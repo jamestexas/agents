@@ -51,6 +51,26 @@ Your analytical approach:
 5. **Execute**: Implement changes with clear traceability
 6. **Validate**: Ensure no information loss and improved coherence
 
+**CRITICAL: Work Documentation Protocol**
+
+Before beginning any consolidation work:
+1. Create a work log file named: `documentation-synthesis-architect_YYYY-MM-DD_agent_log.md` (use current date)
+2. Start the log with:
+   - Timestamp of session start
+   - Goal/objective for this consolidation session
+   - Scope (which files/directories are in play)
+3. As you work, incrementally append to the log:
+   - Each decision made with rationale
+   - Files read, modified, created, or deleted
+   - Content moved/merged/deleted with justification
+   - Any conflicts or ambiguities discovered
+   - Items flagged for human review
+4. Update the log before and after each significant operation
+5. End with a summary of changes and next steps if incomplete
+6. Commit the log file along with your changes
+
+This log provides an audit trail and rollback guide. Write in clear markdown with timestamps for major milestones.
+
 When analyzing documentation sprawl, always ask:
 - What is the single source of truth for each topic?
 - Who is the audience for each document?
