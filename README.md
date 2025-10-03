@@ -223,6 +223,30 @@ System prompt defining the agent's persona, expertise, and methodology...
 3. **Structured Methodology:** Define a clear process the agent follows
 4. **Practical Examples:** Include realistic usage examples in the description
 5. **Model Selection:** Use `inherit` for most agents, `opus` for complex reasoning tasks
+6. **YAML Validation:** Quote the description field to handle colons: `description: "..."`
+
+### Development Setup
+
+If you're developing agents, set up [pre-commit](https://pre-commit.com) for automatic YAML validation:
+
+```bash
+# Install pre-commit (if not already installed)
+pip install pre-commit
+# or: brew install pre-commit
+
+# Install the hooks
+pre-commit install
+
+# Run manually on all files (optional)
+pre-commit run --all-files
+```
+
+This validates YAML frontmatter before each commit, preventing syntax errors like unquoted colons.
+
+**Manual validation without pre-commit:**
+```bash
+./scripts/validate-agents.sh
+```
 
 ## Contributing
 
