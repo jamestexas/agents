@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: validate-agent-yaml
+        name: Validate agent YAML frontmatter
+        entry: scripts/validate-agents.sh
+        language: script
+        files: ^agents/.*\.md$
+        pass_filenames: false

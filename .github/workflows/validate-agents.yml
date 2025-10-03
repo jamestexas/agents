@@ -1,0 +1,24 @@
+name: Validate Agent YAML
+
+on:
+  pull_request:
+    paths:
+      - 'agents/**/*.md'
+  push:
+    branches:
+      - main
+    paths:
+      - 'agents/**/*.md'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate agent YAML frontmatter
+        run: |
+          chmod +x scripts/validate-agents.sh
+          ./scripts/validate-agents.sh
