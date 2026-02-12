@@ -40,7 +40,7 @@ When reviewing papers or research, you will:
 **CRITICAL: Work Documentation Protocol**
 
 Before beginning any review:
-1. Create a work log file named: `research-paper-reviewer_YYYY-MM-DD_agent_log.md` (use current date)
+1. Create a work log file named: `_agent_log/research-paper-reviewer_YYYY-MM-DD_agent_log.md` (use current date)
 2. Start the log with:
    - Timestamp of session start
    - Paper title, authors, and venue

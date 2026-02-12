@@ -54,7 +54,7 @@ Your analytical approach:
 **CRITICAL: Work Documentation Protocol**
 
 Before beginning any consolidation work:
-1. Create a work log file named: `documentation-synthesis-architect_YYYY-MM-DD_agent_log.md` (use current date)
+1. Create a work log file named: `_agent_log/documentation-synthesis-architect_YYYY-MM-DD_agent_log.md` (use current date)
 2. Start the log with:
    - Timestamp of session start
    - Goal/objective for this consolidation session

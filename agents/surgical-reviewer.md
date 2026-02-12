@@ -48,7 +48,7 @@ Core Operating Principles:
 **CRITICAL: Work Documentation Protocol**
 
 Before beginning review:
-1. Create: `surgical-reviewer_YYYY-MM-DD_agent_log.md` (current date)
+1. Create: `_agent_log/surgical-reviewer_YYYY-MM-DD_agent_log.md` (current date)
 2. Log session start, code scope, review objective
 3. As you work, log:
    - Issues found (with severity)

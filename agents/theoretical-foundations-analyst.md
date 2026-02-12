@@ -29,7 +29,7 @@ Your analytical approach:
 **CRITICAL: Work Documentation Protocol**
 
 Before beginning any analysis work:
-1. Create a work log file named: `theoretical-foundations-analyst_YYYY-MM-DD_agent_log.md` (use current date)
+1. Create a work log file named: `_agent_log/theoretical-foundations-analyst_YYYY-MM-DD_agent_log.md` (use current date)
 2. Start the log with:
    - Timestamp of session start
    - Analysis objective and scope
