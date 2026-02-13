@@ -7,6 +7,8 @@ description: Mount a mache FUSE filesystem inside the project directory so agent
 
 Mount a mache data source inside the project directory so all file reads are auto-approved by Claude Code's permission model.
 
+**Important:** This is a skill (prompt expansion), not an agent. The mount is ephemeral — it lives only as long as the mache process runs. If the Claude Code session ends without unmounting, the FUSE process becomes orphaned and must be cleaned up manually (see Cleanup section). The user will need to approve Bash tool calls for mount/unmount operations.
+
 ## Arguments
 
 $ARGUMENTS
@@ -72,14 +74,28 @@ Check if `.mache-mount/` is already in `.gitignore`. If not, append it:
 grep -q '^\.mache-mount/' .gitignore 2>/dev/null || echo '.mache-mount/' >> .gitignore
 ```
 
-**3.3 Start mache in background**
-```bash
-mache --schema "$SCHEMA" --data "$DATA_SOURCE" .mache-mount/$MOUNT_NAME &
-MACHE_PID=$!
-echo "mache PID: $MACHE_PID"
+**3.3 Self-mount guard**
+
+If the data source resolves to the current working directory (`.`, `./`, or the absolute CWD path), check whether `.mache-mount/` is inside it. Mache's directory walker skips dot-prefixed directories, so `.mache-mount/` will not be indexed. However, warn the user:
+
+```
+⚠️  Data source is the current directory. The mount at .mache-mount/ is safe
+because mache skips dot-prefixed directories during walks. Proceeding.
 ```
 
-**3.4 Wait for mount readiness**
+If you cannot confirm that mache skips dot-prefixed dirs (e.g., different schema or version), refuse and suggest mounting with an absolute path to the data source instead.
+
+**3.4 Start mache in background and persist PID**
+
+Claude Code's Bash tool does not preserve shell state between calls, so `$!` PID tracking is unreliable. Write the PID to a file instead:
+
+```bash
+mache --schema "$SCHEMA" --data "$DATA_SOURCE" .mache-mount/$MOUNT_NAME &
+echo $! > .mache-mount/.pid
+echo "mache PID: $(cat .mache-mount/.pid)"
+```
+
+**3.5 Wait for mount readiness**
 
 Poll until the mount is live (up to 10 seconds):
 ```bash
@@ -92,7 +108,7 @@ for i in $(seq 1 10); do
 done
 ```
 
-If mount is not ready after 10 seconds, report failure and clean up.
+If mount is not ready after 10 seconds, report failure, kill the process via `.mache-mount/.pid`, and clean up.
 
 ### Phase 4: Brief the Agent
 
@@ -124,7 +140,13 @@ All of these will be auto-approved since `.mache-mount/` is inside the project d
 When the user says `/mache-unmount` or the session is ending, clean up:
 
 ```bash
-# Try graceful unmount first
+# Kill mache process via PID file
+if [ -f .mache-mount/.pid ]; then
+  kill "$(cat .mache-mount/.pid)" 2>/dev/null
+  rm .mache-mount/.pid
+fi
+
+# Try graceful unmount
 umount .mache-mount/$MOUNT_NAME 2>/dev/null || diskutil unmount .mache-mount/$MOUNT_NAME 2>/dev/null || fusermount -u .mache-mount/$MOUNT_NAME 2>/dev/null
 
 # Verify unmount
@@ -135,6 +157,34 @@ If the graceful unmount fails:
 ```bash
 # Force unmount (macOS)
 umount -f .mache-mount/$MOUNT_NAME
+```
+
+## Orphan Cleanup
+
+If a session ended without unmounting, the FUSE process is orphaned. To clean up manually:
+
+```bash
+# Find and kill orphaned mache processes
+pkill -f "mache.*\.mache-mount"
+
+# Or use the PID file if it exists
+kill "$(cat .mache-mount/.pid)" 2>/dev/null && rm .mache-mount/.pid
+
+# Force unmount any lingering mounts
+umount -f .mache-mount/* 2>/dev/null
+
+# Remove the mount directory
+rm -rf .mache-mount/
+```
+
+If starting a new session and `.mache-mount/.pid` exists, check whether the process is still running before mounting:
+```bash
+if [ -f .mache-mount/.pid ] && kill -0 "$(cat .mache-mount/.pid)" 2>/dev/null; then
+  echo "Existing mache process found (PID $(cat .mache-mount/.pid)). Unmount first or reuse."
+else
+  rm -f .mache-mount/.pid
+  echo "No active mount. Safe to proceed."
+fi
 ```
 
 ## Error Handling
@@ -150,7 +200,8 @@ umount -f .mache-mount/$MOUNT_NAME
 
 **Mount fails to become ready:**
 - Check mache stderr output
-- Verify FUSE/macFUSE is installed: `kextstat | grep fuse` or `ls /Library/Filesystems/macfuse.fs`
+- Verify fuse-t is installed (macOS): `ls /Library/Frameworks/fuse_t.framework`
+- Verify FUSE3 is installed (Linux): `which fusermount3`
 - Report error and clean up mount point
 
 **Mount point already in use:**
@@ -159,8 +210,9 @@ umount -f .mache-mount/$MOUNT_NAME
 
 ## Notes
 
-- Mount lives inside project dir = auto-approved by Claude Code permissions
+- Mount lives inside project dir = auto-approved by Claude Code read permissions. Mount/unmount Bash calls still require user approval.
 - `.gitignore` keeps mount artifacts out of version control
 - Multiple mounts supported via different `mount-name` values
-- On macOS, uses macFUSE; on Linux, uses FUSE3
-- If data source is `.` (current dir), mache may index its own mount point — this is a known edge case the user is aware of
+- On macOS, uses fuse-t (not macFUSE); on Linux, uses FUSE3
+- PID file at `.mache-mount/.pid` tracks the background process across Bash calls
+- Self-mount (data source = `.`) is safe because mache skips dot-prefixed directories during walks, so `.mache-mount/` is never indexed
