@@ -40,13 +40,23 @@ If fewer than 2 arguments, ask the user:
 
 ### Phase 2: Validate Inputs
 
-**2.1 Check mache is available**
+**2.1 Resolve mache binary**
+
 ```bash
-which mache || echo "ERROR: mache not found in PATH"
+MACHE_BIN=$(which mache 2>/dev/null) && echo "Found: $MACHE_BIN" || echo "NOT_FOUND"
 ```
 
-If not found, tell the user:
-- "mache is not installed or not in PATH. Install it or provide the full path."
+If not found in PATH, ask the user: **"I can't find `mache` in PATH. What's the full path to the mache binary?"**
+
+Once you have the binary path (from PATH or user), verify it works and learn the CLI:
+
+```bash
+"$MACHE_BIN" --help 2>&1 | head -20
+```
+
+Use the `--help` output to determine the correct flags for schema, data source, and mount point. Do NOT assume flag names — they may differ between versions.
+
+Store the resolved path as `MACHE_BIN` and use it for all subsequent commands.
 
 **2.2 Validate schema exists**
 ```bash
@@ -90,10 +100,12 @@ If you cannot confirm that mache skips dot-prefixed dirs (e.g., different schema
 Claude Code's Bash tool does not preserve shell state between calls, so `$!` PID tracking is unreliable. Write the PID to a file instead:
 
 ```bash
-mache --schema "$SCHEMA" --data "$DATA_SOURCE" .mache-mount/$MOUNT_NAME &
+"$MACHE_BIN" <flags from --help> .mache-mount/$MOUNT_NAME &
 echo $! > .mache-mount/.pid
 echo "mache PID: $(cat .mache-mount/.pid)"
 ```
+
+Replace `<flags from --help>` with the actual flags you learned from the `--help` output in step 2.1.
 
 **3.5 Wait for mount readiness**
 
@@ -190,7 +202,7 @@ fi
 ## Error Handling
 
 **mache not found:**
-- Check PATH, suggest installation steps
+- Ask the user for the full path to the mache binary
 
 **Schema file not found:**
 - List available schemas if in a mache repo: `ls examples/*.json 2>/dev/null`
