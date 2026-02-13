@@ -208,6 +208,10 @@ fi
 - Check if already mounted: `mount | grep .mache-mount/$MOUNT_NAME`
 - Offer to unmount and remount, or use a different name
 
+## Related
+
+- **`mache-explorer` agent** (`agents/mache-explorer.md`): A dedicated agent that handles the full mount → explore → report → unmount lifecycle. Use the agent when you want autonomous data exploration; use this skill when you just need the mount step.
+
 ## Notes
 
 - Mount lives inside project dir = auto-approved by Claude Code read permissions. Mount/unmount Bash calls still require user approval.
