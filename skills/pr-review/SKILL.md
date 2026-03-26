@@ -1,11 +1,11 @@
 ---
 name: pr-review
-description: Unified PR review skill — give reviews or respond to them. Auto-detects mode based on context. Includes parallel quality agents, cross-repo pattern checks, and convention audits. Use with a PR number, Linear ticket, or auto-detect from branch.
+description: Unified PR review skill — give reviews or respond to them. Auto-detects mode. Review mode runs three lenses in parallel (convention, behavioral correctness, infrastructure) then synthesizes with a disagreement matrix. Respond mode implements fixes and posts threaded replies.
 ---
 
 # PR Review
 
-Give or respond to pull request reviews with automated quality checks.
+Give or respond to pull request reviews. Review mode runs parallel analysis agents through three lenses — convention compliance, behavioral correctness, and infrastructure — then synthesizes findings with explicit disagreement handling.
 
 ## Arguments
 
@@ -84,36 +84,74 @@ Extract ticket ID from PR description or branch name. If found, fetch context vi
 - Read the full diff from 1.2
 - Note any existing review comments (resolved, in-progress, or unaddressed) to avoid duplicating feedback
 - Read the PR description to understand scope and intent
+- Note the stated scope — you'll check for both scope creep AND understated scope later
 
 ### R.2 Launch parallel analysis agents
 
-Launch THREE agents in parallel (single message, multiple Agent tool calls):
+Launch FOUR agents in parallel (single message, multiple Agent tool calls):
 
-**Agent 1: Pattern compliance**
+**Agent 1: Convention compliance** (the "standard" lens)
 ```
 Explore agent (very thorough):
 - Find 2-3 reference implementations for the same kind of change in this repo
 - Compare the PR's patterns against them: type visibility, error handling, test
   conventions, logging, config
 - Flag deviations from established patterns
+- Check build hygiene: are dependency files tidy? (go.mod, package-lock.json, etc.)
+  Do direct imports match direct dependency declarations?
 ```
 
-**Agent 2: Duplication and reuse**
+**Agent 2: Behavioral correctness** (the "adversarial" lens)
+```
+Explore agent (very thorough):
+This is the most important agent. It traces execution paths, not patterns.
+
+For each mutation path (write/delete/update) in the PR:
+1. Trace the full path: trigger → handler → business logic → external API call
+2. Identify all inputs to the path and ask: what if this input is truncated,
+   empty, stale, or arrives out of order?
+3. For event-driven code: enumerate every event type the system handles.
+   For each event type, trace what happens. Then ask: what event sequences
+   could produce bad state? (e.g., unverify then delete, create during cleanup)
+4. For cleanup/deletion logic: what happens if the "source of truth" query
+   returns a truncated or incomplete result? Does the code delete things it
+   shouldn't?
+5. For pagination: does the code page through all results or assume single-page?
+   What is the consequence of truncation — missed work (recoverable) or
+   data deletion (catastrophic)?
+6. For error handling: trace every error path. Is the same error type handled
+   consistently across all call sites? (e.g., if 401 is special-cased in one
+   place, is it special-cased everywhere?)
+7. For dry-run/safety modes: does dry-run cover ALL mutation paths, or only
+   some? If the feature has 3 write paths and dry-run covers 2, that's a bug.
+
+Rate severity based on CONSEQUENCE, not just code quality:
+- Same pattern as existing code but worse consequence here = escalate
+- Pre-existing bug but this PR makes it reachable from a new path = escalate
+- Documented limitation with self-healing = note but don't necessarily block
+```
+
+**Agent 3: Duplication and reuse**
 ```
 Explore agent (medium):
 - For each new utility function in the PR, search the codebase for existing
   equivalents
 - Check if any copied code exists behind internal/ in another module
+- If code was copied, check for behavioral divergence from the original
+  (different return values, different error handling, missing edge cases)
 - Flag duplicated logic that should be extracted or imported
 ```
 
-**Agent 3: Infrastructure audit** (only if PR contains .tf files)
+**Agent 4: Infrastructure audit** (only if PR contains .tf files)
 ```
 Explore agent (medium):
 - Read sibling IAC modules in the same directory
 - grep -r for resource names the PR creates to check for collisions
 - Verify module variable interfaces match actual upstream module signatures
 - Check for hardcoded values that should be variables
+- Check team/product/label tags for consistency with sibling modules
+  (these affect alert routing, dashboards, and cost attribution)
+- Verify secret injection method matches the module's expected pattern
 ```
 
 **Wait for all agents to complete.**
@@ -131,27 +169,73 @@ Then run targeted grep audits on changed files:
 | Constructor return types | Constructors returning concrete types vs interfaces |
 | Dead test variables | Variables written but never asserted |
 | Non-standard logging | Imports of logging libraries that differ from repo convention |
-| Scope creep | Files changed outside the stated PR scope |
+| Untested code in main | Functions with non-trivial logic in `package main` with no `_test.go` |
+| Build hygiene | Dependency files tidy? Direct/indirect markers correct? |
 
-### R.4 Compile review
+### R.4 Synthesize findings
 
-Synthesize agent findings and audit results into a bulleted flaw list. For each issue:
+This is not just a merge — it's a structured synthesis that handles disagreement.
+
+**4.1 Group by location**
+
+Group all findings from all agents by file:line. When multiple agents flag the same location, note it.
+
+**4.2 Build the disagreement matrix**
+
+Where agents disagree on severity or whether something is an issue at all:
+
+```markdown
+| Location | Convention | Behavioral | Duplication | IAC | Resolution |
+|----------|-----------|------------|-------------|-----|------------|
+| groups.go:38 | nit (pre-existing) | BLOCK (truncation → deletion) | — | — | ESCALATE: consequence is worse here |
+| handler.go:95 | — | issue (event ordering gap) | divergence from original | — | Flag: needs human judgment |
+```
+
+**4.3 Apply consequence-aware severity**
+
+For each finding, the final severity considers:
+
+- **"This PR introduced it"** vs **"this code has the bug"** — pre-existing bugs that the PR makes *worse* or *newly reachable* should still be flagged, but with explicit context about what's new vs inherited
+- **Consequence escalation** — same code pattern in two services can warrant different severity if the blast radius differs (e.g., missed backfill vs active data deletion)
+- **Self-healing** — a bug that self-heals on the next cron run is less severe than one that persists until manual intervention, but for customer-facing systems, "up to 1 hour of broken notifications" may still be unacceptable
+
+**4.4 Classify each finding**
+
+| Severity | Meaning |
+|---|---|
+| BLOCK | Must fix before merge. Data loss, security, or correctness bug. |
+| FIX | Should fix. Convention violation, missing test, inconsistency. |
+| NIT | Optional. Style, minor improvement, documentation. |
+| FLAG | Needs human judgment. Agents disagree, or severity depends on product context. |
+
+### R.5 Compile review
+
+For each finding:
 
 - **File:line** — specific location
 - **What's wrong** — direct, imperative statement
-- **Why** — one line explaining the convention or risk
-- **Severity** — Block (must fix), Fix (should fix), Nit (optional)
+- **Why** — one line explaining the risk or convention
+- **Severity** — BLOCK / FIX / NIT / FLAG
+- **New vs inherited** — did this PR introduce it, or is it pre-existing?
 
-Group by severity. Lead with blocking issues.
+Lead with BLOCKs, then FLAGs (because these need human attention), then FIXes, then NITs.
 
-### R.5 Render verdict
+If there are disagreements between agents, include a **Disagreements** section:
+```markdown
+## Disagreements
+
+D1. [Location] — Convention agent says [X]. Behavioral agent says [Y].
+    Resolution depends on: [what human context is needed].
+```
+
+### R.6 Render verdict
 
 Conclude with exactly one of:
 - **APPROVE** — no blocking issues, nits only
-- **REQUEST CHANGES** — blocking issues exist but PR is salvageable
+- **REQUEST CHANGES** — blocking or flagged issues exist but PR is salvageable
 - **CLOSE PR** — fundamental design problems require starting over
 
-### R.6 Present to user
+### R.7 Present to user
 
 Show the compiled review. Ask:
 - "Post this as a GitHub review? (approve/request-changes/comment)"
@@ -159,7 +243,6 @@ Show the compiled review. Ask:
 
 If user approves, post via:
 ```bash
-# Submit review with comments
 gh pr review $PR_NUM --request-changes --body "$(cat <<'EOF'
 <review body>
 EOF
@@ -189,6 +272,7 @@ Create a task list grouped by file/component:
 |---|---|
 | Quick wins | Typos, formatting, naming, comments |
 | Code changes | Refactoring, helpers, pattern fixes |
+| Behavioral fixes | Correctness issues, missing error paths, edge cases |
 | Design questions | Need discussion, not just a code change |
 | Testing | New or modified tests requested |
 
@@ -214,9 +298,12 @@ Review the changes just made:
 - Any new violations introduced while fixing?
 ```
 
-**Agent 2: Duplication check**
+**Agent 2: Behavioral verification**
 ```
-Verify fixes didn't introduce duplicated code
+For any behavioral fixes made:
+- Does the fix actually address the traced execution path?
+- Did the fix introduce new edge cases?
+- Is the fix tested?
 ```
 
 Fix any issues found.
@@ -260,6 +347,12 @@ Trade-offs considered: [...]
 ```
 Keeping as-is — [reasoning].
 [Evidence or reference supporting the decision]
+```
+
+**Pre-existing issue acknowledged:**
+```
+This is pre-existing behavior (see <reference>). Filed <ticket> to address separately.
+[Why fixing it here would expand scope beyond this PR]
 ```
 
 ### S.7 Present and post
@@ -322,6 +415,8 @@ Ready for re-review.
 
 **PR from a fork:** Adjust `gh api` paths. Flag if push access may be limited.
 
+**Pre-existing bugs surfaced by review:** Distinguish clearly. If the PR didn't introduce the bug but makes it worse or newly reachable, flag it as "inherited, escalated." If the bug is completely pre-existing and unrelated to the PR's changes, note it but don't block.
+
 ---
 
 ## Example Usages
@@ -351,9 +446,27 @@ Ready for re-review.
 
 **Git:** Branch detection, clean commits, push
 
-**Quality Agents:** platform-code-reviewer, Explore (duplication), Explore (IAC audit)
+**Analysis Agents:** Convention compliance, behavioral correctness, duplication, IAC audit
 
 **Standards Skills:** `/go-standards`, `/python-standards`, etc. — invoked for convention audits
+
+---
+
+## Design Rationale
+
+This skill uses a multi-lens review model inspired by adversarial review systems that run "good cop" and "bad cop" passes independently, then synthesize.
+
+**Why multiple agents instead of one pass?**
+A single reviewer tends to anchor on either convention or correctness, rarely both. Convention-focused reviews catch style issues but miss behavioral edge cases (event ordering, pagination truncation, incomplete dry-run coverage). Behavioral reviews catch correctness bugs but miss style violations. Running both in parallel and synthesizing produces better coverage than either alone.
+
+**Why the disagreement matrix?**
+When two agents flag the same location for different reasons, that's the highest-value signal. When they disagree on severity, that reveals a judgment call that needs human input. Surfacing disagreements explicitly (rather than picking a winner) gives the reviewer the information they need to decide.
+
+**Why consequence-aware severity?**
+The same code pattern can be a nit in one service and a blocker in another. A single-page list call that truncates results is a nit when the consequence is "missed backfill that self-heals." It's a blocker when the consequence is "actively deletes customer data for orgs on page 2+." The behavioral agent is instructed to rate by consequence, not pattern.
+
+**Why "new vs inherited"?**
+Agent reviewers struggle to distinguish "this code has a bug" from "this PR introduced a bug." Both are factually accurate observations, but they require different responses. A pre-existing bug that's unrelated to the PR is informational. A pre-existing bug that the PR makes worse or newly reachable is actionable. Labeling each finding as new or inherited gives the human reviewer the context to make that call.
 
 ---
 
@@ -361,6 +474,6 @@ Ready for re-review.
 
 - Review mode does NOT write code — it produces a review document
 - Respond mode DOES write code — it implements fixes and commits
-- Both modes use parallel agents for quality checks
+- The behavioral correctness agent is the most important addition — it traces execution paths rather than matching patterns, catching edge cases that static analysis misses
 - Always confirm with user before posting reviews or pushing code
-- The review mode's pattern compliance check is the same Phase 0 research from `/feature-impl`, repurposed as a review lens
+- The convention compliance check reuses the same pattern-discovery approach from `/feature-impl` Phase 0, repurposed as a review lens
