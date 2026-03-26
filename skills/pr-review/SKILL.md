@@ -257,37 +257,83 @@ Or for inline comments, use the review comments API.
 
 *You are the PR author addressing review comments.*
 
-### S.1 Filter unaddressed comments
+### S.1 Filter and triage comments
 
 From the data in 1.2, identify:
 - Comments from reviewers (not the PR author)
 - Comments without replies (where `in_reply_to_id` is null)
 - Exclude comments already responded to
 
-### S.2 Organize and plan
+**Already-addressed detection:**
+
+For each comment, check whether the referenced code was modified AFTER the comment was posted:
+
+```bash
+# Get the comment's creation date and the file it references
+# Check if commits on this branch after that date modified the same file+region
+git log --after="<comment_created_at>" --oneline -- <comment_path>
+```
+
+If the referenced lines were already changed in a subsequent commit, mark the comment as **"likely addressed"** and verify by reading the current code. Don't assume — confirm that the current code actually resolves the reviewer's concern.
+
+### S.2 Validate reviewer claims
+
+Before implementing fixes, run a quick verification pass on non-trivial comments:
+
+```
+For each comment flagging a behavioral issue (not just style):
+1. Read the code the reviewer is pointing at
+2. Trace the execution path they describe — is their scenario actually possible?
+3. If the reviewer's claim is wrong or already mitigated, note it
+4. If the reviewer's claim is valid, note the fix approach
+```
+
+This prevents blindly implementing changes based on incorrect assumptions. Reviewers (human and AI) sometimes misread code flow or miss existing guards.
+
+### S.3 Organize and plan
 
 Create a task list grouped by file/component:
 
 | Category | Description |
 |---|---|
+| Already addressed | Changed in a prior commit — just needs a response |
 | Quick wins | Typos, formatting, naming, comments |
 | Code changes | Refactoring, helpers, pattern fixes |
 | Behavioral fixes | Correctness issues, missing error paths, edge cases |
 | Design questions | Need discussion, not just a code change |
 | Testing | New or modified tests requested |
 
-Present the plan. Ask: "Ready to proceed? Any comments you want to skip or handle manually?"
+For each item, include a **proposed action**:
 
-### S.3 Implement fixes
+```
+#1 groups.go:38 — Pagination risk [Behavioral fix]
+   Proposed: Add pagination loop to ListVerifiedGroups using NextCursor
+   Alternative: Document as known limitation matching existing pattern
+
+#2 tenant-handler:97 — Unverification gap [Behavioral fix]
+   Proposed: Skip Verified check for group.deleted.v1 events
+
+#3 job.go:164 — Missing 401 on List [Quick win]
+   Proposed: Add isUnauthorized check matching other call sites
+
+#7 iac/main.tf:63 — Wrong team tag [Quick win]
+   Proposed: Change to customer-platform to match event-reconciler
+```
+
+Present the plan with proposed actions. Ask: "Ready to proceed? Any you want to change, skip, or handle manually?"
+
+### S.4 Implement fixes
 
 Work through the task list:
-- Start with quick wins (reduces noise for re-review)
+- Start with already-addressed items (just confirm, no code change needed)
+- Then quick wins (reduces noise for re-review)
+- Then behavioral fixes and code changes
 - Group related changes for atomic commits
 - Read files before editing
 - Only fix what was requested — no scope creep
 - Stage specific files (never `git add -A`)
 
-### S.4 Quality checks
+### S.5 Quality checks
 
 Launch TWO agents in parallel:
 
@@ -308,7 +354,7 @@ For any behavioral fixes made:
 
 Fix any issues found.
 
-### S.5 Commit
+### S.6 Commit
 
 ```bash
 git add <specific files>
@@ -319,7 +365,7 @@ git commit -m "refactor: address PR review comments
 Addresses review comments from @reviewer."
 ```
 
-### S.6 Generate responses
+### S.7 Generate responses
 
 For each addressed comment, create a response:
 
@@ -355,7 +401,7 @@ This is pre-existing behavior (see <reference>). Filed <ticket> to address separ
 [Why fixing it here would expand scope beyond this PR]
 ```
 
-### S.7 Present and post
+### S.8 Present and post
 
 Show all responses grouped by thread. Include comment ID and file context.
 
@@ -373,7 +419,7 @@ gh api repos/{owner}/{repo}/pulls/{pr_num}/comments \
   -F in_reply_to=COMMENT_ID
 ```
 
-### S.8 Ticket update (optional)
+### S.9 Ticket update (optional)
 
 If a Linear ticket is linked:
 ```
