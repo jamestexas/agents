@@ -367,23 +367,47 @@ Addresses review comments from @reviewer."
 
 ### S.7 Generate responses
 
-For each addressed comment, create a response:
+**Every response MUST include a GitHub permalink to the specific line(s) changed.** No bare commit hashes. The reviewer should be able to click one link and see exactly what changed.
+
+**Build the permalink after pushing:**
+
+```bash
+# Get the HEAD SHA after push (needed for stable permalinks)
+SHA=$(git rev-parse HEAD)
+
+# Build permalink for a specific file and line:
+# https://github.com/{owner}/{repo}/blob/{sha}/{path}#L{line}
+# For a range: #L{start}-L{end}
+```
+
+Detect `{owner}/{repo}` from the PR metadata fetched in Phase 1.
+
+**Response templates:**
 
 **Simple fix:**
 ```
-Fixed in <commit_hash>
+Fixed — see [{path}#L{line}](https://github.com/{owner}/{repo}/blob/{sha}/{path}#L{line})
 ```
 
 **With explanation:**
 ```
-Fixed in <commit_hash>
+Fixed — [{path}#L{start}-L{end}](https://github.com/{owner}/{repo}/blob/{sha}/{path}#L{start}-L{end})
 
 [Brief explanation of what was changed and why]
+```
+
+**Multiple locations:**
+```
+Fixed in {sha_short}:
+- [{path1}#L{line}](permalink1) — [what changed here]
+- [{path2}#L{line}](permalink2) — [what changed here]
 ```
 
 **Design question:**
 ```
 [Thoughtful explanation with context]
+
+See the implementation: [{path}#L{start}-L{end}](permalink)
 
 Technical rationale: [...]
 Trade-offs considered: [...]
@@ -392,30 +416,37 @@ Trade-offs considered: [...]
 **Intentional non-change:**
 ```
 Keeping as-is — [reasoning].
+
+Current code: [{path}#L{line}](permalink)
 [Evidence or reference supporting the decision]
 ```
 
 **Pre-existing issue acknowledged:**
 ```
-This is pre-existing behavior (see <reference>). Filed <ticket> to address separately.
+This is pre-existing behavior — see [{path}#L{line}](permalink). Filed {ticket} to address separately.
 [Why fixing it here would expand scope beyond this PR]
 ```
 
 ### S.8 Present and post
 
-Show all responses grouped by thread. Include comment ID and file context.
+Show all responses grouped by thread. Include:
+- Comment ID (for posting via gh)
+- File and line context
+- Proposed response text **with permalinks already rendered**
+
+Verify every response contains at least one `github.com/.../blob/` permalink. If a response is missing one, add it before presenting.
 
 Ask: "Ready to post these responses? Any you want to modify?"
 
 If approved:
 ```bash
-# Push changes
+# Push first (permalinks need the SHA to be on the remote)
 git push
 
 # Post inline replies
 gh api repos/{owner}/{repo}/pulls/{pr_num}/comments \
   -X POST \
-  -f body="Fixed in abc1234" \
+  -f body="Fixed — see [path#L42](https://github.com/owner/repo/blob/abc1234/path#L42)" \
   -F in_reply_to=COMMENT_ID
 ```
 
