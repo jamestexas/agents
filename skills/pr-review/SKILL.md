@@ -369,18 +369,38 @@ Addresses review comments from @reviewer."
 
 **Every response MUST include a GitHub permalink to the specific line(s) changed.** No bare commit hashes. The reviewer should be able to click one link and see exactly what changed.
 
-**Build the permalink after pushing:**
+**Step 1: Collect the ingredients.**
 
 ```bash
-# Get the HEAD SHA after push (needed for stable permalinks)
+# Full SHA for stable permalinks
 SHA=$(git rev-parse HEAD)
 
-# Build permalink for a specific file and line:
-# https://github.com/{owner}/{repo}/blob/{sha}/{path}#L{line}
-# For a range: #L{start}-L{end}
+# Owner/repo from the PR (already fetched in Phase 1)
+# e.g., "myorg/myrepo"
+OWNER_REPO=$(gh pr view $PR_NUM --json headRepository --jq '.headRepository.owner.login + "/" + .headRepository.name')
 ```
 
-Detect `{owner}/{repo}` from the PR metadata fetched in Phase 1.
+**Step 2: For each comment, find the lines that address it.**
+
+Each review comment from Phase 1 has a `path` field (the file the reviewer commented on). Find the relevant lines in the current HEAD:
+
+```bash
+# Get the PR's base branch
+BASE=$(gh pr view $PR_NUM --json baseRefName --jq '.baseRefName')
+
+# Show changed line numbers in the file across the entire PR
+git diff "origin/$BASE"...HEAD --unified=0 -- <comment_path> | grep '^@@' | head -10
+# Output like: @@ -38,1 +38,15 @@ → means lines 38-52 in the new file
+```
+
+Read the `@@` hunks to get the line range. Pick the hunk most relevant to the reviewer's comment, then build the permalink:
+```
+https://github.com/{OWNER_REPO}/blob/{SHA}/{path}#L{start}-L{end}
+```
+
+If the fix spans multiple hunks in the same file, link the most relevant one. If the fix is in a DIFFERENT file than the comment, link the new file.
+
+**Step 3: If you cannot determine the line range, fall back to file-level link** (`#L1` omitted), but this should be rare. Never fall back to a bare commit hash.
 
 **Response templates:**
 
@@ -434,7 +454,7 @@ Show all responses grouped by thread. Include:
 - File and line context
 - Proposed response text **with permalinks already rendered**
 
-Verify every response contains at least one `github.com/.../blob/` permalink. If a response is missing one, add it before presenting.
+**HARD GATE:** Before presenting responses to the user, scan every response body for `github.com/.../blob/`. If ANY response is missing a permalink, STOP — go back to Step 2 and find the lines. Do not present responses without permalinks. Do not substitute bare commit hashes as a workaround.
 
 Ask: "Ready to post these responses? Any you want to modify?"
 
