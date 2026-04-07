@@ -31,11 +31,11 @@ PORT="${2:-7532}"
 ### Step 2: Check for existing server
 
 ```bash
-curl -s --max-time 2 -X POST http://localhost:$PORT/mcp \
+curl -s --max-time 5 -X POST http://localhost:$PORT/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"check","version":"1"}}}' \
-  | grep -q '"result"' && echo "RUNNING" || echo "NOT_RUNNING"
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print('RUNNING' if 'result' in d and 'error' not in d else 'NOT_RUNNING')" 2>/dev/null || echo "NOT_RUNNING"
 ```
 
 If `RUNNING`: skip to Step 4.
@@ -43,17 +43,32 @@ If `RUNNING`: skip to Step 4.
 ### Step 3: Start the server
 
 ```bash
-mache serve "$SOURCE" --http "localhost:$PORT" &
-sleep 3
+MACHE_BIN=$(which mache 2>/dev/null || echo "$HOME/go/bin/mache")
+if [ ! -x "$MACHE_BIN" ]; then
+  echo "status: unavailable — mache binary not found in PATH or ~/go/bin/"
+  exit 0
+fi
 ```
 
 mache auto-detects schema from the source (Go files → go-schema.json, .db → serve directly). Do NOT pass `--schema` unless the user explicitly requests a specific schema.
 
-If `mache` is not in PATH:
 ```bash
-which mache || ls ~/go/bin/mache || ls /usr/local/bin/mache
+$MACHE_BIN serve "$SOURCE" --http "localhost:$PORT" &
+MACHE_PID=$!
+for i in $(seq 1 10); do
+  sleep 1
+  curl -s --max-time 2 -X POST http://localhost:$PORT/mcp \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"check","version":"1"}}}' \
+    | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0) if 'result' in d else exit(1)" 2>/dev/null && echo "Server ready" && break
+  if [ $i -eq 10 ]; then
+    kill $MACHE_PID 2>/dev/null
+    echo "status: unavailable — mache serve failed to start after 10 seconds"
+    exit 0
+  fi
+done
 ```
-Use whichever path is found.
 
 ### Step 4: Initialize session and return info
 
@@ -62,15 +77,14 @@ SESSION=$(curl -s -X POST http://localhost:$PORT/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"mache-usage","version":"1"}}}' \
-  -D - 2>/dev/null | grep -i "mcp-session" | tr -d '\r' | awk '{print $2}')
-echo "port=$PORT session=$SESSION"
-```
-
-Report to caller:
-```
-status: available
-port: <PORT>
-session: <SESSION_ID>
+  -D - 2>/dev/null | grep -i "^mcp-session-id:" | tr -d '\r' | awk -F': ' '{print $2}' | tr -d ' ')
+if [ -z "$SESSION" ]; then
+  echo "status: unavailable — session initialization failed"
+  exit 0
+fi
+echo "status: available"
+echo "port: $PORT"
+echo "session: $SESSION"
 ```
 
 ### Step 5: Graceful degradation
