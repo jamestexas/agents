@@ -155,21 +155,30 @@ Extract the `most_referenced` symbol list from the architecture output.
 ```bash
 CHANGED_SYMS=$(gh pr diff "$PR_NUM" ${REPO:+--repo "$REPO"} | \
   grep '^+' | grep -E '^\+(func |type |var |const )' | \
-  sed 's/^+//' | awk '{print $2}' | sed 's/(.*$//' | head -20)
+  sed 's/^+//' | awk '{print $2}' | sed 's/(.*$//' | head -5)
+
+# Prioritize symbols that appear in most_referenced (highest fan-in)
+# Fall back to raw changed symbols if no overlap
+PRIORITIZED_SYMS=$(comm -12 <(echo "$MOST_REFERENCED" | tr ' ' '\n' | sort) <(echo "$CHANGED_SYMS" | tr ' ' '\n' | sort) | head -5)
+if [ -z "$PRIORITIZED_SYMS" ]; then
+  PRIORITIZED_SYMS=$(echo "$CHANGED_SYMS" | head -5)
+fi
 ```
 
 Cross-reference with `most_referenced` from get_architecture. Select the top 3-5 symbols that appear in `most_referenced`, or the top 3-5 by frequency in the diff if none match.
 
 ### Step 8: Call get_impact on selected symbols (max 5)
 
-For each selected symbol (loop, not parallel):
+For each symbol in `$PRIORITIZED_SYMS` (loop, not parallel):
 ```bash
+for SYM in $PRIORITIZED_SYMS; do
 IMPACT=$(curl -s -X POST http://localhost:7532/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "mcp-session-id: $SESSION" \
   -d "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"get_impact\",\"arguments\":{\"symbol\":\"$SYM\",\"max_depth\":2}}}" \
   | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['content'][0]['text'])" 2>/dev/null)
+done
 ```
 
 Collect caller counts. Flag any symbol with >20 unique callers as high blast radius.
@@ -219,9 +228,12 @@ changed_clusters: [<list of cluster IDs containing changed symbols>]
 
 Total output: under 400 words plus the two Mermaid blocks.
 
-If both diagrams unavailable:
-```
-## Structural Pre-flight
-status: unavailable
-reason: mache could not index this repo — proceeding without structural context is safe
+If both diagrams unavailable, emit the short sentinel and stop:
+```bash
+if [ "$EMERGENT_STATUS" = "unavailable" ] && [ -z "$SPEC_OUTPUT" -o "$SPEC_STATUS" = "unavailable" ]; then
+  echo "## Structural Pre-flight"
+  echo "status: unavailable"
+  echo "reason: mache could not index this repo — proceeding without structural context is safe"
+  exit 0
+fi
 ```
