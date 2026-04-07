@@ -1,6 +1,13 @@
 ---
 name: pr-review
-description: Unified PR review skill — give reviews or respond to them. Auto-detects mode. Review mode runs three lenses in parallel (convention, behavioral correctness, infrastructure) then synthesizes with a disagreement matrix. Respond mode implements fixes and posts threaded replies.
+description: >
+  Give or respond to PR reviews with structural awareness via mache. Review mode:
+  runs review-prep (spec-driven + emergent diagrams + impact analysis), shows reviewer
+  the structural picture locally, then runs parallel analysis agents with enriched prompts,
+  synthesizes into one GitHub review submission (body + inline comments). Mermaid diagrams
+  shown locally before posting. Respond mode: addresses reviewer comments.
+allowed-tools: "Bash,Read,Glob,Grep,Agent,mcp__mache__*"
+argument-hint: "[--review|--respond] [PR number, owner/repo#N, or LINEAR-ID]"
 ---
 
 # PR Review
@@ -16,6 +23,36 @@ Arguments can be:
 - Linear ticket: `ENG-123` (finds associated PR)
 - Nothing (auto-detect from current branch)
 - Explicit mode: `--review 123` (give review) or `--respond 123` (address comments)
+
+---
+
+## Phase 0: Structural Pre-flight
+
+*Runs before analysis agents. Output is local — not posted to GitHub.*
+
+### 0.1 Run review-prep
+
+Invoke `/review-prep $PR_NUM` (or `owner/repo#$PR_NUM` if cross-repo).
+
+Store the full `## Structural Pre-flight` output as `STRUCTURAL_CONTEXT`.
+
+### 0.2 Show reviewer
+
+Display to the user now (before agents run):
+- Both diagrams (spec-driven + emergent, or whichever are available)
+- Drift analysis
+- Insights block
+- High blast-radius symbols list
+
+Ask: **"Structural pre-flight complete. Continue with full review?"**
+If the user says no or wants to inspect further, stop here.
+
+### 0.3 Handle unavailable
+
+If `review-prep` returns `status: unavailable`:
+- Note: "Structural analysis unavailable — mache could not index this repo. Proceeding with standard review."
+- Set `STRUCTURAL_CONTEXT=""` and continue to Phase 1.
+- Do NOT block the review.
 
 ---
 
@@ -92,6 +129,13 @@ Launch FOUR agents in parallel (single message, multiple Agent tool calls):
 
 **Agent 1: Convention compliance** (the "standard" lens)
 ```
+If STRUCTURAL_CONTEXT is non-empty, prepend to this agent's prompt:
+
+## Structural Context
+[Insert the insights and changed_clusters sections from STRUCTURAL_CONTEXT]
+```
+
+```
 Explore agent (very thorough):
 - Find 2-3 reference implementations for the same kind of change in this repo
 - Compare the PR's patterns against them: type visibility, error handling, test
@@ -102,6 +146,15 @@ Explore agent (very thorough):
 ```
 
 **Agent 2: Behavioral correctness** (the "adversarial" lens)
+```
+If STRUCTURAL_CONTEXT is non-empty, prepend to this agent's prompt:
+
+## Structural Context
+[Insert full STRUCTURAL_CONTEXT block here]
+
+Priority: trace call paths for high_blast_radius symbols first. Symbols with >20 callers have maximum blast radius — a correctness bug there affects the most code.
+```
+
 ```
 Explore agent (very thorough):
 This is the most important agent. It traces execution paths, not patterns.
@@ -132,6 +185,13 @@ Rate severity based on CONSEQUENCE, not just code quality:
 ```
 
 **Agent 3: Duplication and reuse**
+```
+If STRUCTURAL_CONTEXT is non-empty, prepend to this agent's prompt:
+
+## Structural Context
+[Insert the insights and changed_clusters sections from STRUCTURAL_CONTEXT]
+```
+
 ```
 Explore agent (medium):
 - For each new utility function in the PR, search the codebase for existing
@@ -199,7 +259,20 @@ For each finding, the final severity considers:
 - **Consequence escalation** — same code pattern in two services can warrant different severity if the blast radius differs (e.g., missed backfill vs active data deletion)
 - **Self-healing** — a bug that self-heals on the next cron run is less severe than one that persists until manual intervention, but for customer-facing systems, "up to 1 hour of broken notifications" may still be unacceptable
 
-**4.4 Classify each finding**
+**4.4 Determine review body content**
+
+If `STRUCTURAL_CONTEXT` includes a non-trivial drift observation OR any `high_blast_radius` symbol:
+- Include a `## Structural Impact` section in the review body:
+  ```
+  ## Structural Impact
+  <2-3 sentences from the drift analysis>
+  Changed clusters: [list]
+  High blast-radius symbols: [list with caller counts]
+  ```
+
+Otherwise: body is verdict + blocking issues only. Do not add structural boilerplate to routine PRs.
+
+**4.5 Classify each finding**
 
 | Severity | Meaning |
 |---|---|
@@ -217,6 +290,8 @@ For each finding:
 - **Why** — one line explaining the risk or convention
 - **Severity** — BLOCK / FIX / NIT / FLAG
 - **New vs inherited** — did this PR introduce it, or is it pre-existing?
+
+If `STRUCTURAL_CONTEXT` is non-empty, display the emergent diagram one final time alongside the compiled review for reference.
 
 Lead with BLOCKs, then FLAGs (because these need human attention), then FIXes, then NITs.
 
