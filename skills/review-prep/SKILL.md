@@ -19,7 +19,7 @@ Produce the reviewer's local structural context before analysis agents run.
 
 `$ARGUMENTS` — `<pr-number-or-repo#N> [repo-path]`
 
-- First arg: PR number (e.g. `36910`) or `owner/repo#N` (e.g. `chainguard-dev/mono#36910`)
+- First arg: PR number (e.g. `123`) or `owner/repo#N` (e.g. `myorg/myrepo#123`)
 - Second arg (optional): local path to the repo checkout
 
 ## What To Do

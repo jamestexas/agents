@@ -38,3 +38,6 @@ yarn-error.log*
 # Agent work logs
 *_agent_log.md
 agent-logs/
+
+# Brainstorm / design specs (local scratchpad)
+docs/*-design.md
