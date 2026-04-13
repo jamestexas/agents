@@ -258,117 +258,45 @@ If the change surface spans 10+ areas with complex interdependencies, consider s
 ### Input
 
 ```
-PROJ-123
+"Add webhook handler for build completion events"
 ```
 
 ### Phase 1: Gather Context
 
-Fetch PROJ-123 via Linear MCP. The ticket describes:
-- **Title:** Tenant reconciler for notification service
-- **What it does:** Reconciles tenants between an internal system and a third-party notification platform — ensures every org that should exist as a tenant does, and properties are in sync.
-- **What it touches:** Third-party notification API, internal org/tenant data source, reconciliation job infrastructure
-- **What consumes it:** Scheduled cron job
-- **Constraints:** Must be idempotent, needs dry-run mode, third-party API has rate limits
+- **What it does:** Receives build completion webhooks, validates signatures, stores results, triggers downstream notifications
+- **What it touches:** Webhook endpoint, build data store, notification service
+- **What consumes it:** External CI system sends webhooks; internal dashboard reads results
+- **Constraints:** Must validate webhook signatures, needs idempotent processing (CI may retry)
 
 ### Phase 2: Discover the Change Surface
 
-The Explore agent discovers:
+The Explore agent finds:
+- Existing webhook handlers in `handlers/` following a validate → parse → store → notify pattern
+- A shared `webhooks/` package with signature validation helpers
+- Build data model already exists in `models/build.go`
+- Notification dispatch in `notify/` with existing channel support
+- IAC for other webhook endpoints in `iac/`
 
-- **Existing client patterns:** The repo has a `notifications/` package with an existing API client for other endpoints (messages, workflows). New tenant methods follow the same pattern.
-- **No tenants package yet:** Tenant-specific logic is net-new, but there are existing reconciler patterns in `billing/reconciler.go` and `identity/sync.go` that follow a `list-diff-apply` pattern.
-- **Handler entrypoints:** Other cron jobs are registered in `cmd/worker/main.go` with a standard handler interface.
-- **IAC modules:** Terraform modules in `iac/` define cron jobs with standard patterns — schedule, IAM, env vars.
-- **Pattern:** Similar features follow a `client -> job -> handler -> IAC` layering.
-
-### Phase 3: Decompose
-
-### Phase 4: Output
+### Phase 3–4: Output
 
 ```markdown
-## Unit 1: Notification API client — tenant methods
+## Unit 1: Build completion event types and parsing
+- **Files:** `models/build_event.go`, `models/build_event_test.go`
+- **Depends on:** nothing
+- **Reviewer needs to know:** New event types extending the existing build model. Parse logic for the CI webhook payload format.
+- **Testable by:** `go test ./models/...`
 
-**What:** Add tenant CRUD methods (list, create, update) to the existing notification API
-client package. These methods wrap the tenant API and follow the same patterns as the
-existing message and workflow methods in the package.
+## Unit 2: Webhook handler
+- **Files:** `handlers/build_webhook.go`, `handlers/build_webhook_test.go`
+- **Depends on:** Unit 1
+- **Reviewer needs to know:** Follows the same validate → parse → store → notify pattern as existing webhook handlers. Uses shared signature validation from `webhooks/`.
+- **Testable by:** `go test ./handlers/...`
 
-**Files:**
-- `notifications/tenants.go` — new tenant API methods
-- `notifications/tenants_test.go` — unit tests with HTTP fakes matching existing test patterns
-
-**Depends on:** nothing — first in sequence
-
-**Reviewer needs to know:**
-- Follows the exact same pattern as `notifications/messages.go` — constructor, method signatures,
-  error handling are all consistent
-- The API paginates tenant lists; the client handles pagination internally
-
-**Testable by:** `go test ./notifications/...` — all tests pass, tenant methods exercise all
-API response scenarios (success, rate limit, auth failure, pagination)
-
-
-## Unit 2: Tenant reconciliation job
-
-**What:** Implement the core reconciliation logic — list tenants from both source and
-the notification service, diff them, and apply creates/updates to bring them in sync.
-Includes dry-run mode that logs planned changes without applying them.
-
-**Files:**
-- `tenants/reconciler.go` — list-diff-apply reconciliation logic
-- `tenants/reconciler_test.go` — table-driven tests covering: no drift, missing tenants,
-  stale properties, dry-run behavior, error scenarios
-
-**Depends on:** Unit 1 (uses notification client tenant methods)
-
-**Reviewer needs to know:**
-- Follows the same list-diff-apply pattern as `billing/reconciler.go`
-- Dry-run mode is a first-class parameter, not a flag check bolted on after — every
-  mutation path checks it
-- Rate limiting is handled by the client (Unit 1), not the reconciler
-
-**Testable by:** `go test ./tenants/...` — tests use a fake notification client (no real API calls)
-
-
-## Unit 3: Handler entrypoints and wiring
-
-**What:** Register the tenant reconciler as a cron handler in the worker entrypoint.
-Wire configuration (schedule, dry-run default, API credentials) through the standard
-config pattern.
-
-**Files:**
-- `cmd/worker/tenant_handler.go` — handler that wraps the reconciler with config and logging
-- `cmd/worker/main.go` — register the new handler (small diff)
-- `cmd/worker/tenant_handler_test.go` — integration test for handler wiring
-
-**Depends on:** Unit 2 (uses reconciler)
-
-**Reviewer needs to know:**
-- Handler follows the exact same interface as other handlers in `cmd/worker/`
-- Config uses the same env var library as sibling handlers — no new config mechanism
-- Default is dry-run=true in production; must be explicitly set to false to apply changes
-
-**Testable by:** `go test ./cmd/worker/...` — handler tests pass; `go build ./cmd/worker/`
-compiles successfully
-
-
-## Unit 4: Infrastructure — cron job and IAM
-
-**What:** Terraform module that deploys the tenant reconciler cron job with appropriate
-IAM roles, schedule, and environment variables.
-
-**Files:**
-- `iac/tenant-reconciler/main.tf` — cron job definition, IAM, env vars
-- `iac/tenant-reconciler/variables.tf` — configurable schedule, dry-run flag, resource names
-- `iac/tenant-reconciler/outputs.tf` — job name, IAM role ARN for reference
-
-**Depends on:** Unit 3 (needs to know the entrypoint shape — env var names, ports)
-
-**Reviewer needs to know:**
-- Uses the same cron module as `iac/billing-reconciler/` — verified no resource name collisions
-- Schedule and dry-run are variables with sane defaults (every 15m, dry-run=true)
-- Tags match sibling modules
-
-**Testable by:** `terraform plan` in the module directory shows expected resources with
-no errors or name collisions
+## Unit 3: Wire endpoint and add IAC
+- **Files:** `cmd/api/routes.go` (modify), `iac/build-webhook/main.tf`
+- **Depends on:** Unit 2
+- **Reviewer needs to know:** Thin wiring — registers the handler and deploys the endpoint. Check IAM and secret injection match sibling modules.
+- **Testable by:** `go build ./cmd/api/` compiles; `terraform plan` shows expected resources
 ```
 
-**"Does this breakdown make sense? Want to adjust the scope, ordering, or granularity of any unit?"**
+**"Does this breakdown make sense? Want to adjust any units?"**

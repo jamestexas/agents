@@ -120,12 +120,12 @@ Based on the comment categorization, select one of three modes:
 Display a summary and wait for user confirmation:
 
 ```
-PR #456: "feat: add tenant reconciler for notification service"
-13 files changed, +1843 -1
-Review comments: 28 total
-  - 7 from @alice (all replied)
-  - 15 from @bob (12 unaddressed)
-Mode: Engage — 12 unaddressed comments from @bob
+PR #789: "feat: add build completion webhook handler"
+5 files changed, +340 -12
+Review comments: 8 total
+  - 3 from @alice (all replied)
+  - 5 from @bob (3 unaddressed)
+Mode: Engage — 3 unaddressed comments from @bob
 Proceed?
 ```
 
@@ -309,23 +309,21 @@ Display drafted responses grouped by reviewer, then by file:
 ```
 ## Responses to @bob
 
-### internal/reconciler/groups.go
+### handlers/build_webhook.go
 
 **Thread #1** (comment ID: 1234567)
-> Reviewer: "This pagination call only fetches the first page..."
+> Reviewer: "This doesn't validate the webhook signature before parsing the body..."
 
 Response:
-Good catch — the existing pattern was single-page. Fixed at [internal/reconciler/groups.go#L38-L52](https://github.com/org/repo/blob/abc123/internal/reconciler/groups.go#L38-L52).
-
-Added a cursor-based pagination loop that fetches all pages.
+Good catch — moved signature validation before body parsing. See [handlers/build_webhook.go#L38-L45](https://github.com/org/repo/blob/abc123/handlers/build_webhook.go#L38-L45).
 
 ---
 
 **Thread #2** (comment ID: 1234568)
-> Reviewer: "Should this handle the 401 case like the other endpoints?"
+> Reviewer: "What happens if the build ID already exists in the store?"
 
 Response:
-Fixed — see [internal/reconciler/groups.go#L95](https://github.com/org/repo/blob/abc123/internal/reconciler/groups.go#L95)
+It upserts — same behavior as the deploy webhook. See [handlers/build_webhook.go#L72](https://github.com/org/repo/blob/abc123/handlers/build_webhook.go#L72)
 
 ---
 ```
@@ -366,9 +364,9 @@ gh api repos/$OWNER_REPO/pulls/$PR_NUM/comments \
 
 Report what was posted:
 ```
-Posted 12 responses to PR #456:
-  - 8 replies to @bob (3 fixes, 2 explanations, 2 already-handled, 1 design discussion)
-  - 4 replies to @alice (2 fixes, 2 acknowledgments)
+Posted 3 responses to PR #789:
+  - 2 replies to @bob (1 fix, 1 explanation)
+  - 1 reply to @alice (already-handled)
 ```
 
 ---
