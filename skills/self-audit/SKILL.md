@@ -187,21 +187,33 @@ a "self-audit report" file — the commits are the report.
 ## Project-specific extensions (optional)
 
 The steps above are deliberately generic so this skill works in any repo.
-If your current repo has extra tooling — internal style bots,
-generated-code verifiers, API-compatibility checkers, policy gates — drop
-a sibling file at `<this-skill-dir>/local-extensions.md` describing how
-to invoke them. Read it at the start of step 6 to layer project-specific
-checks on top of the convention review.
+For invocations tied to a specific work environment — internal style
+bots, generated-code verifiers, API-compatibility checkers, policy gates
+— keep them out of this `SKILL.md` and in a private extension file.
 
-Keep work-specific invocations out of this `SKILL.md` so the generic skill
-stays portable across repos and public forks. The extension file can stay
-`.gitignore`-ed if it references internal endpoints, credentials, or
-work-only tooling.
+### Convention
 
-Example extension hooks worth including if your environment has them:
+If `~/.claude/skills/self-audit/extensions.md` exists, read and follow it
+at the start of **Step 6** (project convention check). The extensions
+file layers environment-specific checks on top of the generic convention
+review.
+
+Why this path:
+
+- Lives in the user's personal Claude config, not in any git repo.
+- Never at risk of being committed to a public skills repo.
+- Survives re-clones and migrations of the agents repo.
+- Mirrors the `skills/<name>/` structure so multiple skills can each have
+  their own extensions file without collision.
+
+If the extensions file is absent, step 6 is just the generic convention
+review — the skill degrades gracefully.
+
+### Example extension hooks worth adding
 
 - A local runner for a CI-side policy bot (so you catch issues before push).
-- A project-specific memory-to-diff comparison (check your diff against
-  rules stated in repo-level `CLAUDE.md` or team memory files).
+- A diff-vs-memory comparison (check your diff against rules stated in
+  repo-level `CLAUDE.md` or team memory files).
 - Repo-specific dead-code detectors (e.g. proto field usage scanners,
   Terraform variable reachability checks).
+- Credential/secret sweeps specific to the org's token shapes.
