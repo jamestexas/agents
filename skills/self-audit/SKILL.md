@@ -114,7 +114,34 @@ rg -l '\bFunctionName\b' | rg -v '_test\.go$' | rg -v '<defining-file>'
 Zero results → it's exported for future use that may never come. Make it
 unexported unless the future use is imminent.
 
-## Step 6 — Adversarial agent pass
+## Step 6 — Project convention check
+
+Most repos state conventions *outside* the linter config — `CLAUDE.md`,
+`AGENTS.md`, `CONTRIBUTING.md`, `.cursorrules`, team memory files. Generic
+linters catch what's universal; these files catch what's local. Read them
+and check your diff against them.
+
+```bash
+# Skim project conventions before checking:
+head -200 CLAUDE.md AGENTS.md CONTRIBUTING.md .cursorrules 2>/dev/null
+```
+
+Classes of convention that generic linters miss:
+
+- **Test idioms** tied to the Go/language version (e.g. `t.Context()` over
+  `context.Background()` in Go 1.24+ repos).
+- **Error wrapping conventions** (`%w` vs `%v`; when to wrap).
+- **Log framework preferences** (project-specific choice of slog / zerolog
+  / internal logger).
+- **Import-grouping rules** beyond what `goimports` enforces.
+- **Private-type + exported-interface return patterns**.
+- **Subtests vs table-driven** test preferences.
+
+If your org runs a policy bot in CI that checks project-specific rules,
+the CLAUDE.md / convention docs are the local source of truth the bot is
+mirroring. A hit here saves a CI round-trip.
+
+## Step 7 — Adversarial agent pass
 
 This is the highest-leverage step and the one you will most want to skip.
 **Don't skip it.**
@@ -149,10 +176,32 @@ a "self-audit report" file — the commits are the report.
 ## Anti-patterns to avoid
 
 - **Running the audit, finding nothing, and declaring victory.** If the
-  adversarial agent in step 6 also says clean, that's fine. If you skipped
-  step 6 because step 1-5 looked good, you have not actually audited.
+  adversarial agent in step 7 also says clean, that's fine. If you skipped
+  step 7 because steps 1-6 looked good, you have not actually audited.
 - **Amending previous commits** to fold findings in. The stack should still
   be readable as a sequence of decisions. New commit per finding.
 - **Hiding the audit in a side branch** and squashing away the evidence.
   The fact that you caught and fixed something is information for the next
   person (including future you).
+
+## Project-specific extensions (optional)
+
+The steps above are deliberately generic so this skill works in any repo.
+If your current repo has extra tooling — internal style bots,
+generated-code verifiers, API-compatibility checkers, policy gates — drop
+a sibling file at `<this-skill-dir>/local-extensions.md` describing how
+to invoke them. Read it at the start of step 6 to layer project-specific
+checks on top of the convention review.
+
+Keep work-specific invocations out of this `SKILL.md` so the generic skill
+stays portable across repos and public forks. The extension file can stay
+`.gitignore`-ed if it references internal endpoints, credentials, or
+work-only tooling.
+
+Example extension hooks worth including if your environment has them:
+
+- A local runner for a CI-side policy bot (so you catch issues before push).
+- A project-specific memory-to-diff comparison (check your diff against
+  rules stated in repo-level `CLAUDE.md` or team memory files).
+- Repo-specific dead-code detectors (e.g. proto field usage scanners,
+  Terraform variable reachability checks).
