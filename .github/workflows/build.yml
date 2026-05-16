@@ -1,0 +1,34 @@
+name: Build
+
+on:
+  pull_request:
+    paths:
+      - 'agents/**'
+      - 'skills/**'
+      - 'scripts/**'
+      - '_shared/**'
+      - 'README.md'
+      - '.github/workflows/build.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'agents/**'
+      - 'skills/**'
+      - 'scripts/**'
+      - '_shared/**'
+      - 'README.md'
+      - '.github/workflows/build.yml'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure ruby (used by build.sh for YAML parsing)
+        run: ruby --version
+
+      - name: Run build check (lint + include drift + README drift)
+        run: |
+          chmod +x scripts/build.sh
+          ./scripts/build.sh check

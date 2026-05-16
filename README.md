@@ -1,277 +1,143 @@
-# Claude Code Agents Collection
+# Claude Code Agents & Skills
 
-A curated collection of specialized AI agents for [Claude Code](https://claude.ai/code) that provide expert-level assistance in specific technical domains.
+A curated collection of specialized [Claude Code](https://claude.ai/code) **subagents** and **skills**. Subagents are personas with focused expertise; skills are workflows you (or Claude) can invoke with `/skill-name`.
 
-## Quick Start
-
-```bash
-# Clone the repository
-git clone https://github.com/jamestexas/agents.git
-
-# Install agents using symlinks (recommended - auto-updates with git pull)
-cd agents
-ln -s "$(pwd)"/agents/*.md ~/.claude/agents/
-
-# Or copy agents (alternative method)
-mkdir -p ~/.claude/agents
-cp agents/*.md ~/.claude/agents/
-
-# Use an agent in Claude Code
-/agent production-readiness-reviewer
-```
-
-## What Are Claude Code Agents?
-
-Claude Code agents are specialized AI personas that extend Claude Code's capabilities with domain-specific expertise. Each agent:
-
-- Has a unique persona with deep knowledge in a specific domain
-- Inherits all tools and capabilities from your Claude Code session
-- Follows a structured methodology for consistent, high-quality outputs
-- Creates detailed work logs for traceability and audit trails
-- Can be invoked on-demand when you need specialized analysis
-
-Think of agents as expert consultants you can call upon for focused assistance.
-
-## Available Agents
-
-### 🔵 Production Readiness Reviewer
-**File:** [`agents/production-readiness-reviewer.md`](agents/production-readiness-reviewer.md)
-**Model:** Inherits from parent session
-**Persona:** Legendary principal engineer and SRE with decades of experience
-
-Approaches code with pragmatic paranoia, systematically identifying how systems will fail in production before they do. Focuses on failure mode analysis, scalability, security, observability, and maintainability.
-
-**Use when:**
-- Preparing code for production deployment
-- Reviewing critical features or bug fixes
-- Analyzing performance-sensitive code
-- Implementing APIs or data pipelines
-- Assessing blast radius and cascading failures
-
-### 🟢 Research Paper Reviewer
-**File:** [`agents/research-paper-reviewer.md`](agents/research-paper-reviewer.md)
-**Model:** Inherits from parent session
-**Persona:** Distinguished research fellow with decades of peer review experience
-
-Provides expert-level analysis of academic papers and research proposals with focus on methodological rigor, technical soundness, and novelty assessment. Applies the same standards used for top-tier journals.
-
-**Use when:**
-- Evaluating research papers for citations
-- Understanding paper limitations and assumptions
-- Assessing methodological validity
-- Reviewing experimental design
-- Distinguishing genuine advances from incremental work
-
-### 🟣 Theoretical Foundations Analyst
-**File:** [`agents/theoretical-foundations-analyst.md`](agents/theoretical-foundations-analyst.md)
-**Model:** Uses Claude Opus for enhanced reasoning
-**Persona:** Prodigious savant across mathematics, physics, and computer science
-
-Approaches problems as an intellectual outsider with expertise in topological data analysis, differential geometry, gauge theory, and machine learning. Examines problems from first principles to identify fundamental issues.
-
-**Use when:**
-- Reviewing novel mathematical approaches
-- Debugging complex algorithmic issues
-- Analyzing theoretical foundations
-- Cross-disciplinary problem solving
-- Verifying mathematical consistency
-
-### 🔵 Surgical Reviewer
-**File:** [`agents/surgical-reviewer.md`](agents/surgical-reviewer.md)
-**Model:** Inherits from parent session
-**Persona:** Direct, precise code reviewer following kata methodology
-
-Provides scalpel-sharp, focused code reviews that call out only what needs to change. Uses kata methodology to break down problems to their essence and rebuild them stronger. Zero fluff, maximum impact.
-
-**Use when:**
-- Need focused review of specific code changes
-- Just completed a feature or refactoring
-- Want precise feedback without broad suggestions
-- Reviewing bug fixes or targeted improvements
-- Need actionable feedback quickly
-
-### 🔵 Documentation Synthesis Architect
-**File:** [`agents/documentation-synthesis-architect.md`](agents/documentation-synthesis-architect.md)
-**Model:** Inherits from parent session
-**Persona:** Documentation architect specializing in information architecture
-
-Consolidates sprawling, overlapping, or fragmented documentation into coherent, maintainable structures. Identifies patterns, eliminates redundancy, and creates clear information hierarchies.
-
-**Use when:**
-- Documentation is spread across multiple files
-- Overlapping or conflicting information exists
-- Need to restructure documentation for clarity
-- Consolidating roadmaps, ADRs, or technical docs
-- Creating coherent information architecture
-
-## Installation
-
-### Method 1: Symlink Installation (Recommended)
-
-Using symlinks allows agents to automatically update when you pull new changes from the repository:
+## Quick start
 
 ```bash
-# Clone the repository
+# Clone
 git clone https://github.com/jamestexas/agents.git
 cd agents
 
-# For user-level installation (available in all projects)
-mkdir -p ~/.claude/agents
-ln -s "$(pwd)"/agents/*.md ~/.claude/agents/
+# Preview what install would do
+scripts/install.sh
 
-# For project-level installation (specific project only)
-cd /path/to/your/project
-mkdir -p .claude/agents
-ln -s /path/to/agents/agents/*.md .claude/agents/
+# Symlink agents + skills into ~/.claude/{agents,skills}
+scripts/install.sh --apply
 ```
 
-### Method 2: Copy Installation (Alternative)
+`install.sh` is idempotent. Re-run any time you pull. Use `--doctor` to find broken symlinks left over from path moves.
 
-If you prefer copied files over symlinks:
+## Agents
 
-```bash
-# Clone the repository
-git clone https://github.com/jamestexas/agents.git
-cd agents
+> Generated by `scripts/build.sh readme`. Edit the source file's frontmatter, not the table below.
 
-# For user-level installation
-mkdir -p ~/.claude/agents
-cp agents/*.md ~/.claude/agents/
+<!-- BEGIN: AGENTS -->
+| Agent | Model | Color | Purpose |
+|-------|-------|-------|---------|
+| [`adversarial-synthesis-lead`](agents/adversarial-synthesis-lead.md) | opus | red | Use this agent to integrate findings from the six adversarial reviewers (dos-resilience-auditor, enumeration-oracle-hunter, bundle-isolation-tester, protocol-replay-adversary, trust-root-adversary, observability-gap-auditor), reconcile overlaps, prioritize, and promote findings into the threat-model + ADR record. |
+| [`bundle-isolation-tester`](agents/bundle-isolation-tester.md) | opus | red | Use this agent for adversarial analysis of cross-tenant isolation in workerd-style hypervisors — slice-grant escapes, manifest misconfig exploitation, service-binding leakage, identity-confusion at the syscall boundary. |
+| [`documentation-synthesis-architect`](agents/documentation-synthesis-architect.md) | inherit | blue | Use this agent when you have sprawling, overlapping, or fragmented documentation that needs consolidation, restructuring, and distillation into coherent, non-redundant artifacts. |
+| [`dos-resilience-auditor`](agents/dos-resilience-auditor.md) | opus | red | Use this agent for adversarial analysis of resource-exhaustion attack vectors in agent-hosting substrates — self-DoS via legal exits, single-threaded handler saturation, queue-depth attacks, fairness violations. |
+| [`empirical-validation-designer`](agents/empirical-validation-designer.md) | inherit | — | Translates theoretical claims into concrete, executable experiments that produce real results on real hardware |
+| [`enumeration-oracle-hunter`](agents/enumeration-oracle-hunter.md) | opus | red | Use this agent to find side-channel and response-shape oracles that let an attacker enumerate names, existence, or relationships in a multi-tenant substrate. |
+| [`experimental-design-architect`](agents/experimental-design-architect.md) | inherit | magenta | Specializes in translating high-level research philosophy into concrete, falsifiable, and scalable experimental protocols |
+| [`mache-explorer`](agents/mache-explorer.md) | inherit | orange | Mount and explore structured data via mache FUSE filesystems. |
+| [`observability-gap-auditor`](agents/observability-gap-auditor.md) | opus | red | Use this agent for adversarial analysis of observability and alerting gaps — silent denial paths, alert deadlock under load, 'silence is evidence' invariants that break when the silence is from the substrate not the absence of activity. |
+| [`paradigm-assessor`](agents/paradigm-assessor.md) | opus | red | Use this agent for a high-skepticism, 'red-team' audit of a novel 'paradigm-defining' framework. |
+| [`platform-archaeologist`](agents/platform-archaeologist.md) | inherit | orange | Build complete infrastructure memory by traversing repositories and mapping all dependencies, migrations, and patterns. |
+| [`platform-code-reviewer`](agents/platform-code-reviewer.md) | inherit | green | Use this agent for reviewing Go, Terraform, and GCP infrastructure code with a focus on semantic correctness, not just syntax. |
+| [`production-readiness-reviewer`](agents/production-readiness-reviewer.md) | inherit | blue | Use this agent when you need a comprehensive production readiness assessment of code before deployment. |
+| [`protocol-replay-adversary`](agents/protocol-replay-adversary.md) | opus | red | Use this agent for adversarial analysis of protocol-state attacks — lease replay across windows, nonce-ledger gaps, epoch confusion, clock-skew exploitation, partial-failure replay across cross-DO orchestrators, receipt-chain forks. |
+| [`repo-seo-curator`](agents/repo-seo-curator.md) | inherit | yellow | Use this agent to improve repository discoverability for the three audiences that find code: humans skimming GitHub/HN/search results, AI agents and LLMs ingesting context, and search engine crawlers. |
+| [`research-paper-reviewer`](agents/research-paper-reviewer.md) | inherit | green | Use this agent when you need expert-level review and analysis of academic papers, research proposals, or technical documents. |
+| [`research-paper-writer`](agents/research-paper-writer.md) | inherit | blue | Use this agent when you need to write academic papers, research reports, or technical manuscripts based on experimental results. |
+| [`review-pattern-surfacer`](agents/review-pattern-surfacer.md) | inherit | magenta | Use this agent to analyze code review patterns from any GitHub user across specified repositories. |
+| [`security-auditor`](agents/security-auditor.md) | opus | red | Use this agent when you need adversarial security analysis of infrastructure, authentication flows, supply chain integrity, key management, or deployment configurations. |
+| [`surgical-reviewer`](agents/surgical-reviewer.md) | inherit | cyan | Use this agent when you need precise, no-nonsense code review that focuses exclusively on necessary improvements. |
+| [`theoretical-foundations-analyst`](agents/theoretical-foundations-analyst.md) | opus | purple | Use this agent when you need rigorous theoretical analysis of complex mathematical or computational systems, cross-disciplinary problem solving, or fundamental correctness review of novel approaches. |
+| [`trust-root-adversary`](agents/trust-root-adversary.md) | opus | red | Use this agent for adversarial analysis of supply-chain and trust-root compromise scenarios — helper binary tamper, keystore confusion, CA bundle poisoning, kid (key-id) confusion, signer rotation races. |
+<!-- END: AGENTS -->
 
-# For project-level installation
-cd /path/to/your/project
-mkdir -p .claude/agents
-cp /path/to/agents/agents/*.md .claude/agents/
-```
+## Skills
 
-**Note:** With the copy method, you'll need to manually copy files again after pulling repository updates.
+> Generated by `scripts/build.sh readme`. Edit the source file's frontmatter, not the table below.
 
-## Usage
+<!-- BEGIN: SKILLS -->
+| Skill | Tool scope | Purpose |
+|-------|------------|---------|
+| [`break-glass`](skills/break-glass/SKILL.md) | inherits all | Emergency IAM elevation for oncall/debugging. |
+| [`diagram-gen-emergent`](skills/diagram-gen-emergent/SKILL.md) | scoped | Generate a bottom-up community diagram from real code cross-references. |
+| [`diagram-gen-spec`](skills/diagram-gen-spec/SKILL.md) | scoped | Generate a top-down structural diagram from a mache schema file. |
+| [`doc-triage`](skills/doc-triage/SKILL.md) | inherits all | Find internal docs (not for external consumers), review against code reality, bead real items, archive stale files. |
+| [`feature-impl`](skills/feature-impl/SKILL.md) | inherits all | Research-first feature implementation workflow. |
+| [`mache-explore`](skills/mache-explore/SKILL.md) | inherits all | Mount a mache FUSE filesystem inside the project directory so agents can explore structured data without per-file permission prompts. |
+| [`mache-usage`](skills/mache-usage/SKILL.md) | scoped | Start or locate a running mache MCP server for a source path or .db file. |
+| [`pr-respond`](skills/pr-respond/SKILL.md) | scoped | Fresh-eyes review and review comment response for PRs. |
+| [`pr-review`](skills/pr-review/SKILL.md) | scoped | Give or respond to PR reviews with structural awareness via mache. |
+| [`readme-restructure`](skills/readme-restructure/SKILL.md) | scoped | Restructure a README for both human skimmers and LLM ingestion. |
+| [`repo-description-polish`](skills/repo-description-polish/SKILL.md) | scoped | Audit and polish the GitHub repository description — the one-sentence pitch shown in search results, link previews, and embeds. |
+| [`repo-homepage-set`](skills/repo-homepage-set/SKILL.md) | scoped | Audit and set the GitHub repository homepage URL — the link on the repo card's "About" panel and on every search result. |
+| [`repo-social-preview`](skills/repo-social-preview/SKILL.md) | scoped | Audit the GitHub OpenGraph social preview image — the card shown when a repo URL is posted on HN, Twitter, Slack, or Discord. |
+| [`repo-topic-tagger`](skills/repo-topic-tagger/SKILL.md) | scoped | Audit and apply GitHub topic tags (repository topics) on a target repo for discoverability — proposes tags from code signals, deduplicates against current tags, and applies via gh api after explicit user approval. |
+| [`review-prep`](skills/review-prep/SKILL.md) | scoped | Given a PR number or diff, synthesize spec-driven diagram, emergent diagram, and impact analysis into a structured insight: block for the reviewer. |
+| [`self-audit`](skills/self-audit/SKILL.md) | scoped | Pre-review self-audit of a PR branch. |
+| [`survey`](skills/survey/SKILL.md) | inherits all | Multi-perspective codebase survey that produces beads and mermaid diagrams from code structure. |
+| [`work-scope`](skills/work-scope/SKILL.md) | scoped | Decompose feature work into reviewable, shippable units before coding starts. |
+<!-- END: SKILLS -->
 
-### Invoking Agents
+## How agents and skills differ
 
-Once installed, invoke agents in any Claude Code session using the `/agent` command:
+| | Agent | Skill |
+|--|--|--|
+| **Invocation** | Claude delegates automatically based on `description`; you can also invoke with the `Agent` tool | `/skill-name` (you) or automatic (Claude reads `description`) |
+| **Context** | Runs in a separate context window | Inlined into the current conversation (or forked via `context: fork`) |
+| **Scope** | A persona with long-lived methodology | A workflow with arguments and (optional) scoped tool permissions |
+| **Frontmatter required** | `name`, `description` | `description` (name defaults to directory) |
 
-```bash
-# Get production readiness review of your code
-/agent production-readiness-reviewer
+For full semantics, see Anthropic's [subagents](https://code.claude.com/docs/en/sub-agents) and [skills](https://code.claude.com/docs/en/skills) docs.
 
-# Analyze an academic paper
-/agent research-paper-reviewer
+## Creating new agents/skills
 
-# Review mathematical foundations
-/agent theoretical-foundations-analyst
+The frontmatter is validated against **both** the Anthropic Claude Code spec and the stricter Gemini CLI spec — unknown fields fail lint because Gemini rejects them.
 
-# Get focused code review
-/agent surgical-reviewer
-
-# Consolidate documentation
-/agent documentation-synthesis-architect
-```
-
-### How Agents Work
-
-When you invoke an agent:
-
-1. **Inherits Context**: The agent has access to all files and tools from your current Claude Code session
-2. **Specialized Analysis**: It applies its domain expertise and structured methodology to your request
-3. **Creates Work Log**: Most agents create timestamped log files (e.g., `agent-name_YYYY-MM-DD_agent_log.md`) documenting their analysis and decisions
-4. **Focused Output**: You receive specialized guidance based on the agent's expertise
-
-### Example Workflow
-
-```bash
-# 1. You're about to deploy a new API endpoint
-/agent production-readiness-reviewer
-# Agent performs failure mode analysis, checks security, scalability, etc.
-
-# 2. You've written complex math code
-/agent theoretical-foundations-analyst
-# Agent verifies mathematical consistency and theoretical soundness
-
-# 3. You just refactored a module
-/agent surgical-reviewer
-# Agent provides precise, actionable feedback on your changes
-```
-
-### Best Practices
-
-- **Choose the right agent**: Match your task to the agent's expertise
-- **Review work logs**: Agents create detailed logs for traceability
-- **Use sequentially**: Different agents can provide complementary perspectives
-- **Commit work logs**: Include agent logs in your commits for documentation
-
-## Creating New Agents
-
-Agent files follow this format:
+**Agent** (`agents/<name>.md`):
 
 ```markdown
 ---
-name: agent-identifier
-description: When to use this agent with examples in XML format
-model: inherit|opus|sonnet
-color: blue|green|purple|red|orange
+name: my-agent
+description: "When to use, with embedded <example> blocks Claude reads."
+model: inherit          # or sonnet / opus / haiku / claude-<full-id>
+color: blue             # red blue green yellow purple orange pink cyan magenta
 ---
 
-System prompt defining the agent's persona, expertise, and methodology...
+System prompt for the persona…
 ```
 
-### Guidelines for New Agents
+**Skill** (`skills/<name>/SKILL.md`):
 
-1. **Clear Specialization:** Each agent should have a distinct domain of expertise
-2. **Rich Persona:** Create a compelling backstory that reinforces the agent's capabilities
-3. **Structured Methodology:** Define a clear process the agent follows
-4. **Practical Examples:** Include realistic usage examples in the description
-5. **Model Selection:** Use `inherit` for most agents, `opus` for complex reasoning tasks
-6. **YAML Validation:** Quote the description field to handle colons: `description: "..."`
+```markdown
+---
+name: my-skill
+description: Trigger phrases and what this does.
+allowed-tools: Bash Read Grep
+argument-hint: <required> [optional]
+---
 
-### Development Setup
+Workflow body. `$ARGUMENTS` is substituted at invocation.
+```
 
-If you're developing agents, set up [pre-commit](https://pre-commit.com) for automatic YAML validation:
+Run `scripts/build.sh` before committing — it lints frontmatter and regenerates the tables above.
+
+## Development
 
 ```bash
-# Install pre-commit (if not already installed)
-pip install pre-commit
-# or: brew install pre-commit
+scripts/build.sh lint        # validate frontmatter only
+scripts/build.sh readme      # regenerate README tables only
+scripts/build.sh             # both (default)
 
-# Install the hooks
+scripts/install.sh           # dry-run: show planned symlinks
+scripts/install.sh --apply   # create/update symlinks in ~/.claude/
+scripts/install.sh --doctor  # remove broken symlinks (with --apply)
+```
+
+A pre-commit hook is configured in `.pre-commit-config.yaml`:
+
+```bash
+brew install pre-commit   # or: pip install pre-commit
 pre-commit install
-
-# Run manually on all files (optional)
-pre-commit run --all-files
 ```
-
-This validates YAML frontmatter before each commit, preventing syntax errors like unquoted colons.
-
-**Manual validation without pre-commit:**
-```bash
-./scripts/validate-agents.sh
-```
-
-## Contributing
-
-Contributions are welcome! When submitting new agents:
-
-1. **Clear Specialization**: Ensure the agent serves a distinct purpose not covered by existing agents
-2. **File Location**: Place agent files in the `agents/` directory
-3. **Naming Convention**: Use kebab-case (e.g., `my-new-agent.md`)
-4. **Format Requirements**: Follow the established format with YAML frontmatter
-5. **Usage Examples**: Include comprehensive examples in the description field using XML format
-6. **Testing**: Test the agent thoroughly before submitting
-7. **Documentation**: Update this README with the new agent's information in the Available Agents section
-
-For detailed agent development guidelines, see [CLAUDE.md](CLAUDE.md).
 
 ## License
 
-MIT License - See [LICENSE](LICENSE) file for details
-
-## Support
-
-For issues, questions, or suggestions:
-- Open an issue in this repository
-- For Claude Code specific issues: https://github.com/anthropics/claude-code/issues
-
-## Acknowledgments
-
-These agents are designed to work with [Claude Code](https://claude.ai/code), Anthropic's official CLI for Claude.
+MIT — see [LICENSE](LICENSE).

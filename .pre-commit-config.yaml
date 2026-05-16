@@ -1,9 +1,15 @@
 repos:
   - repo: local
     hooks:
-      - id: validate-agent-yaml
-        name: Validate agent YAML frontmatter
-        entry: scripts/validate-agents.sh
+      - id: agents-skills-lint
+        name: Lint agent/skill frontmatter against Anthropic + Gemini specs
+        entry: scripts/build.sh lint
         language: script
-        files: ^agents/.*\.md$
+        files: ^(agents|skills)/.*\.md$
+        pass_filenames: false
+      - id: agents-skills-readme
+        name: Regenerate README tables from frontmatter
+        entry: scripts/build.sh readme
+        language: script
+        files: ^(agents|skills)/.*\.md$
         pass_filenames: false
