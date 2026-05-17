@@ -65,6 +65,8 @@ scripts/install.sh --apply
 | [`mache-usage`](skills/mache-usage/SKILL.md) | scoped | Start or locate a running mache MCP server for a source path or .db file. |
 | [`pr-respond`](skills/pr-respond/SKILL.md) | scoped | Fresh-eyes review and review comment response for PRs. |
 | [`pr-review`](skills/pr-review/SKILL.md) | scoped | Give or respond to PR reviews with structural awareness via mache. |
+| [`prior-art-cartographer`](skills/prior-art-cartographer/SKILL.md) | scoped | Produce structured comparisons between a project being built (described by a baseline doc) and external systems that solve adjacent problems. |
+| [`problem-decomposer`](skills/problem-decomposer/SKILL.md) | scoped | Decompose an aspiration into a lattice of dispatchable bead specs using 5-whys descent + a 7-property dispatchability rubric. |
 | [`readme-restructure`](skills/readme-restructure/SKILL.md) | scoped | Restructure a README for both human skimmers and LLM ingestion. |
 | [`repo-description-polish`](skills/repo-description-polish/SKILL.md) | scoped | Audit and polish the GitHub repository description — the one-sentence pitch shown in search results, link previews, and embeds. |
 | [`repo-homepage-set`](skills/repo-homepage-set/SKILL.md) | scoped | Audit and set the GitHub repository homepage URL — the link on the repo card's "About" panel and on every search result. |
