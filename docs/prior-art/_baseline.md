@@ -23,7 +23,8 @@ Annotated Cap'n Proto schemas, hand-rolled per-capability spec directories, a Ru
 
 - **cloister** — TS+Rust workerd-based hypervisor; primary host of capability specs (`cloister-spec/<cap>/v<n>/`).
 - **notme** — Cap'n Proto schemas, CF Worker, ships `@notme/contract` shared TS vocabulary (SCOPES, ERROR_STATUS, etc.).
-- **signet** — Go, identity and auth; consumer of @notme/contract conceptually.
+- **signet** — Go, layer-1 of a three-layer identity stack: *"do you have the key?"* PoP authentication. Ships SPIRE-model CA bundle rotation (HTTP middleware, `pkg/http/middleware`), Fulcio-style OIDC→X.509 cert minting (`auth.notme.bot`), macaroon-shaped HTTP request proofs (master→ephemeral→request chain), and a Sigstore KMS plugin (`cmd/sigstore-kms-signet`) so signet keys work natively with cosign/gitsign. Supports Ed25519 + ML-DSA-44 post-quantum, OpenSSL-compatible CMS/PKCS#7 via `go-cms`. Zero-secret GHA via ambient OIDC. Also contains `pkg/sigpol/` (trust policy bundles — bundle/checker/compiler with 37 tests, the policy-language adjacent layer).
+- **sigid** — Go, layer-2 of the identity stack: *"who are you, how did you get here?"* Identity Context Provider that extracts provenance/environment/boundary claims from signet tokens for capability-based authorization. Reserved CBOR fields 20-23 on signet tokens; 4-entity model (Owner/Machine/Actor/Identity); HMAC-SHA256 ppids (privacy-preserving pseudonymous identifiers). Pluggable `AttestationProvider` interface with planned SPIRE / TPM / Sigstore providers. Offline-first; legacy signet tokens still work via fallback. Performance budget: <10ms total per request. Capability protocol consumes its output.
 - **mache** — Go code-intelligence; uses tree-sitter + capnp binding logs.
 - **ley-line-open** — Rust data-plane primitives; includes capnp schemas.
 - **schema-bridge** — Rust tool (lives in `cloister/tools/schema-bridge`); compiles capnp → zod.
@@ -56,15 +57,30 @@ Annotated Cap'n Proto schemas, hand-rolled per-capability spec directories, a Ru
 
 ## Axis 5 — Identity / capability model
 
-- **Position:** **Interlace lease** — macaroon-shaped capability token. Cryptographically bound caveats. Vendor-neutral spec at `interlace-spec/0.1.0/`. Workload identity emerging (cloister identifies workloads via per-bundle keys + manifests; notme issues identity assertions).
-- **Evidence:** `interlace-spec/0.1.0/` (spec); `cloister/src/routes/lease-middleware.ts` (verification); `cloister-spec/credential-isolation/v1/` (consumer).
-- **Note:** Shape strongly resembles SPIFFE workload identity + Macaroons hybrid. Not consciously modeled after either; convergent evolution.
+- **Position:** A **three-layer working stack**, deliberately layered (per `sigid/CLAUDE.md` architecture diagram), not just one big credential blob.
+
+  | Layer | Question it answers | Where it lives |
+  |---|---|---|
+  | **1. Authentication** | *"Do you have the key?"* | `signet` — PoP auth, ephemeral X.509, SPIRE-model CA rotation, Fulcio-shape OIDC→cert bridge, macaroon-shape `master→ephemeral→request` HTTP proofs |
+  | **2. Identity context** | *"Who are you, how did you get here?"* | `sigid` — extracts provenance (actor/delegator chains, ppids), environment (cluster/image/TPM attestations), boundary (VPC/region/domain) from signet tokens. CBOR fields 20-23. 4-entity model: Owner/Machine/Actor/Identity. Pluggable `AttestationProvider` with planned SPIRE / TPM / Sigstore providers. |
+  | **3. Authorization / capabilities** | *"What can you do?"* | `cloister-spec/credential-isolation/v1/` + interlace lease — macaroon-shaped capability tokens with cryptographically bound caveats; vendor-neutral spec at `interlace-spec/0.1.0/`; enforced in `cloister/src/routes/lease-middleware.ts`. |
+
+  Plus a **policy layer** alongside: `signet/pkg/sigpol/` — trust policy bundles with a bundle/checker/compiler (37 tests; the policy-language adjacent surface).
+
+- **Evidence:** `sigid/CLAUDE.md` (architecture diagram); `sigid/context.go`, `sigid/identity.go`, `sigid/provider.go` (Context/Provenance/Environment/Boundary types + ContextProvider/AttestationProvider/BoundaryValidator interfaces); `signet/pkg/http/middleware/README.md`; `signet/cmd/signet/authority.go`; `signet/README.md` §3/§4/§6; `signet/pkg/sigpol/{bundle,checker,compiler,golden_path}_test.go`; `interlace-spec/0.1.0/`; `cloister/src/routes/lease-middleware.ts`.
+
+- **Note:** signet is consciously SPIRE-shaped (CA rotation, eventual SPIRE attestation provider) and Fulcio-shaped (OIDC cert minting). sigid is the layer SPIRE doesn't really cover — *making identity claims structured and pluggable*, not just attested. The macaroon resemblance in interlace lease is convergent design. The four pieces interlock: signet establishes workload identity → sigid extracts context from that identity → sigpol policy decides if context permits the action → interlace lease + cloister enforce capability on the call.
+
+- **Gap / planned:** sigid's environment + boundary providers are stubbed (`providers/basic/provider.go:108-128`); HMAC-SHA256 ppid derivation is TODO; SPIRE/TPM/Sigstore attestation providers are planned but not shipped.
 
 ## Axis 6 — Supply-chain story
 
-- **Position:** **None.** No signing, no SBOM, no SLSA provenance, no Sigstore, no Rekor. Releases are tagged git commits. Consumer trust is "you cloned the right repo."
-- **Evidence:** Search of `cloister/.github/workflows/*.yml`, `cloister/Taskfile.yml` — no cosign / SLSA / SBOM generation steps.
-- **Gap:** Everything. This is the most underdeveloped axis.
+- **Position:** Mixed — signing plumbing exists but isn't wired into releases yet.
+  - **What works:** signet ships a `sigstore-kms-signet` plugin so Signet keys are usable from cosign/gitsign for blob/artifact signing today. The `cosign sign-blob --key signet://default ...` flow is the working surface (see `signet/docs/sigstore-integration.md`).
+  - **What works:** GHA OIDC bridge cert minting at `auth.notme.bot/cert/gha` — repos can sign in CI without secrets, using ambient identity. Reusable workflow at `agentic-research/notme/.github/workflows/gha-identity.yml@main`.
+  - **What's missing:** Nothing in the ART substrate releases is *currently* signed. No SBOMs (no CycloneDX or SPDX generation in any repo's CI). No SLSA provenance. No Rekor transparency-log entries (`tlog-upload=false` in signet's docs example — telling). No signed release manifests for the eventual `art-substrate` aggregator.
+- **Evidence:** `signet/README.md` §6 (GHA OIDC), §Sigstore KMS Plugin; `signet/cmd/sigstore-kms-signet/`; grep of `.github/workflows/*.yml` across cloister/mache/rosary/notme — no cosign / SLSA / SBOM steps.
+- **Gap:** The *connection*, not the primitives. Primitives (cosign-via-signet, OIDC-cert via notme) are sitting there unused. Wiring them into a release workflow + producing SLSA L1/L2 provenance + opting into Rekor would close most of the axis quickly.
 
 ## Axis 7 — Adoption cost (for an external consumer)
 

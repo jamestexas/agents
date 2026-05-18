@@ -29,15 +29,15 @@ Seven axes (full definitions in [TEMPLATE.md](TEMPLATE.md)):
 
 > One row per axis. One column per entry + a final "Us" column. Each cell is a *short verdict*, not analysis. Click through to the entry's page for evidence and rationale.
 
-| Axis | [Smithy](smithy.md) | [Buf](buf.md) | [SPIFFE](spiffe.md) `[planned]` | [Macaroons](macaroons.md) `[planned]` | [Nixpkgs](nixpkgs.md) `[planned]` | [SLSA](slsa.md) `[planned]` | [Backstage](backstage.md) `[planned]` | **Us** ([baseline](_baseline.md)) |
+| Axis | [Smithy](smithy.md) | [Buf](buf.md) | [SPIFFE](spiffe.md) | [Macaroons](macaroons.md) | [Nixpkgs](nixpkgs.md) `[planned]` | [SLSA+Sigstore+in-toto](slsa-sigstore-in-toto.md) | [Backstage](backstage.md) `[planned]` | **Us** ([baseline](_baseline.md)) |
 |---|---|---|---|---|---|---|---|---|
-| 1. IDL shape | `.smithy` IDL, services + shapes | protobuf only; operates over `.proto` | n/a | n/a | nix expressions | n/a | YAML templates | capnp |
-| 2. Annotation / trait model | **rich** — typed traits, custom-declarable, propagate through codegen | inherits protobuf custom options; no Buf trait library | n/a | caveats (bearer-side) | n/a | predicates in attestation | template parameters | informal capnp `$annotation` |
-| 3. Versioning + breaking-change | `smithy diff` + projections | `buf breaking --against`; FILE/PACKAGE/WIRE tiers | versioned SVID specs | per-spec versioning | nixpkgs channels | versioned predicate types | template versions | per-dir, no automation |
-| 4. Codegen targets + plugin model | plugin-driven; Java/Kotlin/TS/Python/OpenAPI | `buf.gen.yaml`; remote/local/builtin plugins | reference SDKs | n/a | n/a | n/a | scaffold-time only | single-target (zod), hardcoded |
-| 5. Identity / capability model | out of scope (auth-as-trait descriptor) | out of scope | **canonical** — SVID, trust domain, workload attestation | **canonical** — bearer + caveats | n/a | n/a | n/a | interlace lease (macaroon-shaped) |
-| 6. Supply-chain story | out of scope | content-addressed commits + lockfile digest only | out of scope | out of scope | **strong** — reproducible builds | **canonical** — provenance levels | n/a | none |
-| 7. Adoption cost | M (patterns) / L (wholesale) | S (patterns) / L (wholesale: protobuf migration) | L (operationally) | S (just a lib) | L (paradigm) | M (CI wire-up) | M (Backstage runtime) | n/a — we're the baseline |
+| 1. IDL shape | `.smithy` IDL, services + shapes | protobuf only; operates over `.proto` | SPIFFE ID URI + SVID formats | credential format, not IDL | nix expressions | in-toto Statement + DSSE envelope | YAML templates | capnp |
+| 2. Annotation / trait model | **rich** — typed traits, custom-declarable, propagate through codegen | inherits protobuf custom options; no Buf trait library | none — SVIDs are leaves | caveats as application-defined predicates | n/a | predicate-type URIs (flat, interoperable) | template parameters | informal capnp `$annotation` |
+| 3. Versioning + breaking-change | `smithy diff` + projections | `buf breaking --against`; FILE/PACKAGE/WIRE tiers | bundle `spiffe_sequence` rotation | n/a | nixpkgs channels | per-spec semver, no diff tool | template versions | per-dir, no automation |
+| 4. Codegen targets + plugin model | plugin-driven; Java/Kotlin/TS/Python/OpenAPI | `buf.gen.yaml`; remote/local/builtin plugins | reference SDKs + attestor plugins (SPIRE) | n/a | n/a | out of scope (build-system integrations) | scaffold-time only | single-target (zod), hardcoded |
+| 5. Identity / capability model | out of scope (auth-as-trait descriptor) | out of scope | **canonical workload identity** — SVID + trust domain | **canonical capability tokens** — HMAC chain, attenuation, discharge | n/a | Fulcio OIDC→X.509 + Rekor witness (signet already implements) | n/a | interlace lease (macaroon-shaped) + signet (SPIRE/Fulcio-shaped) |
+| 6. Supply-chain story | out of scope | content-addressed commits + lockfile digest only | out of scope | out of scope | **strong** — reproducible builds | **canonical** — SLSA L1/L2/L3 + signed in-toto attestations + Rekor log | n/a | primitives exist (signet+cosign bridge), nothing wired into releases |
+| 7. Adoption cost | M (patterns) / L (wholesale) | S (patterns) / L (wholesale: protobuf migration) | L (SPIRE deploy) / S (vocabulary) | S (we mostly have it) | L (paradigm) | S (L1+sign+Rekor) / L (L3) | M (Backstage runtime) | n/a — we're the baseline |
 
 `[planned]` columns are populated as the agent runs.
 
@@ -49,25 +49,23 @@ Seven axes (full definitions in [TEMPLATE.md](TEMPLATE.md)):
 |---|---|---|---|
 | Smithy | No | Trait propagation, `operation { input, output, errors }`, `diff` subcommand, plugin codegen | Capnp already covers shapes; JVM toolchain not worth it |
 | Buf | No | `buf breaking --against <ref>` shape; FILE/PACKAGE/WIRE rule tiers; `buf.gen.yaml` plugin config; content-addressed commit + lockfile digest | Capnp ≠ protobuf; BSR-as-a-service premature until ≥3 external consumers |
-| SPIFFE / SPIRE | _pending_ | _pending_ | _pending_ |
-| Macaroons | _pending_ | _pending_ | _pending_ |
+| SPIFFE / SPIRE | No | SPIFFE ID URI scheme as canonical workload-name shape; explicit trust-domain field; bundle-rotation vocabulary (`epoch` ↔ `spiffe_sequence`); workload-attestor pattern for ambient identity | signet already implements SPIRE-shape primitives (CA bundle rotation, OIDC→X.509, ephemeral certs); SPIRE Server+Agent topology is the wrong shape for our edge/CI/dev surface |
+| Macaroons | No | Third-party caveats + discharge protocol (the gap); canonical caveat vocabulary; document the asymmetric-signature variant we already ship | We already have the first-party-caveat construction in production (signet `pkg/crypto/epr/` + interlace lease in cloister); macaroons are a construction, not a system to adopt |
+| SLSA + Sigstore + in-toto | **Yes** (the predicate + envelope + log; not Fulcio — we have signet) | Adopt SLSA Build L1 across all release-producing repos; in-toto Statement + DSSE envelope; Rekor (public) via existing cosign-via-signet flow; predicate-type-URI vocabulary for custom attestations (APAS) | signet already IS the Fulcio-shape primitive; switching to Fulcio loses signet's algorithm agility (ML-DSA-44 post-quantum); SLSA L3 deferred — requires hardened builder isolation |
 | Nixpkgs | _pending_ | _pending_ | _pending_ |
-| SLSA | _pending_ | _pending_ | _pending_ |
 | Backstage | _pending_ | _pending_ | _pending_ |
 
 ## Triage queue
 
 Systems mentioned but not yet evaluated. The agent should pick from this list in roughly the order shown (highest-signal first):
 
-1. **SPIFFE / SPIRE** — closest to interlace + workload identity. We're already reimplementing this; alignment cost is asymmetric (cheap now, expensive later).
-2. **Macaroons** — the 2014 Google paper. Tiny but load-bearing for confirming our lease shape is correct.
-3. **Cap'n Proto annotations + RPC layer** — *not external, but worth re-evaluating against the rubric* since we use a strict subset today.
-4. **Nixpkgs** — the gold standard for "many independent packages, one coordinated release." Aspirational.
-5. **SLSA + Sigstore + in-toto** — the supply-chain triplet. Probably evaluate all three in one entry.
-6. **Backstage software templates** — for the recipe / scaffolding side.
-7. **WIT + WebAssembly Component Model** — future-bet; only if wasm becomes load-bearing.
-8. **CUE / Pkl** — if schema-bridge ever needs to render configs (not just types).
-9. **TypeSpec** (Microsoft) — adjacent to Smithy; lower-priority duplicate.
+1. **Cap'n Proto annotations + RPC layer** — *not external, but worth re-evaluating against the rubric* since we use a strict subset today.
+2. **Nixpkgs** — the gold standard for "many independent packages, one coordinated release." Aspirational.
+3. **Backstage software templates** — for the recipe / scaffolding side.
+4. **WIT + WebAssembly Component Model** — future-bet; only if wasm becomes load-bearing.
+5. **CUE / Pkl** — if schema-bridge ever needs to render configs (not just types).
+6. **TypeSpec** (Microsoft) — adjacent to Smithy; lower-priority duplicate.
+7. **Biscuit tokens** — asymmetric-signature macaroon variant; surfaced as a follow-up by the Macaroons entry (signet's construction may already align with Biscuit). `[unverified]` until a session evaluates it.
 
 ## Refresh discipline
 
