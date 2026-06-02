@@ -78,27 +78,21 @@ gh api repos/$OWNER/$REPO/issues/$N/comments \
 
 ### Staleness gate — does the PR still apply to base?
 
-Always run this before reviewing the diff. A PR that renders a clean diff on GitHub may be unmergeable against current base if the surrounding code was refactored *under it*. For any PR more than a few days old, this is often *the* load-bearing finding — and no other phase will surface it.
-
-First confirm the canonical base remote: `origin` is often your fork, `upstream` the canonical org/repo. Run the `gh` commands above against the canonical `OWNER/REPO`; run the `git` commands against the canonical remote.
+Always run this before reviewing the diff. A PR that renders a clean diff on GitHub may be unmergeable against current base if the surrounding code was refactored *under it*. For any PR more than a few days old, this is often *the* load-bearing finding — and no other phase surfaces it.
 
 ```bash
-git remote -v   # identify which remote points at the canonical org/repo
-
+# Run git commands against the canonical remote (see Phase 2 on fork-vs-upstream).
 git fetch <upstream-remote> pull/$N/head:pr-$N-review
 MB=$(git merge-base pr-$N-review <upstream-remote>/<base>)
+git rev-list --count $MB..<upstream-remote>/<base>   # how many commits behind base
 
-# How far behind base has the PR fallen?
-git rev-list --count $MB..<upstream-remote>/<base>
-
-# Drift on the files the PR touches — a changed signature means the patch won't apply.
+# Drift on touched files — a changed signature means the patch will not apply.
 for f in $(git diff --name-only $MB pr-$N-review); do
-  echo "== $f =="
-  diff <(git show <upstream-remote>/<base>:"$f" 2>/dev/null) <(git show pr-$N-review:"$f") >/dev/null || echo "  base diverged on this file"
+  diff -q <(git show <upstream-remote>/<base>:"$f" 2>/dev/null) <(git show pr-$N-review:"$f") >/dev/null || echo "diverged: $f"
 done
 ```
 
-A large commit count behind base plus signature/API drift on a touched function means **the fix idea may survive a rebase but the patch does not apply**. Report this as a blocker distinct from any code-quality finding; it is also what a `mergeable: UNKNOWN` status usually reflects.
+A large commit count behind base plus signature/API drift on a touched function means **the fix idea may survive a rebase but the patch does not apply** — report it as a blocker distinct from code-quality findings; it is what a `mergeable: UNKNOWN` status usually reflects.
 
 ---
 
