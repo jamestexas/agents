@@ -56,14 +56,17 @@ scripts/install.sh --apply
 <!-- BEGIN: SKILLS -->
 | Skill | Tool scope | Purpose |
 |-------|------------|---------|
+| [`arena`](skills/arena/SKILL.md) | inherits all | Interactively build a benchmark arena for any API, codebase, or workflow. |
 | [`break-glass`](skills/break-glass/SKILL.md) | inherits all | Emergency IAM elevation for oncall/debugging. |
 | [`diagram-gen-emergent`](skills/diagram-gen-emergent/SKILL.md) | scoped | Generate a bottom-up community diagram from real code cross-references. |
 | [`diagram-gen-spec`](skills/diagram-gen-spec/SKILL.md) | scoped | Generate a top-down structural diagram from a mache schema file. |
 | [`doc-triage`](skills/doc-triage/SKILL.md) | inherits all | Find internal docs (not for external consumers), review against code reality, bead real items, archive stale files. |
 | [`feature-impl`](skills/feature-impl/SKILL.md) | inherits all | Research-first feature implementation workflow. |
+| [`linear-escalation-triage`](skills/linear-escalation-triage/SKILL.md) | scoped | Use when handling Linear tickets assigned to you — during weekly oncall queue sweeps, when picking up a specific aged escalation (P1/P2 in Triage > 7 days), when cleaning up stale Todos where work may have landed elsewhere, or when an external escalation (Slack ping, support comment) surfaces a ticket needing a triaged customer-facing reply. |
 | [`mache-explore`](skills/mache-explore/SKILL.md) | inherits all | Mount a mache FUSE filesystem inside the project directory so agents can explore structured data without per-file permission prompts. |
 | [`mache-usage`](skills/mache-usage/SKILL.md) | scoped | Start or locate a running mache MCP server for a source path or .db file. |
 | [`pr-respond`](skills/pr-respond/SKILL.md) | scoped | Fresh-eyes review and review comment response for PRs. |
+| [`pr-review-kit`](skills/pr-review-kit/SKILL.md) | scoped | Self-contained playbook for rigorous PR review. |
 | [`pr-review`](skills/pr-review/SKILL.md) | scoped | Give or respond to PR reviews with structural awareness via mache. |
 | [`prior-art-cartographer`](skills/prior-art-cartographer/SKILL.md) | scoped | Produce structured comparisons between a project being built (described by a baseline doc) and external systems that solve adjacent problems. |
 | [`problem-decomposer`](skills/problem-decomposer/SKILL.md) | scoped | Decompose an aspiration into a lattice of dispatchable bead specs using 5-whys descent + a 7-property dispatchability rubric. |
@@ -75,6 +78,7 @@ scripts/install.sh --apply
 | [`review-prep`](skills/review-prep/SKILL.md) | scoped | Given a PR number or diff, synthesize spec-driven diagram, emergent diagram, and impact analysis into a structured insight: block for the reviewer. |
 | [`self-audit`](skills/self-audit/SKILL.md) | scoped | Pre-review self-audit of a PR branch. |
 | [`survey`](skills/survey/SKILL.md) | inherits all | Multi-perspective codebase survey that produces beads and mermaid diagrams from code structure. |
+| [`v2-arena`](skills/v2-arena/SKILL.md) | inherits all | Dogfood the v2alpha1 API by hitting real endpoints and validating behavior. |
 | [`work-scope`](skills/work-scope/SKILL.md) | scoped | Decompose feature work into reviewable, shippable units before coding starts. |
 <!-- END: SKILLS -->
 
