@@ -76,6 +76,30 @@ gh api repos/$OWNER/$REPO/issues/$N/comments \
 
 **Key thing to notice in this phase**: who has reviewed, what they said, and how the PR has evolved over time. PRs by authors who run their own AI-bot self-review often have many inline comments that look "open" but are pre-merge punch lists already addressed by later commits (see Phase 4).
 
+### Staleness gate — does the PR still apply to base?
+
+Always run this before reviewing the diff. A PR that renders a clean diff on GitHub may be unmergeable against current base if the surrounding code was refactored *under it*. For any PR more than a few days old, this is often *the* load-bearing finding — and no other phase will surface it.
+
+First confirm the canonical base remote: `origin` is often your fork, `upstream` the canonical org/repo. Run the `gh` commands above against the canonical `OWNER/REPO`; run the `git` commands against the canonical remote.
+
+```bash
+git remote -v   # identify which remote points at the canonical org/repo
+
+git fetch <upstream-remote> pull/$N/head:pr-$N-review
+MB=$(git merge-base pr-$N-review <upstream-remote>/<base>)
+
+# How far behind base has the PR fallen?
+git rev-list --count $MB..<upstream-remote>/<base>
+
+# Drift on the files the PR touches — a changed signature means the patch won't apply.
+for f in $(git diff --name-only $MB pr-$N-review); do
+  echo "== $f =="
+  diff <(git show <upstream-remote>/<base>:"$f" 2>/dev/null) <(git show pr-$N-review:"$f") >/dev/null || echo "  base diverged on this file"
+done
+```
+
+A large commit count behind base plus signature/API drift on a touched function means **the fix idea may survive a rebase but the patch does not apply**. Report this as a blocker distinct from any code-quality finding; it is also what a `mergeable: UNKNOWN` status usually reflects.
+
 ---
 
 ## Phase 2 — Clean working copy via worktree
@@ -290,6 +314,173 @@ After posting, verify it landed:
 gh api repos/$OWNER/$REPO/pulls/$N/reviews \
   --jq '[.[] | select(.user.login == "<your-handle>")] | .[-1] | {id, state, submitted_at}'
 ```
+
+---
+
+## Phase 9 — Engage mode: responding to existing reviewer comments
+
+When the PR has existing inline reviewer comments — yours, or on a PR you're collaborating on — drafting replies is a distinct workflow from fresh review. This phase covers it end-to-end. Same default-do-not-post posture as Phase 8.
+
+### 9.1 Categorize every comment
+
+Bucket each existing inline comment into one of three categories before drafting anything:
+
+- **Unaddressed** — No reply exists from the PR author. Check: comment has no child where `in_reply_to_id` equals this comment's `id`, or no child from the PR author.
+- **Already replied** — The PR author has posted a reply (a comment with `in_reply_to_id` matching this comment's `id`).
+- **Addressed by code** — The file referenced by the comment was modified after the comment was posted. Check with:
+  ```bash
+  git log --after="<comment-created-at>" --oneline -- <comment-path>
+  ```
+  If commits exist after the comment date touching that file, mark as "likely addressed by code" — but **verify by reading the current code at the cited line** (Rule 4 — don't trust the timestamp alone; the commit might have touched a different part of the file). This is the same Rule 2 (walk commits forward) applied to comment triage.
+
+Display a categorized summary to the user before drafting:
+
+```
+PR #789: "feat: add build completion webhook handler"
+5 files changed, +340 -12
+Inline comments: 8 total
+  - 3 from @alice (all replied)
+  - 5 from @bob (3 unaddressed, 2 addressed-by-code)
+Mode: Engage — drafting 3 replies for @bob's unaddressed comments.
+Proceed?
+```
+
+Wait for user confirmation before drafting.
+
+### 9.2 Discovery agent: per-comment analysis
+
+For each unaddressed comment, the isolated discovery agent (Phase 5 — fresh-eyes / Explore) should be instructed to:
+
+- Read the cited file:line in full context (not just the diff hunk).
+- Trace the reviewer's concern. Is the claim accurate against the current code?
+- Note evidence with specific file paths and line numbers.
+- If the reviewer is wrong, explain why with code references.
+- If the reviewer is right, identify the fix location.
+
+The agent returns a structured per-comment block:
+
+```
+## Per-Comment Analysis
+
+### Thread #1 (comment 1234567, @bob, handlers/build_webhook.go:42)
+Reviewer: "This doesn't validate the webhook signature before parsing."
+Evidence: handlers/build_webhook.go:38-48 — signature check at L52, after parse at L40.
+Assessment: Reviewer is correct; order is parse-then-verify, should be verify-then-parse.
+Suggested response direction: acknowledge, fix, link to the corrected lines.
+```
+
+### 9.3 Response templates
+
+Every drafted response **must include a GitHub permalink to specific lines**. The Phase 8 posting commands take a body file (`/tmp/reply.md`); these templates produce that body.
+
+Collect ingredients first:
+
+```bash
+SHA=$(git rev-parse HEAD)
+BASE=$(gh pr view $N --repo $OWNER/$REPO --json baseRefName --jq '.baseRefName')
+
+# Show changed line ranges in the relevant file
+git diff "origin/$BASE"...HEAD --unified=0 -- $COMMENT_PATH | grep '^@@'
+# Output like: @@ -38,1 +38,15 @@ — means lines 38-52 in the new file
+```
+
+Permalink format: `https://github.com/$OWNER/$REPO/blob/$SHA/$PATH#L<start>-L<end>`
+
+**Templates** (pick one per comment):
+
+```
+# Simple fix
+Fixed — see [<path>#L<line>](<permalink>)
+
+# Fix with explanation
+Fixed — <permalink>
+
+<explanation>
+
+# Already handled elsewhere
+This is handled at <permalink> — <explanation>
+
+# Valid concern
+Good catch — <acknowledge>. Fixed at <permalink>.
+
+# Intentional non-change
+Keeping as-is — <reasoning>.
+
+Current code: <permalink>
+
+# Design discussion
+<explanation>
+
+See: <permalink>
+
+Trade-offs: <list>
+
+# Pre-existing issue
+This is pre-existing — see <permalink>.
+<why not in this PR>
+```
+
+### 9.4 Permalink hard-gate
+
+**HARD GATE**: Before presenting any drafted response to the user, scan every response body for `github.com/.../blob/`.
+
+If ANY response is missing a permalink: **STOP**. Go back to 9.3 and find the lines. Do not present responses without permalinks. Do not substitute bare commit hashes as a workaround. Every response must have at least one clickable permalink so the reviewer can see exactly which code is being referenced.
+
+### 9.5 Present + authorize + post
+
+Display drafted responses grouped by reviewer, then by file:
+
+```
+## Responses to @bob
+
+### handlers/build_webhook.go
+
+Thread #1 (comment 1234567)
+> "This doesn't validate the webhook signature before parsing..."
+
+Response:
+Good catch — moved signature verification before body parse. See [handlers/build_webhook.go#L38-L45](<permalink>).
+```
+
+Offer action options:
+
+1. **Post all** — post every drafted reply
+2. **Select** — choose by number which to post
+3. **Edit** — modify a specific response before posting (then re-validate the hard-gate)
+4. **Skip** — don't post anything
+
+Wait for user choice. **Do not post without explicit authorization.**
+
+Before posting, ensure local SHA is on the remote (permalinks must resolve):
+
+```bash
+LOCAL_SHA=$(git rev-parse HEAD)
+REMOTE_SHA=$(git rev-parse origin/$(git branch --show-current))
+[ "$LOCAL_SHA" != "$REMOTE_SHA" ] && git push
+```
+
+Then use the inline-reply command from Phase 8:
+
+```bash
+gh api repos/$OWNER/$REPO/pulls/$N/comments -X POST \
+  -f body="$(cat /tmp/reply.md)" -F in_reply_to=<comment-id>
+```
+
+Repeat per response. Report what was posted:
+
+```
+Posted 3 responses to PR #789:
+  - 2 replies to @bob (1 fix, 1 explanation)
+  - 1 reply to @alice (already-handled)
+```
+
+### 9.6 Engage-mode error handling
+
+- **PR not found**: `gh pr list --limit 10`, ask user to specify.
+- **No inline comments**: not an engage-mode situation — switch back to fresh-review (Phases 1-7).
+- **`gh api` POST fails**: report the error and the response body that failed to post; offer retry or save for manual posting.
+- **Permalink line range unclear** (cited code no longer exists at HEAD): use `git log --follow` to trace the file, and note in the response that the code was moved or removed, linking to the nearest relevant location.
+- **Discovery agent returns thin per-comment analysis** (no evidence, no file:line citations): re-launch with a more explicit prompt directing to specific files. Don't post responses backed by unsupported opinions.
 
 ---
 
