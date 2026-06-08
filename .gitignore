@@ -41,3 +41,9 @@ agent-logs/
 
 # Brainstorm / design specs (local scratchpad)
 docs/*-design.md
+docs/superpowers/
+
+# Local scratch / experiments
+all_repo_review_comments.jsonl
+applicability.yaml
+scripts/which-applies.sh
