@@ -56,7 +56,6 @@ scripts/install.sh --apply
 <!-- BEGIN: SKILLS -->
 | Skill | Tool scope | Purpose |
 |-------|------------|---------|
-| [`arena`](skills/arena/SKILL.md) | inherits all | Interactively build a benchmark arena for any API, codebase, or workflow. |
 | [`break-glass`](skills/break-glass/SKILL.md) | inherits all | Emergency IAM elevation for oncall/debugging. |
 | [`diagram-gen-emergent`](skills/diagram-gen-emergent/SKILL.md) | scoped | Generate a bottom-up community diagram from real code cross-references. |
 | [`diagram-gen-spec`](skills/diagram-gen-spec/SKILL.md) | scoped | Generate a top-down structural diagram from a mache schema file. |
@@ -77,7 +76,6 @@ scripts/install.sh --apply
 | [`review-prep`](skills/review-prep/SKILL.md) | scoped | Given a PR number or diff, synthesize spec-driven diagram, emergent diagram, and impact analysis into a structured insight: block for the reviewer. |
 | [`self-audit`](skills/self-audit/SKILL.md) | scoped | Pre-review self-audit of a PR branch. |
 | [`survey`](skills/survey/SKILL.md) | inherits all | Multi-perspective codebase survey that produces beads and mermaid diagrams from code structure. |
-| [`v2-arena`](skills/v2-arena/SKILL.md) | inherits all | Dogfood the v2alpha1 API by hitting real endpoints and validating behavior. |
 | [`work-scope`](skills/work-scope/SKILL.md) | scoped | Decompose feature work into reviewable, shippable units before coding starts. |
 <!-- END: SKILLS -->
 
