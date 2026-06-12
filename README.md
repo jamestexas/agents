@@ -37,6 +37,7 @@ scripts/install.sh --apply
 | [`paradigm-assessor`](agents/paradigm-assessor.md) | opus | red | Use this agent for a high-skepticism, 'red-team' audit of a novel 'paradigm-defining' framework. |
 | [`platform-archaeologist`](agents/platform-archaeologist.md) | inherit | orange | Build complete infrastructure memory by traversing repositories and mapping all dependencies, migrations, and patterns. |
 | [`platform-code-reviewer`](agents/platform-code-reviewer.md) | inherit | green | Use this agent for reviewing Go, Terraform, and GCP infrastructure code with a focus on semantic correctness, not just syntax. |
+| [`pr-reviewer`](agents/pr-reviewer.md) | inherit | cyan | Reviews a SINGLE pull request in an isolated git worktree and returns a structured verdict — never posts to GitHub. |
 | [`production-readiness-reviewer`](agents/production-readiness-reviewer.md) | inherit | blue | Use this agent when you need a comprehensive production readiness assessment of code before deployment. |
 | [`protocol-replay-adversary`](agents/protocol-replay-adversary.md) | opus | red | Use this agent for adversarial analysis of protocol-state attacks — lease replay across windows, nonce-ledger gaps, epoch confusion, clock-skew exploitation, partial-failure replay across cross-DO orchestrators, receipt-chain forks. |
 | [`repo-seo-curator`](agents/repo-seo-curator.md) | inherit | yellow | Use this agent to improve repository discoverability for the three audiences that find code: humans skimming GitHub/HN/search results, AI agents and LLMs ingesting context, and search engine crawlers. |
@@ -74,6 +75,7 @@ scripts/install.sh --apply
 | [`repo-social-preview`](skills/repo-social-preview/SKILL.md) | scoped | Audit the GitHub OpenGraph social preview image — the card shown when a repo URL is posted on HN, Twitter, Slack, or Discord. |
 | [`repo-topic-tagger`](skills/repo-topic-tagger/SKILL.md) | scoped | Audit and apply GitHub topic tags (repository topics) on a target repo for discoverability — proposes tags from code signals, deduplicates against current tags, and applies via gh api after explicit user approval. |
 | [`review-prep`](skills/review-prep/SKILL.md) | scoped | Given a PR number or diff, synthesize spec-driven diagram, emergent diagram, and impact analysis into a structured insight: block for the reviewer. |
+| [`review-queue`](skills/review-queue/SKILL.md) | inherits all | Fan out isolated, one-per-PR code reviews across your review queue, then synthesize. |
 | [`self-audit`](skills/self-audit/SKILL.md) | scoped | Pre-review self-audit of a PR branch. |
 | [`survey`](skills/survey/SKILL.md) | inherits all | Multi-perspective codebase survey that produces beads and mermaid diagrams from code structure. |
 | [`work-scope`](skills/work-scope/SKILL.md) | scoped | Decompose feature work into reviewable, shippable units before coding starts. |
