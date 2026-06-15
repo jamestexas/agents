@@ -65,6 +65,7 @@ scripts/install.sh --apply
 | [`linear-escalation-triage`](skills/linear-escalation-triage/SKILL.md) | scoped | Use when handling Linear tickets assigned to you — during weekly oncall queue sweeps, when picking up a specific aged escalation (P1/P2 in Triage > 7 days), when cleaning up stale Todos where work may have landed elsewhere, or when an external escalation (Slack ping, support comment) surfaces a ticket needing a triaged customer-facing reply. |
 | [`mache-explore`](skills/mache-explore/SKILL.md) | inherits all | Mount a mache FUSE filesystem inside the project directory so agents can explore structured data without per-file permission prompts. |
 | [`mache-usage`](skills/mache-usage/SKILL.md) | scoped | Start or locate a running mache MCP server for a source path or .db file. |
+| [`pr-board`](skills/pr-board/SKILL.md) | scoped | Use when you ask "how are my PRs?", "did I address Mark's review?", "what's new on the PRs I opened?", or "anything waiting on me?" — the recurring authored-PR status question. |
 | [`pr-review-kit`](skills/pr-review-kit/SKILL.md) | scoped | Self-contained playbook for rigorous PR review. |
 | [`pr-review`](skills/pr-review/SKILL.md) | scoped | Give or respond to PR reviews with structural awareness via mache. |
 | [`prior-art-cartographer`](skills/prior-art-cartographer/SKILL.md) | scoped | Produce structured comparisons between a project being built (described by a baseline doc) and external systems that solve adjacent problems. |
