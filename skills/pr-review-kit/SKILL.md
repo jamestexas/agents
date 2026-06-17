@@ -315,6 +315,80 @@ gh api repos/$OWNER/$REPO/pulls/$N/reviews \
 
 When the PR has existing inline reviewer comments — yours, or on a PR you're collaborating on — drafting replies is a distinct workflow from fresh review. This phase covers it end-to-end. Same default-do-not-post posture as Phase 8.
 
+### 9.0 — Generate the reply-tracking file
+
+Before categorizing or drafting anything, generate a per-PR reply-tracking file. This is the durable artifact that answers "have I both *fixed* and *replied* to every comment?" at a glance.
+
+The key insight: `Code-addressed` and `Reply-posted` are two independent states. A comment can be fully fixed in code yet have no reply posted — leaving the reviewer's thread visibly open on a merged or approved PR. The tracking file makes this gap impossible to miss.
+
+**Location**: same `<notes-dir>` as Phase 7 notes, named `PR-N-<short-title>-replies.md`. Keep it outside the repo being reviewed.
+
+**Generate raw comment data** (root comments only — not replies — sorted by file):
+
+```bash
+OWNER=<org>; REPO=<repo>; N=<PR number>
+SHA=$(git rev-parse HEAD)   # must be the pushed HEAD; used for permalinks
+AUTHOR=$(gh pr view $N --repo $OWNER/$REPO --json author --jq '.author.login')
+
+# All root-level comments with html_url + created_at, sorted by file then line.
+# Flags already_replied=true if the PR author has a reply under that thread.
+gh api "repos/$OWNER/$REPO/pulls/$N/comments?per_page=100" --paginate \
+  --jq --arg author "$AUTHOR" '
+    (map(select(.in_reply_to_id == null)) | sort_by(.path, .line)) as $roots |
+    ([.[] | select(.in_reply_to_id != null and .user.login == $author) | .in_reply_to_id] | unique) as $replied |
+    $roots[] | {
+      id,
+      html_url,
+      path,
+      line: (.line // .original_line),
+      reviewer: .user.login,
+      created_at,
+      already_replied: ([.id] | inside($replied)),
+      body
+    }
+  '
+```
+
+**Tracking file template** — one block per root comment, ordered by file:
+
+```markdown
+# PR #N — [title] — Reply Tracking
+
+Code permalink base: `<sha>` (pushed HEAD).
+Ordered by file. Code-addressed = fix verified in code. Reply-posted = reply visible in GitHub thread.
+
+---
+
+## N. `<path>:<line>` — [first ~8 words of reviewer's comment]
+
+- **Comment link:** https://github.com/OWNER/REPO/pull/N#discussion_rID
+- **Code-addressed:** [ ]
+- **Reply-posted:** [ ]
+- **Timestamp:** [created_at ISO 8601]
+- **Priority:** [P1/P2/P3 — assigned by human]
+
+---
+
+**notes:** [why/how handled — fill in during §9.2]
+
+**thread:** [reviewer's original comment, verbatim]
+
+**reply:** [copy-paste-ready markdown with code permalinks pinned to `<sha>`]
+```
+
+**Comment link is always a full `html_url`** — never a bare comment ID.
+
+**The two-state matrix:**
+
+| Code-addressed | Reply-posted | Meaning |
+|---|---|---|
+| `[ ]` | `[ ]` | Not handled — needs code fix and reply |
+| `[x]` | `[ ]` | Fix is in the code; reply still needed — the most common gap on approved PRs |
+| `[ ]` | `[x]` | Reply posted ("will fix") but code change not yet verified |
+| `[x]` | `[x]` | Done |
+
+**Agent rule**: set `Code-addressed: [x]` only after reading the current code at the cited file:line and confirming the concern is resolved (Rule 4 — commit timestamps are not evidence; the commit may have touched a different part of the file). Set `Reply-posted: [x]` only after the `gh api POST` in §9.5 returns HTTP 201.
+
 ### 9.1 Categorize every comment
 
 Bucket each existing inline comment into one of three categories before drafting anything:
@@ -339,7 +413,7 @@ Mode: Engage — drafting 3 replies for @bob's unaddressed comments.
 Proceed?
 ```
 
-Wait for user confirmation before drafting.
+Wait for user confirmation before drafting. After confirmation, update the tracking file (§9.0): set `Code-addressed: [x]` for each comment verified as addressed by code; leave `Reply-posted: [ ]` until §9.5.
 
 ### 9.2 Discovery agent: per-comment analysis
 
@@ -460,12 +534,13 @@ gh api repos/$OWNER/$REPO/pulls/$N/comments -X POST \
   -f body="$(cat /tmp/reply.md)" -F in_reply_to=<comment-id>
 ```
 
-Repeat per response. Report what was posted:
+Repeat per response. After each HTTP 201, mark `Reply-posted: [x]` in the tracking file for that comment. Report what was posted:
 
 ```
 Posted 3 responses to PR #789:
   - 2 replies to @bob (1 fix, 1 explanation)
   - 1 reply to @alice (already-handled)
+Tracking file updated: 3 Reply-posted checkboxes set.
 ```
 
 ### 9.6 Engage-mode error handling
