@@ -61,6 +61,7 @@ scripts/install.sh --apply
 | [`diagram-gen-emergent`](skills/diagram-gen-emergent/SKILL.md) | scoped | Generate a bottom-up community diagram from real code cross-references. |
 | [`diagram-gen-spec`](skills/diagram-gen-spec/SKILL.md) | scoped | Generate a top-down structural diagram from a mache schema file. |
 | [`doc-triage`](skills/doc-triage/SKILL.md) | inherits all | Find internal docs (not for external consumers), review against code reality, bead real items, archive stale files. |
+| [`explain-work`](skills/explain-work/SKILL.md) | scoped | Review a unit of work (a PR, a Linear ticket, or a path) and explain it so it sticks — composing structural context (mache/seams), team ownership (CODEOWNERS), and intent (the ticket) into a taught synthesis rather than a bare findings list. |
 | [`feature-impl`](skills/feature-impl/SKILL.md) | inherits all | Research-first feature implementation workflow. |
 | [`linear-escalation-triage`](skills/linear-escalation-triage/SKILL.md) | scoped | Use when handling Linear tickets assigned to you — during weekly oncall queue sweeps, when picking up a specific aged escalation (P1/P2 in Triage > 7 days), when cleaning up stale Todos where work may have landed elsewhere, or when an external escalation (Slack ping, support comment) surfaces a ticket needing a triaged customer-facing reply. |
 | [`mache-explore`](skills/mache-explore/SKILL.md) | inherits all | Mount a mache FUSE filesystem inside the project directory so agents can explore structured data without per-file permission prompts. |
