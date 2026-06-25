@@ -16,7 +16,7 @@ Each file in this directory follows [TEMPLATE.md](../../skills/problem-decompose
 - File name: `<aspiration-slug>.md` (e.g., `substrate-idl.md`)
 - Status banner in header: `Draft | Reviewed | Locked`
 - Refresh after: 3-month max staleness
-- Cross-reference related prior-art entries (`../prior-art/*.md`) and ADRs in consuming repos (e.g. `~/remotes/art/cloister/docs/adr/`)
+- Cross-reference related prior-art entries (`../prior-art/*.md`) and ADRs in the consuming repo (e.g. `<consuming-repo>/docs/adr/`)
 
 ## What lives here vs. elsewhere
 

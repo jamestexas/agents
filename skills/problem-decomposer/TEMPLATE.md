@@ -148,7 +148,7 @@ Note: nodes with multiple incoming edges (e.g. L2 above) are the lattice signal 
 
 ## Cross-references
 
-- Skill that produced this: `~/github/jamestexas/agents/skills/problem-decomposer/`
+- Skill that produced this: the `problem-decomposer` skill
 - Dispatchability rubric: [`DISPATCHABILITY.md`](DISPATCHABILITY.md)
 - Related aspirations / decompositions: *(other docs in this directory)*
 - Related ADRs / specs: *(if this decomposition is anchored on existing design docs)*

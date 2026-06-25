@@ -65,7 +65,7 @@ Tag `red-team:isolation`.
 
 ## Reference
 
-- Golden Rules: `~/remotes/art/rosary/agents/rules/GOLDEN_RULES.md`.
+- Golden Rules: [`agentic-research/rosary` → `agents/rules/GOLDEN_RULES.md`](https://github.com/agentic-research/rosary/blob/main/agents/rules/GOLDEN_RULES.md) (use your local checkout if you have one).
 - Authoritative ADRs: ADR-0011 (hypervisor/bundle boundary), ADR-0013 (slice-grant enforcement). Read both before drafting findings.
 - Existing lint: `scripts/lint-bundle-isolation.mjs` (5 invariants post-cloister-988589). Your findings should propose new invariants where appropriate.
 - Threat model rows: §"prompt-injection vs vault-slice failure mode (NOT YET DEMONSTRATED)" (`cloister-74ce00`) is the open frontier — your findings often promote into rows there.

@@ -1,6 +1,6 @@
 ---
 name: review-queue
-description: "Fan out isolated, one-per-PR code reviews across your review queue, then synthesize. Use when you have several peer PRs to review and want each in its own context + git worktree (no cross-PR pollution), with a single consolidated report at the end. Dispatches the pr-reviewer sub-agent (isolation worktree, read-only) per PR; pulls the queue from zen (zen_inbox) or gh; catches up via lectio; posts nothing without explicit per-PR authorization."
+description: "Fan out isolated, one-per-PR code reviews across your review queue, then synthesize. Use when you have several peer PRs to review and want each in its own context + git worktree (no cross-PR pollution), with a single consolidated report at the end. Dispatches the pr-reviewer sub-agent (isolation worktree, read-only) per PR; pulls the queue from a review inbox (zen) or gh; optionally catches up via an observational memory layer if one is connected; posts nothing without explicit per-PR authorization."
 ---
 
 # Review Queue — isolated per-PR reviews, fanned out and synthesized
@@ -21,7 +21,7 @@ A list of PR numbers/URLs to review (e.g. `42088 42090 39311`, or full `chaingua
    - **zen** (if the `zen` MCP is connected): call `zen_inbox` — PRs awaiting *you* (configured authors + explicit review requests). This is the intended source.
    - **gh** fallback: `gh search prs --review-requested=@me --state=open --json number,title,repository` (and/or the repos you care about).
    - **args**: if the user passed PR refs, use those verbatim — skip discovery.
-2. **Catch up via lectio** (if the `lectio` MCP is connected) — for each PR you're about to review, a quick `memory_get_timeline` / `memory_text_search` to surface *what changed and who reviewed since you last looked* (especially if it's a re-review). This is the "stay current" layer — query it, don't carry it.
+2. **Catch up via an observational memory layer** (optional — only if your harness provides one, e.g. a memory/timeline MCP) — for each PR you're about to review, a quick timeline / text search to surface *what changed and who reviewed since you last looked* (especially if it's a re-review). This is the "stay current" layer — query it, don't carry it. Skip silently if no such source is connected.
 3. **Confirm the list with the user** before dispatching — show `repo#number — title` for each, note any that are drafts or already-approved, and let them prune. Don't fan out a dozen agents on an unconfirmed list.
 
 ---

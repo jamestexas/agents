@@ -210,8 +210,8 @@ Manual follow-ups suggested:
 /readme-restructure
 → dry-run on ./README.md
 
-/readme-restructure ~/remotes/art/mache/README.md
-→ dry-run on mache
+/readme-restructure <path-to-repo>/README.md
+→ dry-run on that repo's README
 
 /readme-restructure ./README.md --apply
 → dry-run, prompt, write

@@ -259,7 +259,7 @@ graph TD
 
 ## Cross-references
 
-- Skill: `~/github/jamestexas/agents/skills/problem-decomposer/`
+- Skill: the `problem-decomposer` skill
 - Dispatchability rubric: [`../DISPATCHABILITY.md`](../DISPATCHABILITY.md)
 - Prior art consulted:
   - `docs/prior-art/smithy.md` (trait model borrowed → L2)

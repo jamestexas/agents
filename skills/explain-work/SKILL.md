@@ -64,7 +64,8 @@ when it is not. Never block on a missing layer.
   `~/.claude/rules/*.md`, and auto-memory (`MEMORY.md`). Also **derive** a
   lightweight identity signal from the user's recent commits and the CODEOWNERS
   teams of the paths they touch. If a richer observational source is available
-  (e.g. a `lectio` memory query for recent work / intersecting teams), use it.
+  (e.g. an observational-memory MCP query for recent work / intersecting teams,
+  if your harness provides one), use it.
 
 ## Step 3 — Reconcile authored vs derived identity
 

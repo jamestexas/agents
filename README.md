@@ -32,7 +32,6 @@ scripts/install.sh --apply
 | [`empirical-validation-designer`](agents/empirical-validation-designer.md) | inherit | — | Translates theoretical claims into concrete, executable experiments that produce real results on real hardware |
 | [`enumeration-oracle-hunter`](agents/enumeration-oracle-hunter.md) | opus | red | Use this agent to find side-channel and response-shape oracles that let an attacker enumerate names, existence, or relationships in a multi-tenant substrate. |
 | [`experimental-design-architect`](agents/experimental-design-architect.md) | inherit | magenta | Specializes in translating high-level research philosophy into concrete, falsifiable, and scalable experimental protocols |
-| [`mache-explorer`](agents/mache-explorer.md) | inherit | orange | Mount and explore structured data via mache FUSE filesystems. |
 | [`observability-gap-auditor`](agents/observability-gap-auditor.md) | opus | red | Use this agent for adversarial analysis of observability and alerting gaps — silent denial paths, alert deadlock under load, 'silence is evidence' invariants that break when the silence is from the substrate not the absence of activity. |
 | [`paradigm-assessor`](agents/paradigm-assessor.md) | opus | red | Use this agent for a high-skepticism, 'red-team' audit of a novel 'paradigm-defining' framework. |
 | [`platform-archaeologist`](agents/platform-archaeologist.md) | inherit | orange | Build complete infrastructure memory by traversing repositories and mapping all dependencies, migrations, and patterns. |
@@ -64,7 +63,6 @@ scripts/install.sh --apply
 | [`explain-work`](skills/explain-work/SKILL.md) | scoped | Review a unit of work (a PR, a Linear ticket, or a path) and explain it so it sticks — composing structural context (mache/seams), team ownership (CODEOWNERS), and intent (the ticket) into a taught synthesis rather than a bare findings list. |
 | [`feature-impl`](skills/feature-impl/SKILL.md) | inherits all | Research-first feature implementation workflow. |
 | [`linear-escalation-triage`](skills/linear-escalation-triage/SKILL.md) | scoped | Use when handling Linear tickets assigned to you — during weekly oncall queue sweeps, when picking up a specific aged escalation (P1/P2 in Triage > 7 days), when cleaning up stale Todos where work may have landed elsewhere, or when an external escalation (Slack ping, support comment) surfaces a ticket needing a triaged customer-facing reply. |
-| [`mache-explore`](skills/mache-explore/SKILL.md) | inherits all | Mount a mache FUSE filesystem inside the project directory so agents can explore structured data without per-file permission prompts. |
 | [`mache-usage`](skills/mache-usage/SKILL.md) | scoped | Start or locate a running mache MCP server for a source path or .db file. |
 | [`pr-board`](skills/pr-board/SKILL.md) | scoped | Use when you ask "how are my PRs?", "did I address Mark's review?", "what's new on the PRs I opened?", or "anything waiting on me?" — the recurring authored-PR status question. |
 | [`pr-review-kit`](skills/pr-review-kit/SKILL.md) | scoped | Self-contained playbook for rigorous PR review. |
@@ -80,7 +78,9 @@ scripts/install.sh --apply
 | [`review-queue`](skills/review-queue/SKILL.md) | inherits all | Fan out isolated, one-per-PR code reviews across your review queue, then synthesize. |
 | [`self-audit`](skills/self-audit/SKILL.md) | scoped | Pre-review self-audit of a PR branch. |
 | [`survey`](skills/survey/SKILL.md) | inherits all | Multi-perspective codebase survey that produces beads and mermaid diagrams from code structure. |
+| [`taskfile-ci-parity`](skills/taskfile-ci-parity/SKILL.md) | inherits all |  |
 | [`work-scope`](skills/work-scope/SKILL.md) | scoped | Decompose feature work into reviewable, shippable units before coding starts. |
+| [`workflow-audit`](skills/workflow-audit/SKILL.md) | scoped | Mine the user's Claude Code chat corpus for self-optimization patterns — repeated corrections, tool thrash, dropped threads, restated constraints — and produce a ranked, PII-scrubbed, anti-recency-biased markdown report. |
 <!-- END: SKILLS -->
 
 ## How agents and skills differ

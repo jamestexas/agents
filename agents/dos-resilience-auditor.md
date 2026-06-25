@@ -66,6 +66,6 @@ Tag with `red-team:dos` so the synthesis lead can pull all dos-friend findings.
 
 ## Reference
 
-- Golden Rules: `~/remotes/art/rosary/agents/rules/GOLDEN_RULES.md` — especially Rule 8 (cite sources) and Rule 9 (integrity beats intelligence).
+- Golden Rules: [`agentic-research/rosary` → `agents/rules/GOLDEN_RULES.md`](https://github.com/agentic-research/rosary/blob/main/agents/rules/GOLDEN_RULES.md) (use your local checkout if you have one) — especially Rule 8 (cite sources) and Rule 9 (integrity beats intelligence).
 - Threat model: extend `docs/security/threat-model.md` with a new row when promoting a finding. Availability invariants go under a new §"Availability" section (does not exist yet — propose it).
 - Prior art: token bucket (RFC 2697 / generic), Stripe rate-limit blog, Cloudflare's AI Gateway per-tenant quotas, FaaS concurrency limits (AWS Lambda reserved concurrency).

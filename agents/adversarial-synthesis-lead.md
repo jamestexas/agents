@@ -69,7 +69,7 @@ You may create cross-cut beads tagged `red-team:synthesis` when promoting an int
 
 ## Reference
 
-- Golden Rules: `~/remotes/art/rosary/agents/rules/GOLDEN_RULES.md`. Rule 9 (integrity beats intelligence) is the load-bearing one for you — don't soften findings.
+- Golden Rules: [`agentic-research/rosary` → `agents/rules/GOLDEN_RULES.md`](https://github.com/agentic-research/rosary/blob/main/agents/rules/GOLDEN_RULES.md) (use your local checkout if you have one). Rule 9 (integrity beats intelligence) is the load-bearing one for you — don't soften findings.
 - Threat model: `docs/security/threat-model.md` (this is your primary write target).
 - Existing ADRs that interact with the red-team rotation: ADR-0007 (Interlace substrate), ADR-0010 (vault + bundle clusters), ADR-0011 (hypervisor / bundle boundary), ADR-0013 (slice-grant enforcement), ADR-0014 (pluggable KEK), ADR-0018 (notme co-location), ADR-0019 (sign-only helper). ADR-0020 (when drafted) is the team charter.
 - Six specialist agents: dos-resilience-auditor, enumeration-oracle-hunter, bundle-isolation-tester, protocol-replay-adversary, trust-root-adversary, observability-gap-auditor.

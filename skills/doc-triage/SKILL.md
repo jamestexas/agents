@@ -154,7 +154,7 @@ Output summary:
 ## Example
 
 ```
-/doc-triage ~/remotes/art/crumb
+/doc-triage <path-to-repo>
 
 Discovered 4 internal docs:
   1. HANDOFF_2025-11-15.md (29 items)

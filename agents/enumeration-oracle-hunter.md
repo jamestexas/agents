@@ -63,6 +63,6 @@ Tag with `red-team:oracle`.
 
 ## Reference
 
-- Golden Rules: `~/remotes/art/rosary/agents/rules/GOLDEN_RULES.md`.
+- Golden Rules: [`agentic-research/rosary` → `agents/rules/GOLDEN_RULES.md`](https://github.com/agentic-research/rosary/blob/main/agents/rules/GOLDEN_RULES.md) (use your local checkout if you have one).
 - Threat model precedent for closing an oracle: `docs/security/threat-model.md` §9.4.b cross-peer timing oracle (CLOSED 2026-05-10, `cloister-1c42ae`). Read this row before drafting findings — it's the worked example.
 - Prior art: side-channel cryptography literature (cache attacks, timing attacks on string compare), Cloudflare's constant-time auth blog posts, OWASP "improper error handling" category.
