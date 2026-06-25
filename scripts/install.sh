@@ -35,8 +35,8 @@ link_one() {
     local name
     name="$(basename "$src")"
 
-    # Resolve symlink chains so a target reached via ~/github vs ~/remotes
-    # (which is a symlink to the same path) doesn't read as drift.
+    # Resolve symlink chains so a target reached via two different paths that
+    # symlink to the same real directory doesn't read as drift.
     local src_real
     src_real="$(cd "$(dirname "$src")" 2>/dev/null && pwd -P)/$(basename "$src")"
 
