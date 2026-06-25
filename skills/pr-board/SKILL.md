@@ -98,7 +98,7 @@ PR board — new since <window>  (gh swept <freshness>)
 
 chainguard-dev/mono#42090 — "title" — OPEN — ⚠ NEEDS REPLY
   • Mark: 3 review comments (src/foo.rs, src/bar.rs) — 2h ago — you haven't replied since
-  • local: ~/github/.../mono-pr-42090-review worktree, notes at <path>
+  • local: <worktree-path>/mono-pr-42090-review worktree, notes at <path>
 chainguard-dev/mono#39311 — "title" — OPEN — ✓ replied
   • Carol: 1 approval — 1d ago
 …
