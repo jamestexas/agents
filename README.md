@@ -78,7 +78,7 @@ scripts/install.sh --apply
 | [`review-queue`](skills/review-queue/SKILL.md) | inherits all | Fan out isolated, one-per-PR code reviews across your review queue, then synthesize. |
 | [`self-audit`](skills/self-audit/SKILL.md) | scoped | Pre-review self-audit of a PR branch. |
 | [`survey`](skills/survey/SKILL.md) | inherits all | Multi-perspective codebase survey that produces beads and mermaid diagrams from code structure. |
-| [`taskfile-ci-parity`](skills/taskfile-ci-parity/SKILL.md) | inherits all |  |
+| [`taskfile-ci-parity`](skills/taskfile-ci-parity/SKILL.md) | scoped | Wire repo validation so local == CI by construction - every check is a Taskfile target, and CI + git hooks INVOKE those targets rather than re-implementing the commands. |
 | [`work-scope`](skills/work-scope/SKILL.md) | scoped | Decompose feature work into reviewable, shippable units before coding starts. |
 | [`workflow-audit`](skills/workflow-audit/SKILL.md) | scoped | Mine the user's Claude Code chat corpus for self-optimization patterns — repeated corrections, tool thrash, dropped threads, restated constraints — and produce a ranked, PII-scrubbed, anti-recency-biased markdown report. |
 <!-- END: SKILLS -->

@@ -1,8 +1,15 @@
 ---
 name: taskfile-ci-parity
-description: Wire repo validation so local == CI by construction — every check is a Taskfile target, and CI + git hooks INVOKE those targets rather than re-implementing the commands. Use when adding a test/lint/format/validation gate, when CI and local disagree, when a pre-commit/pre-push hook duplicates a command, or when asked to "make validation 1:1 with CI" / "add a Taskfile target" / "stop CI failing first". Covers includes-vs-composition, the non-mutating `task ci` gate, and the pre-push hook pattern.
-allowed-tools: Read Glob Grep Edit Write Bash(task *) Bash(task:*) Bash(pre-commit *) Bash(git *) Bash(gh *) Bash(grep *) Bash(ls *)
-argument-hint: [check-name] [--audit] [--repo <path>]
+description: >
+  Wire repo validation so local == CI by construction - every check is a
+  Taskfile target, and CI + git hooks INVOKE those targets rather than
+  re-implementing the commands. Use when adding a test/lint/format/validation
+  gate, when CI and local disagree, when a pre-commit/pre-push hook duplicates
+  a command, or when asked to make validation 1:1 with CI, add a Taskfile
+  target, or stop CI failing first. Covers includes-vs-composition, the
+  non-mutating task ci gate, and the pre-push hook pattern.
+allowed-tools: "Read,Glob,Grep,Edit,Write,Bash(task *),Bash(task:*),Bash(pre-commit *),Bash(git *),Bash(gh *),Bash(grep *),Bash(ls *)"
+argument-hint: "<check-name> [--audit] [--repo <path>]"
 ---
 
 <!-- Author: jamestexas — drafted by claude-opus-4-8 (2026-06-22). Reference impl: agentic-research/mache PR #429. Provenance: mache memory feedback_validation_taskfile_ci_gate. -->

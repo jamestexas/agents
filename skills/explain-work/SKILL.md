@@ -36,6 +36,19 @@ PII-free.
 - The target resolves to a PR, a Linear ticket, or a path/diff (auto-detected).
 - `--deep` runs the full review-lens panel (see Step 4). Default is a light pass.
 
+## Step 0 — Check for prior session context
+
+Before fetching anything, check whether the current session already contains
+analysis of the same target. If a `pr-review-kit`, `pr-review`, or `review-prep`
+pass was just run in this session for the same PR/path, **reuse that context
+rather than re-fetching**. The layers that are already materialised (file reads,
+commit history, inline comment triage, matrix rows) should be treated as the
+`hard` layer from Step 2 — no need to repeat the gh calls or worktree setup.
+
+Signal that session context was reused in the degradation report (Step 6) so
+the user knows the explanation was built from the live analysis, not a cold
+fetch.
+
 ## Step 1 — Resolve the unit of work and authorship
 
 1. Detect the input type: PR number / `owner/repo#N` → a PR; `[A-Z]+-\d+` → a
@@ -48,7 +61,8 @@ PII-free.
 ## Step 2 — Assemble context layers (use what is reachable; degrade gracefully)
 
 Each layer is a seam: present it when the source is available, skip it silently
-when it is not. Never block on a missing layer.
+when it is not. Never block on a missing layer. **Track each layer's outcome**
+(reached / partial / skipped + reason) for the degradation report in Step 6.
 
 - **Code / structural** — run `review-prep` (spec + emergent diagrams + impact)
   for a PR/diff, or read the files directly for a path. This is the `hard` layer.
@@ -103,6 +117,37 @@ Shift emphasis by authorship (Step 1):
 
 Scale to the context available: sparse context yields a solid code + findings
 explanation; rich context (ownership + intent + identity) yields a situated one.
+
+## Step 6 — Degradation report (always emit, even when everything worked)
+
+After the teaching output, append a compact block showing what context was
+actually available. This lets the user calibrate how much to trust the
+explanation and where to dig deeper themselves.
+
+Format:
+
+```
+---
+**Context used for this explanation**
+
+| Layer | Status | Notes |
+|---|---|---|
+| Code / structural | ✅ reached (session reuse) | pr-review-kit pass earlier this session |
+| Seam / boundaries | ❌ skipped | seam-discovery not available |
+| Team ownership | ✅ reached | CODEOWNERS: @org/team-name |
+| Intent / ticket | ⚠️ partial | PR body only; no linked Linear ticket |
+| Situated identity | ❌ skipped | no identity.md or memory present |
+```
+
+Status values:
+- `✅ reached` — full data available and used
+- `✅ reached (session reuse)` — used prior-session analysis, no re-fetch
+- `⚠️ partial` — some data available; note what was missing
+- `❌ skipped` — not available; note why (tool not connected, file absent, etc.)
+
+Keep notes brief — one clause each. The block is a signal, not a diagnosis.
+Do not omit the block when everything worked; a clean all-✅ table is itself
+useful signal that the explanation is built on solid ground.
 
 ## Posture
 
