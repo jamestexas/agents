@@ -1,20 +1,20 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Repository Overview
 
-This is a Claude Code agent definitions repository containing specialized AI agents that extend Claude Code's capabilities. The repository contains no executable code - only agent definition files in Markdown format with YAML frontmatter.
+This is a Codex agent definitions repository containing specialized AI agents that extend Codex's capabilities. The repository contains no executable code - only agent definition files in Markdown format with YAML frontmatter.
 
 ## Agent Development Workflow
 
 ### Testing Agents Locally
 ```bash
 # Copy agent to user directory for testing
-cp agent-name.md ~/.claude/agents/
+cp agent-name.md ~/.Codex/agents/
 
 # Or copy to project directory
-cp agent-name.md /path/to/project/.claude/agents/
+cp agent-name.md /path/to/project/.Codex/agents/
 ```
 
 ### Creating New Agents
@@ -45,8 +45,8 @@ cp agent-name.md /path/to/project/.claude/agents/
 /
 ├── *.md                    # Agent definition files
 ├── README.md              # Public documentation
-├── CLAUDE.md              # This file
-└── .claude/               # Claude Code configuration
+├── AGENTS.md              # This file
+└── .Codex/               # Codex configuration
     └── settings.local.json # Local permissions
 ```
 
@@ -63,7 +63,7 @@ Each agent file has two parts:
 1. **YAML Frontmatter**: Metadata and configuration
 2. **System Prompt**: Defines persona, expertise, and behavior
 
-The agents inherit all tools and capabilities from the parent Claude Code session, so focus on domain expertise rather than tool usage.
+The agents inherit all tools and capabilities from the parent Codex session, so focus on domain expertise rather than tool usage.
 
 ## Common Tasks
 

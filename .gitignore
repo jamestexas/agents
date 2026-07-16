@@ -47,3 +47,8 @@ docs/superpowers/
 all_repo_review_comments.jsonl
 applicability.yaml
 scripts/which-applies.sh
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
