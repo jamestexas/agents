@@ -111,6 +111,8 @@ color: blue             # red blue green yellow purple orange pink cyan magenta
 System prompt for the persona…
 ```
 
+If the persona calls a known MCP server's tools (`rsry_*`, `mache_*`, or the fully-qualified `mcp__server__tool` form), document it with a `**MCP dependency:**` line in the body — `scripts/build.sh lint` fails any agent that calls one without declaring it, so the dependency can't drift silently out of the frontmatter/prose. For agents that should never write source (read-only reviewers, "find it, file a bead, never patch" personas), also add `disallowedTools: Write, Edit` to the frontmatter so the constraint is enforced, not just promised in prose. See `agents/dos-resilience-auditor.md` for both in practice.
+
 **Skill** (`skills/<name>/SKILL.md`):
 
 ```markdown

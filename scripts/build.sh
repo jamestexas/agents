@@ -141,6 +141,22 @@ lint_one() {
         fi
     fi
 
+    # Agent MCP-dependency check: if the body invokes a known MCP server's
+    # tools (rsry_*, mache_*, or the fully-qualified mcp__server__tool form)
+    # but never documents the dependency, frontmatter drifts silently from
+    # what the agent actually needs at runtime. Require a "MCP dependency:"
+    # line as the documented, greppable declaration (see CLAUDE.md "Creating
+    # new agents"). Scoped to known MCP server prefixes, not generic
+    # snake_case calls, so worked-example code (e.g. a retired backend's
+    # client.record_x() calls) doesn't false-positive.
+    if [ "$kind" = "agent" ]; then
+        if grep -qE '\b(rsry|mache)_[a-z_]+\(|mcp__[a-zA-Z0-9_]+__[a-zA-Z0-9_]+' "$file" \
+            && ! grep -q 'MCP dependency:' "$file"; then
+            echo "  ❌ $file: calls a known MCP server's tool but has no 'MCP dependency:' line"
+            errors=$((errors+1))
+        fi
+    fi
+
     [ $errors -eq 0 ] || return 1
     return 0
 }
