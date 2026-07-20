@@ -545,7 +545,11 @@ gh api repos/{owner}/{repo}/pulls/{pr_num}/comments \
   -F in_reply_to=COMMENT_ID
 ```
 
-### S.9 Ticket update (optional)
+### S.9 Resolve threads + re-request review
+
+After posting (S.8), resolve any thread whose reply just confirmed a fix, and re-request review if the PR needs another look. This is pure `gh api` (REST for re-request, GraphQL for thread resolution — GitHub's REST API has no resolve-thread endpoint) — no GitHub App/MCP connector needed. Full detail (ID-mapping query, the resolve-gate rule, the mutation, the re-request command) lives in `pr-review-kit` §9.6 — follow it as written rather than re-deriving; the short version: only resolve threads you've both replied to AND confirmed the code addresses, and only re-request review with explicit user authorization (same posting gate as S.8).
+
+### S.10 Ticket update (optional)
 
 If a Linear ticket is linked:
 ```

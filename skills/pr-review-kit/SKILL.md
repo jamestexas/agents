@@ -543,7 +543,55 @@ Posted 3 responses to PR #789:
 Tracking file updated: 3 Reply-posted checkboxes set.
 ```
 
-### 9.6 Engage-mode error handling
+### 9.6 Resolve threads + re-request review
+
+Everything in this section is plain `gh api` — REST for re-requesting review, GraphQL for thread resolution (GitHub's REST API has no resolve-thread endpoint). No GitHub App / MCP connector required; `gh auth status` is the only prerequisite, same as every other command in this skill.
+
+**Map comment IDs to thread IDs.** The numeric comment IDs used for posting (9.5) and GitHub's thread IDs (needed to resolve) are different ID spaces. Fetch the mapping once per PR:
+
+```bash
+gh api graphql -f query='
+  query($owner:String!, $repo:String!, $pr:Int!) {
+    repository(owner:$owner, name:$repo) {
+      pullRequest(number:$pr) {
+        reviewThreads(first: 100) {
+          nodes { id isResolved comments(first: 1) { nodes { databaseId } } }
+        }
+      }
+    }
+  }' -f owner=$OWNER -f repo=$REPO -F pr=$N \
+  --jq '.data.repository.pullRequest.reviewThreads.nodes[] | {threadId: .id, firstCommentId: .comments.nodes[0].databaseId, isResolved}'
+```
+
+`firstCommentId` matches the numeric `id` used in 9.0's reply-tracking file and the `in_reply_to` value from 9.5 — join on that to find each thread's `threadId` (`PRRT_...`).
+
+**Resolve gate:** only resolve a thread whose tracking-file row has **both** `Code-addressed: [x]` and `Reply-posted: [x]` checked (9.0/Rule 4's existing discipline — don't resolve on the strength of a posted reply alone; the code must actually be confirmed fixed). Never resolve a thread you haven't replied to — a silently-resolved unreplied thread reads as the reviewer's concern being dismissed.
+
+```bash
+gh api graphql -f query='
+  mutation($threadId:ID!) {
+    resolveReviewThread(input:{threadId:$threadId}) { thread { isResolved } }
+  }' -f threadId=<PRRT_...>
+```
+
+Resolving an already-resolved thread is a no-op — safe to call without checking `isResolved` first if you've already confirmed the gate above.
+
+**Re-request review.** After posting responses (and resolving what qualifies), if the PR needs another look from a reviewer who already reviewed (their prior review is now stale against the fixes):
+
+```bash
+gh api repos/$OWNER/$REPO/pulls/$N/requested_reviewers -X POST -f 'reviewers[]=<username>'
+```
+
+This is the same effect as GitHub's "re-request review" button — it works even if that reviewer already submitted a review (their old review stays visible but the PR shows as awaiting them again). Only do this on explicit authorization, same gate as 9.5 posting — ask "Re-request review from @X?" rather than doing it automatically once responses are posted.
+
+Report what happened, in the same style as 9.5:
+
+```
+Resolved 2 threads (both had Code-addressed + Reply-posted). Left 1 unresolved — @alice's design question needs her reply first.
+Re-requested review from @bob.
+```
+
+### 9.7 Engage-mode error handling
 
 - **PR not found**: `gh pr list --limit 10`, ask user to specify.
 - **No inline comments**: not an engage-mode situation — switch back to fresh-review (Phases 1-7).
