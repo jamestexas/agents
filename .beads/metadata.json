@@ -1,7 +1,4 @@
 {
-  "database": "dolt",
-  "backend": "dolt",
-  "dolt_mode": "embedded",
-  "dolt_database": "agents",
+  "backend": "sqlite",
   "project_id": "3817ea13-8f03-4452-8e3e-9563f1c2ce89"
 }
