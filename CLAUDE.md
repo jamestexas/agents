@@ -27,10 +27,23 @@ cp agent-name.md /path/to/project/.claude/agents/
    - `color`: Choose from blue, green, purple, red, orange
 
 3. **Agent Persona Guidelines**:
-   - Create compelling backstory that reinforces expertise
    - Define clear methodology and process
    - Structure output format for consistency
    - Include specific technical focus areas
+
+4. **Declare MCP dependencies** — enforced by `scripts/build.sh lint`, not
+   optional. An agent whose body calls a known MCP tool (`rsry_*`, `mache_*`,
+   or the fully-qualified `mcp__server__tool` form) must carry a line
+   beginning `**MCP dependency:**` naming the server and the tools it needs.
+   Frontmatter does not record this, so without the line the agent's real
+   runtime requirements drift silently from what is written down. Six agents
+   share the common case via `<!-- @include-begin _shared/mcp-dependency-rsry.md -->`;
+   an agent needing different tools states its own.
+
+5. **Restrict tools when the agent must not write.** A reviewer that files
+   findings and never patches should say so in prose *and* enforce it with
+   `disallowedTools: Write, Edit` (or a `tools:` allowlist). Prose is
+   documentation; the frontmatter field is the enforcement.
 
 ### Quality Standards
 
@@ -63,7 +76,13 @@ Each agent file has two parts:
 1. **YAML Frontmatter**: Metadata and configuration
 2. **System Prompt**: Defines persona, expertise, and behavior
 
-The agents inherit all tools and capabilities from the parent Claude Code session, so focus on domain expertise rather than tool usage.
+By default an agent inherits the parent session's tools, so most agents can
+focus on domain expertise rather than tool plumbing. That default is not a
+guarantee: `disallowedTools` and `tools` narrow it, and several agents here
+rely on that — the six adversarial reviewers carry
+`disallowedTools: Write, Edit` so their read-only posture is enforced rather
+than merely stated, and `type-driven-correctness` uses a `tools:` allowlist.
+Check the frontmatter before assuming an agent can reach something.
 
 ## Common Tasks
 

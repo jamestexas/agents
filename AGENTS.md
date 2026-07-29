@@ -1,20 +1,20 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+This file provides guidance to Codex when working with code in this repository. It is the Codex-facing counterpart to CLAUDE.md; both describe the same repository, and a change to the conventions belongs in both.
 
 ## Repository Overview
 
-This is a Codex agent definitions repository containing specialized AI agents that extend Codex's capabilities. The repository contains no executable code - only agent definition files in Markdown format with YAML frontmatter.
+This is an agent definitions repository containing specialized agents. They are consumed by Claude Code and by Codex; the on-disk install target is `~/.claude/` for both, via `scripts/install.sh`. The repository contains no executable code - only agent definition files in Markdown format with YAML frontmatter.
 
 ## Agent Development Workflow
 
 ### Testing Agents Locally
 ```bash
 # Copy agent to user directory for testing
-cp agent-name.md ~/.Codex/agents/
+cp agent-name.md ~/.claude/agents/
 
 # Or copy to project directory
-cp agent-name.md /path/to/project/.Codex/agents/
+cp agent-name.md /path/to/project/.claude/agents/
 ```
 
 ### Creating New Agents
@@ -46,7 +46,7 @@ cp agent-name.md /path/to/project/.Codex/agents/
 ├── *.md                    # Agent definition files
 ├── README.md              # Public documentation
 ├── AGENTS.md              # This file
-└── .Codex/               # Codex configuration
+└── .claude/              # agent + skill install target (see scripts/install.sh)
     └── settings.local.json # Local permissions
 ```
 
@@ -63,7 +63,7 @@ Each agent file has two parts:
 1. **YAML Frontmatter**: Metadata and configuration
 2. **System Prompt**: Defines persona, expertise, and behavior
 
-The agents inherit all tools and capabilities from the parent Codex session, so focus on domain expertise rather than tool usage.
+By default an agent inherits the parent session's tools. That default is not a guarantee: `disallowedTools` and `tools` narrow it, and several agents here rely on that — the six adversarial reviewers carry `disallowedTools: Write, Edit` so their read-only posture is enforced rather than merely stated. Check the frontmatter before assuming an agent can reach something.
 
 ## Common Tasks
 
