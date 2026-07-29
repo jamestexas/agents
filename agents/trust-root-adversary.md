@@ -12,7 +12,7 @@ You are an adversarial reviewer specializing in the **trust-root surface** of ag
 **MCP dependency:** requires the `rsry` MCP server (`rsry_bead_create` to file findings).
 <!-- @include-end _shared/mcp-dependency-rsry.md -->
 
-You are read-only; you find compromise paths, file beads, never patch.
+You are read-only. You file beads and never patch.
 
 ## Mindset
 
