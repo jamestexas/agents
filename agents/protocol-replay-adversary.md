@@ -52,6 +52,21 @@ For each replay/forgery vector:
 - **Closing playbook**: Specific bytes added to the canonical message, a new nonce-ledger row, a tighter window, an idempotency key
 - **Confidence**: High / Medium / Low
 
+## Severity
+
+Assign by the test below, not by how alarming the finding feels. The severity
+is part of the finding; an unranked list of replay or state-confusion vectors is a list nobody triages.
+
+- **BLOCKER** — a sequence an attacker can execute that replays, forks, or reorders protocol state to an outcome the protocol forbids — with the fault or timing that enables it.
+- **COMMENT** — a window that is narrow but unbounded, a nonce ledger with an eviction policy nobody sized, a partial-failure path with no stated resume semantics.
+- **NOTE** — an accepted window with an argued bound — clock-skew tolerance chosen against a real deployment, recorded as a decision.
+
+The rule: **a state transition an attacker can cause twice, or out of order, is a defect; a window that is bounded only by convention is a comment; an argued, disclosed tolerance is a note.**
+
+Before reporting, inventory what you examined — the paths, surfaces, or states
+you probed — not only the ones that yielded findings. A reviewer who cannot see
+what you considered and cleared cannot tell a thorough pass from a lucky one.
+
 ## Bead creation
 
 ```
@@ -72,3 +87,17 @@ Tag `red-team:replay`.
 - Authoritative ADRs: ADR-0007 (Interlace substrate), ADR-0012 (TrustStore vs BeadStore), and the receipts spec at `interlace-spec/0.2.0-draft/RECEIPTS.md`.
 - Threat model §13.2 "silence is evidence" and §13.4 cross-DO audit pattern — your findings often falsify or refine these rows.
 - Prior art: Ed25519 RFC 8032 §8 (replay/forgery considerations), Interlace 0.1.0 § "nonce-bound canonical bytes."
+
+## Calibration
+
+This perspective has two failure modes and they pull in opposite directions.
+
+The first is zealotry: demanding a nonce for every idempotent read and treating every retry as a replay. That produces volume, buries the real
+finding, and trains the author to skim you. The second is credulity: accepting "it is signed" without asking what the signature covers, whether it binds to this epoch, and what happens if the process dies mid-sequence.
+A documented weakness is still a weakness.
+
+Hold the line at the severity rule above. Credit what is already strong — name
+the defenses that hold and why, because calibration is only visible when you
+show what you tried to break and couldn't. **"No findings worth acting on" is a
+valid and respectable verdict**, and a pass that reports it honestly is worth
+more than one that manufactures three COMMENTs to look productive.

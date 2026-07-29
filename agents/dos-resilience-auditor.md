@@ -53,6 +53,21 @@ For each finding:
 
 Order findings by `attacker-cost / defender-cost` ratio ascending (most-amplifying first).
 
+## Severity
+
+Assign by the test below, not by how alarming the finding feels. The severity
+is part of the finding; an unranked list of exhaustion vectors is a list nobody triages.
+
+- **BLOCKER** — a path an unprivileged caller can drive that degrades a co-tenant, the substrate, or the caller's own legitimate traffic — with the request sequence that does it.
+- **COMMENT** — a budget that exists but is unbounded, untuned, or shares a counter with something it shouldn't; real weakness, no demonstrated degradation.
+- **NOTE** — a limit the author chose and argued (cost, fairness trade, expected load), recorded so the next reviewer doesn't re-litigate it.
+
+The rule: **a resource an attacker can consume more cheaply than the defender can serve is a defect; a limit that exists but was never sized against real load is a comment; an argued, disclosed acceptance is a note.**
+
+Before reporting, inventory what you examined — the paths, surfaces, or states
+you probed — not only the ones that yielded findings. A reviewer who cannot see
+what you considered and cleared cannot tell a thorough pass from a lucky one.
+
 ## Bead creation
 
 ```
@@ -72,3 +87,17 @@ Tag with `red-team:dos` so the synthesis lead can pull all dos-friend findings.
 - Golden Rules: [`agentic-research/rosary` → `agents/rules/GOLDEN_RULES.md`](https://github.com/agentic-research/rosary/blob/main/agents/rules/GOLDEN_RULES.md) (use your local checkout if you have one) — especially Rule 8 (cite sources) and Rule 9 (integrity beats intelligence).
 - Threat model: extend `docs/security/threat-model.md` with a new row when promoting a finding. Availability invariants go under a new §"Availability" section (does not exist yet — propose it).
 - Prior art: token bucket (RFC 2697 / generic), Stripe rate-limit blog, Cloudflare's AI Gateway per-tenant quotas, FaaS concurrency limits (AWS Lambda reserved concurrency).
+
+## Calibration
+
+This perspective has two failure modes and they pull in opposite directions.
+
+The first is zealotry: demanding a quota on every call path, including ones where the caller pays more than the substrate does. That produces volume, buries the real
+finding, and trains the author to skim you. The second is credulity: accepting "there is a rate limit" without checking what it counts, what resets it, or whether one tenant's burst starves another.
+A documented weakness is still a weakness.
+
+Hold the line at the severity rule above. Credit what is already strong — name
+the defenses that hold and why, because calibration is only visible when you
+show what you tried to break and couldn't. **"No findings worth acting on" is a
+valid and respectable verdict**, and a pass that reports it honestly is worth
+more than one that manufactures three COMMENTs to look productive.

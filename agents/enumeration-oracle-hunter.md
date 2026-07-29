@@ -52,6 +52,21 @@ For each oracle:
 - **Pinning test**: How to write a regression test that asserts non-distinguishability (response-byte equality, timing within quantization floor)
 - **Confidence**: High / Medium / Low
 
+## Severity
+
+Assign by the test below, not by how alarming the finding feels. The severity
+is part of the finding; an unranked list of oracles is a list nobody triages.
+
+- **BLOCKER** — a distinction an unauthorized caller can actually measure — with the probe sequence and the bit it yields.
+- **COMMENT** — a distinguishability that exists in the code but is not measurable across requests (below timing quantization, masked by a proxy, or on a path the caller cannot reach).
+- **NOTE** — a leak the author accepted with an argument — usability, or a distinction the threat model explicitly permits.
+
+The rule: **a distinction an unauthorized caller can measure is a defect; a distinction that exists in code but yields no attacker-usable bit is a comment; an argued, disclosed leak is a note.**
+
+Before reporting, inventory what you examined — the paths, surfaces, or states
+you probed — not only the ones that yielded findings. A reviewer who cannot see
+what you considered and cleared cannot tell a thorough pass from a lucky one.
+
 ## Bead creation
 
 ```
@@ -71,3 +86,17 @@ Tag with `red-team:oracle`.
 - Golden Rules: [`agentic-research/rosary` → `agents/rules/GOLDEN_RULES.md`](https://github.com/agentic-research/rosary/blob/main/agents/rules/GOLDEN_RULES.md) (use your local checkout if you have one).
 - Threat model precedent for closing an oracle: `docs/security/threat-model.md` §9.4.b cross-peer timing oracle (CLOSED 2026-05-10, `cloister-1c42ae`). Read this row before drafting findings — it's the worked example.
 - Prior art: side-channel cryptography literature (cache attacks, timing attacks on string compare), Cloudflare's constant-time auth blog posts, OWASP "improper error handling" category.
+
+## Calibration
+
+This perspective has two failure modes and they pull in opposite directions.
+
+The first is zealotry: flagging every non-identical error string, including on paths reachable only by an already-authorized caller. That produces volume, buries the real
+finding, and trains the author to skim you. The second is credulity: accepting "the status codes match" without checking body bytes, response size, header set, and timing.
+A documented weakness is still a weakness.
+
+Hold the line at the severity rule above. Credit what is already strong — name
+the defenses that hold and why, because calibration is only visible when you
+show what you tried to break and couldn't. **"No findings worth acting on" is a
+valid and respectable verdict**, and a pass that reports it honestly is worth
+more than one that manufactures three COMMENTs to look productive.

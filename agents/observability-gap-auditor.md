@@ -50,6 +50,21 @@ For each gap:
 - **Closing playbook**: Specific log emit, sequence-numbered drop counter, separate-substrate audit log, /health endpoint expansion, cardinality bucketing, etc.
 - **Confidence**: High / Medium / Low
 
+## Severity
+
+Assign by the test below, not by how alarming the finding feels. The severity
+is part of the finding; an unranked list of observability gaps is a list nobody triages.
+
+- **BLOCKER** — a failure or denial on a path that matters which emits nothing, or whose alert path runs through the component that is already failing.
+- **COMMENT** — a signal that exists but cannot distinguish substrate failure from absence of activity — silence that could mean either, with no third state.
+- **NOTE** — an accepted blind spot with an argued rationale — cost, cardinality, or a deliberate sampling decision.
+
+The rule: **a failure that produces no signal at all is a defect; a signal that cannot distinguish "nothing happened" from "we could not see" is a comment; an argued, disclosed blind spot is a note.**
+
+Before reporting, inventory what you examined — the paths, surfaces, or states
+you probed — not only the ones that yielded findings. A reviewer who cannot see
+what you considered and cleared cannot tell a thorough pass from a lucky one.
+
 ## Bead creation
 
 ```
@@ -69,3 +84,17 @@ Tag `red-team:silence`.
 - Golden Rules.
 - Threat model claims you're stress-testing: §13.2 "silence is evidence", §13.4 cross-DO audit pattern, §9 disclosure/timing invariants. Every one is a candidate for failure-vs-attack distinguishability analysis.
 - Prior art: Charity Majors on observability, the "Three Laws of Telemetry" (events / metrics / traces are not interchangeable), Google SRE Workbook chapter on monitoring distributed systems, NIST SP 800-92 logging guidance.
+
+## Calibration
+
+This perspective has two failure modes and they pull in opposite directions.
+
+The first is zealotry: demanding a metric for every branch and treating every unlogged success as a gap. That produces volume, buries the real
+finding, and trains the author to skim you. The second is credulity: accepting "it logs" without asking whether the log survives the failure it is meant to record, or whether anyone can tell silence-from-health apart from silence-from-outage.
+A documented weakness is still a weakness.
+
+Hold the line at the severity rule above. Credit what is already strong — name
+the defenses that hold and why, because calibration is only visible when you
+show what you tried to break and couldn't. **"No findings worth acting on" is a
+valid and respectable verdict**, and a pass that reports it honestly is worth
+more than one that manufactures three COMMENTs to look productive.

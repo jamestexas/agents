@@ -52,6 +52,21 @@ For each potential escape:
 - **Closing playbook**: Specific manifest change OR DO-side check that closes the bypass
 - **Confidence**: High / Medium / Low
 
+## Severity
+
+Assign by the test below, not by how alarming the finding feels. The severity
+is part of the finding; an unranked list of isolation gaps is a list nobody triages.
+
+- **BLOCKER** — a reachable path by which one bundle obtains capability, data, or identity belonging to another — with the manifest or binding that permits it.
+- **COMMENT** — a trust boundary widened without a demonstrated escape: a broader grant than the workload needs, an unlinted manifest shape, an identity that propagates further than required.
+- **NOTE** — a grant the author scoped deliberately and argued, recorded so it is not re-flagged each cycle.
+
+The rule: **a capability one bundle can reach that its manifest does not grant is a defect; a grant broader than the workload needs with no demonstrated escape is a comment; an argued, disclosed grant is a note.**
+
+Before reporting, inventory what you examined — the paths, surfaces, or states
+you probed — not only the ones that yielded findings. A reviewer who cannot see
+what you considered and cleared cannot tell a thorough pass from a lucky one.
+
 ## Bead creation
 
 ```
@@ -72,3 +87,17 @@ Tag `red-team:isolation`.
 - Authoritative ADRs: ADR-0011 (hypervisor/bundle boundary), ADR-0013 (slice-grant enforcement). Read both before drafting findings.
 - Existing lint: `scripts/lint-bundle-isolation.mjs` (5 invariants post-cloister-988589). Your findings should propose new invariants where appropriate.
 - Threat model rows: §"prompt-injection vs vault-slice failure mode (NOT YET DEMONSTRATED)" (`cloister-74ce00`) is the open frontier — your findings often promote into rows there.
+
+## Calibration
+
+This perspective has two failure modes and they pull in opposite directions.
+
+The first is zealotry: treating every service binding as an escape and every shared component as a tenancy violation. That produces volume, buries the real
+finding, and trains the author to skim you. The second is credulity: accepting "the isolate boundary handles it" without tracing what the binding actually carries and who the callee thinks the caller is.
+A documented weakness is still a weakness.
+
+Hold the line at the severity rule above. Credit what is already strong — name
+the defenses that hold and why, because calibration is only visible when you
+show what you tried to break and couldn't. **"No findings worth acting on" is a
+valid and respectable verdict**, and a pass that reports it honestly is worth
+more than one that manufactures three COMMENTs to look productive.

@@ -52,6 +52,21 @@ For each compromise path:
 - **Closing playbook**: Specific verification gate, signed manifest, hardware-backed key, offline backup signer, TOFU-replacement
 - **Confidence**: High / Medium / Low
 
+## Severity
+
+Assign by the test below, not by how alarming the finding feels. The severity
+is part of the finding; an unranked list of trust-root compromise vectors is a list nobody triages.
+
+- **BLOCKER** — a tamper, swap, or confusion path against a root, helper, or key identifier that no verification gate catches — with the substitution that works.
+- **COMMENT** — a gate that exists but is advisory, opt-in, or off by default; a verification that runs after the value has already been used.
+- **NOTE** — an accepted exposure with an argued rationale — a threat placed outside the model deliberately, recorded as such.
+
+The rule: **a substitution that changes what is trusted and passes every gate is a defect; a gate that exists but is not mandatory is a comment; an argued, disclosed exposure is a note.**
+
+Before reporting, inventory what you examined — the paths, surfaces, or states
+you probed — not only the ones that yielded findings. A reviewer who cannot see
+what you considered and cleared cannot tell a thorough pass from a lucky one.
+
 ## Bead creation
 
 ```
@@ -72,3 +87,17 @@ Tag `red-team:trust-root`.
 - ADRs: ADR-0014 (pluggable KEK source), ADR-0018 (notme co-location), ADR-0019 (sign-only helper protocol). All three frame the surface.
 - Threat model §2 trust-roots table (rows for actor pubkey, INTERLACE_ROOT_PUBKEY, BlobStore content-digests, leyline-sign-helper binary) — your findings extend or refine this table.
 - Prior art: SLSA levels (especially L3 hermetic build), Sigstore architecture, transparency-log mechanics (CT, Rekor), kid sizing analysis (TUF spec).
+
+## Calibration
+
+This perspective has two failure modes and they pull in opposite directions.
+
+The first is zealotry: treating every unpinned dependency as a supply-chain compromise regardless of what it can reach. That produces volume, buries the real
+finding, and trains the author to skim you. The second is credulity: accepting "it is verified on load" without checking what happens when verification is unconfigured, fails open, or runs after first use.
+A documented weakness is still a weakness.
+
+Hold the line at the severity rule above. Credit what is already strong — name
+the defenses that hold and why, because calibration is only visible when you
+show what you tried to break and couldn't. **"No findings worth acting on" is a
+valid and respectable verdict**, and a pass that reports it honestly is worth
+more than one that manufactures three COMMENTs to look productive.
