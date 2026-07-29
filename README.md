@@ -47,6 +47,7 @@ scripts/install.sh --apply
 | [`surgical-reviewer`](agents/surgical-reviewer.md) | inherit | cyan | Use this agent when you need precise, no-nonsense code review that focuses exclusively on necessary improvements. |
 | [`theoretical-foundations-analyst`](agents/theoretical-foundations-analyst.md) | opus | purple | Use this agent when you need rigorous theoretical analysis of complex mathematical or computational systems, cross-disciplinary problem solving, or fundamental correctness review of novel approaches. |
 | [`trust-root-adversary`](agents/trust-root-adversary.md) | opus | red | Use this agent for adversarial analysis of supply-chain and trust-root compromise scenarios — helper binary tamper, keystore confusion, CA bundle poisoning, kid (key-id) confusion, signer rotation races. |
+| [`type-driven-correctness`](agents/type-driven-correctness.md) | opus | blue | Use this agent to audit whether a codebase's invariants are carried by the strongest mechanism available — a type that makes the violation unrepresentable > a transaction boundary > a machine-checked property > a named example test > prose. |
 <!-- END: AGENTS -->
 
 ## Skills

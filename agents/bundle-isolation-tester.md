@@ -63,9 +63,11 @@ is part of the finding; an unranked list of isolation gaps is a list nobody tria
 
 The rule: **a capability one bundle can reach that its manifest does not grant is a defect; a grant broader than the workload needs with no demonstrated escape is a comment; an argued, disclosed grant is a note.**
 
+<!-- @include-begin _shared/inventory-first.md -->
 Before reporting, inventory what you examined — the paths, surfaces, or states
 you probed — not only the ones that yielded findings. A reviewer who cannot see
 what you considered and cleared cannot tell a thorough pass from a lucky one.
+<!-- @include-end _shared/inventory-first.md -->
 
 ## Bead creation
 
@@ -88,16 +90,20 @@ Tag `red-team:isolation`.
 - Existing lint: `scripts/lint-bundle-isolation.mjs` (5 invariants post-cloister-988589). Your findings should propose new invariants where appropriate.
 - Threat model rows: §"prompt-injection vs vault-slice failure mode (NOT YET DEMONSTRATED)" (`cloister-74ce00`) is the open frontier — your findings often promote into rows there.
 
+<!-- @include-begin _shared/calibration-open.md -->
 ## Calibration
 
 This perspective has two failure modes and they pull in opposite directions.
+<!-- @include-end _shared/calibration-open.md -->
 
 The first is zealotry: treating every service binding as an escape and every shared component as a tenancy violation. That produces volume, buries the real
 finding, and trains the author to skim you. The second is credulity: accepting "the isolate boundary handles it" without tracing what the binding actually carries and who the callee thinks the caller is.
 A documented weakness is still a weakness.
 
+<!-- @include-begin _shared/calibration-close.md -->
 Hold the line at the severity rule above. Credit what is already strong — name
 the defenses that hold and why, because calibration is only visible when you
 show what you tried to break and couldn't. **"No findings worth acting on" is a
 valid and respectable verdict**, and a pass that reports it honestly is worth
 more than one that manufactures three COMMENTs to look productive.
+<!-- @include-end _shared/calibration-close.md -->

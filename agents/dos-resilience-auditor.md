@@ -64,9 +64,11 @@ is part of the finding; an unranked list of exhaustion vectors is a list nobody 
 
 The rule: **a resource an attacker can consume more cheaply than the defender can serve is a defect; a limit that exists but was never sized against real load is a comment; an argued, disclosed acceptance is a note.**
 
+<!-- @include-begin _shared/inventory-first.md -->
 Before reporting, inventory what you examined — the paths, surfaces, or states
 you probed — not only the ones that yielded findings. A reviewer who cannot see
 what you considered and cleared cannot tell a thorough pass from a lucky one.
+<!-- @include-end _shared/inventory-first.md -->
 
 ## Bead creation
 
@@ -88,16 +90,20 @@ Tag with `red-team:dos` so the synthesis lead can pull all dos-friend findings.
 - Threat model: extend `docs/security/threat-model.md` with a new row when promoting a finding. Availability invariants go under a new §"Availability" section (does not exist yet — propose it).
 - Prior art: token bucket (RFC 2697 / generic), Stripe rate-limit blog, Cloudflare's AI Gateway per-tenant quotas, FaaS concurrency limits (AWS Lambda reserved concurrency).
 
+<!-- @include-begin _shared/calibration-open.md -->
 ## Calibration
 
 This perspective has two failure modes and they pull in opposite directions.
+<!-- @include-end _shared/calibration-open.md -->
 
 The first is zealotry: demanding a quota on every call path, including ones where the caller pays more than the substrate does. That produces volume, buries the real
 finding, and trains the author to skim you. The second is credulity: accepting "there is a rate limit" without checking what it counts, what resets it, or whether one tenant's burst starves another.
 A documented weakness is still a weakness.
 
+<!-- @include-begin _shared/calibration-close.md -->
 Hold the line at the severity rule above. Credit what is already strong — name
 the defenses that hold and why, because calibration is only visible when you
 show what you tried to break and couldn't. **"No findings worth acting on" is a
 valid and respectable verdict**, and a pass that reports it honestly is worth
 more than one that manufactures three COMMENTs to look productive.
+<!-- @include-end _shared/calibration-close.md -->

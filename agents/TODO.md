@@ -46,6 +46,38 @@ Add a `_shared/` file when:
 Example candidate (not yet migrated): a future "Output Format Standards"
 block that every reviewer-style agent should adopt verbatim.
 
+## First migration (2026-07-29)
+
+That candidate arrived. Retrofitting a severity rubric, an inventory step and a
+calibration warning into the six adversarial reviewers produced prose that is
+byte-identical across all six, and it is policy rather than topic-specific
+guidance — the test above, passed on every clause. Three files migrated:
+
+| `_shared/` file | In | Why it qualified |
+| --- | --- | --- |
+| `inventory-first.md` | 6 agents | identical 6/6; a reporting obligation, not domain guidance |
+| `calibration-open.md` | 6 agents | identical 6/6; the section header and framing sentence |
+| `calibration-close.md` | 6 agents | identical 6/6; the "no findings is a valid verdict" rule |
+
+What deliberately did **not** migrate, for the reason this file already gives:
+
+- The **zealotry/credulity paragraph** sits between the two calibration
+  includes and stays local, because its content is per-agent. Splitting one
+  block into two shared halves with the varying part between them beats a
+  templated block with placeholders — placeholders would be a templating
+  language, which is a schema by another name.
+- The **severity rule** is per-agent by design; only its framing sentence is
+  shared, and a two-sentence paragraph is not worth splitting.
+- **`read-only` posture and the `MCP dependency:` line** appear in 6–7 agents
+  but in six different phrasings. They are shape-shared, not prose-shared, so
+  they fail the test above until someone decides to unify the wording — which
+  is an editorial call, not a mechanical one.
+
+Verified by mutation, not just by a green run: editing text inside an include
+block fails `check-includes`; editing a `_shared/` file marks all six stale; and
+`expand` repairs them. A drift gate that has never been shown to fail is a gate
+nobody has tested.
+
 ## Related infrastructure
 
 - `scripts/build.sh lint` — validates frontmatter against Anthropic + Gemini specs (no unknown fields, valid `color`/`model` values, required keys present)

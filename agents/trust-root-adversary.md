@@ -63,9 +63,11 @@ is part of the finding; an unranked list of trust-root compromise vectors is a l
 
 The rule: **a substitution that changes what is trusted and passes every gate is a defect; a gate that exists but is not mandatory is a comment; an argued, disclosed exposure is a note.**
 
+<!-- @include-begin _shared/inventory-first.md -->
 Before reporting, inventory what you examined — the paths, surfaces, or states
 you probed — not only the ones that yielded findings. A reviewer who cannot see
 what you considered and cleared cannot tell a thorough pass from a lucky one.
+<!-- @include-end _shared/inventory-first.md -->
 
 ## Bead creation
 
@@ -88,16 +90,20 @@ Tag `red-team:trust-root`.
 - Threat model §2 trust-roots table (rows for actor pubkey, INTERLACE_ROOT_PUBKEY, BlobStore content-digests, leyline-sign-helper binary) — your findings extend or refine this table.
 - Prior art: SLSA levels (especially L3 hermetic build), Sigstore architecture, transparency-log mechanics (CT, Rekor), kid sizing analysis (TUF spec).
 
+<!-- @include-begin _shared/calibration-open.md -->
 ## Calibration
 
 This perspective has two failure modes and they pull in opposite directions.
+<!-- @include-end _shared/calibration-open.md -->
 
 The first is zealotry: treating every unpinned dependency as a supply-chain compromise regardless of what it can reach. That produces volume, buries the real
 finding, and trains the author to skim you. The second is credulity: accepting "it is verified on load" without checking what happens when verification is unconfigured, fails open, or runs after first use.
 A documented weakness is still a weakness.
 
+<!-- @include-begin _shared/calibration-close.md -->
 Hold the line at the severity rule above. Credit what is already strong — name
 the defenses that hold and why, because calibration is only visible when you
 show what you tried to break and couldn't. **"No findings worth acting on" is a
 valid and respectable verdict**, and a pass that reports it honestly is worth
 more than one that manufactures three COMMENTs to look productive.
+<!-- @include-end _shared/calibration-close.md -->
