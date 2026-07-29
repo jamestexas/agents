@@ -308,15 +308,36 @@ expand_file() {
     # expand_file <path> <mode>   mode = "write" | "check"
     local file="$1" mode="$2"
     local repo_root="$REPO_ROOT"
-    local tmp drift=0
+    local tmp drift=0 awk_status=0
     tmp="$(mktemp)"
     awk -v root="$repo_root" -v mode="$mode" '
-        function read_file(p,    line, out) {
+        # Read a fragment, or die. getline returns -1 for a missing or
+        # unreadable path and 0 at EOF, and returning "" for the -1 case blanked
+        # every consumer of a deleted fragment while the gate stayed green:
+        # `expand` wrote the empty version, so each file then matched its own
+        # expansion and `check-includes` had nothing to compare against. Silent
+        # prose loss across six files, exit 0. Fail on the read instead.
+        #
+        # `first` tracks whether any line was consumed, so a fragment whose
+        # first line is blank keeps that line — the old accumulator treated
+        # out == "" as "nothing yet" and swallowed a leading newline
+        # permanently, with no drift loop to reveal it.
+        function read_file(p,    line, out, first, n) {
             out = ""
-            while ((getline line < p) > 0) {
-                out = (out == "" ? line : out "\n" line)
+            first = 1
+            while ((n = (getline line < p)) > 0) {
+                out = (first ? line : out "\n" line)
+                first = 0
             }
             close(p)
+            if (n < 0) {
+                printf("  ❌ %s: cannot read included fragment %s\n", FILENAME, p) > "/dev/stderr"
+                exit 3
+            }
+            if (first) {
+                printf("  ❌ %s: included fragment %s is empty\n", FILENAME, p) > "/dev/stderr"
+                exit 3
+            }
             return out
         }
         # Track fenced code blocks so directives inside examples are ignored.
@@ -345,7 +366,15 @@ expand_file() {
             next
         }
         !in_block { print }
-    ' "$file" > "$tmp"
+    ' "$file" > "$tmp" || awk_status=$?
+    # A failed read must not be mistaken for drift. Without this the missing
+    # fragment surfaces as "@include block out of date", which sends the reader
+    # to `expand` — the command that caused the blanking.
+    if [ "${awk_status:-0}" -ne 0 ]; then
+        rm -f "$tmp"
+        echo "  ❌ $file: include expansion aborted (see error above); file left unchanged"
+        return 1
+    fi
 
     if ! cmp -s "$file" "$tmp"; then
         drift=1
