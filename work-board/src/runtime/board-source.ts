@@ -57,11 +57,18 @@ export function createBoardSource(
   };
 
   const read = async (signal: AbortSignal, refreshed: boolean): Promise<BoardSourceResult> => {
+    let response: Response;
     try {
-      const response = await call("/board", "GET", signal);
-      if (!response.ok) {
-        throw new BoardSourceError(`board source returned ${response.status}`, "upstream", 502);
-      }
+      response = await call("/board", "GET", signal);
+    } catch (error) {
+      if (error instanceof BoardSourceError) throw error;
+      if (signal.aborted) throw new BoardSourceError("board source timed out", "timeout", 504);
+      throw new BoardSourceError(error instanceof Error ? error.message : String(error), "upstream", 502);
+    }
+    if (!response.ok) {
+      throw new BoardSourceError(`board source returned ${response.status}`, "upstream", 502);
+    }
+    try {
       return { board: normalizeBoard(await response.json()), source: kind, refreshed };
     } catch (error) {
       if (error instanceof BoardSourceError) throw error;

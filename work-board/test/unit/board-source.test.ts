@@ -92,4 +92,33 @@ describe("createBoardSource", () => {
       message: "board source timed out"
     });
   });
+
+  it("normalizes a board transport rejection during a direct read as upstream", async () => {
+    const source = createBoardSource({
+      CANONICAL_HOURS: fetcher(async () => {
+        throw new Error("board unavailable");
+      })
+    }, new Headers());
+
+    await expect(source.read(AbortSignal.timeout(1000))).rejects.toMatchObject({
+      kind: "upstream",
+      status: 502,
+      message: "board unavailable"
+    });
+  });
+
+  it("normalizes a board transport rejection after a successful tick as upstream", async () => {
+    const source = createBoardSource({
+      CANONICAL_HOURS: fetcher(async (request) => {
+        if (request.method === "POST") return Response.json({ result: "all_clear" });
+        throw new Error("board unavailable");
+      })
+    }, new Headers());
+
+    await expect(source.refresh(AbortSignal.timeout(1000))).rejects.toMatchObject({
+      kind: "upstream",
+      status: 502,
+      message: "board unavailable"
+    });
+  });
 });
