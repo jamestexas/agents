@@ -87,6 +87,41 @@ describe("normalizeBoard", () => {
     });
   });
 
+  it("normalizes HTTP artifact URLs before exposing them to the browser", () => {
+    const board = normalizeBoard({
+      generated_at: "2026-07-30T12:00:00Z",
+      tick_status: "ok",
+      items: [{
+        kind: "pr",
+        title: "normalized artifact",
+        url: "HTTPS://Example.COM:443/pulls/../pull/7?view=review#files",
+        state: "active"
+      }]
+    });
+
+    expect(board.items[0]?.url).toBe(
+      "https://example.com/pull/7?view=review#files"
+    );
+  });
+
+  it.each([
+    "javascript:alert(document.domain)",
+    "data:text/html,<script>alert(1)</script>",
+    "file:///etc/passwd",
+    "custom://artifact/7"
+  ])("rejects a non-HTTP artifact URL: %s", (url) => {
+    expect(() => normalizeBoard({
+      generated_at: "2026-07-30T12:00:00Z",
+      tick_status: "ok",
+      items: [{
+        kind: "pr",
+        title: "unsafe artifact",
+        url,
+        state: "active"
+      }]
+    })).toThrow();
+  });
+
   it("rejects invalid timestamps and unknown kinds", () => {
     expect(() => normalizeBoard({
       generated_at: "not-a-time",

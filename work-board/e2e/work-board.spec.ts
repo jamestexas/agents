@@ -158,6 +158,33 @@ test("refresh is single-flight and preserves the last board on failure", async (
   await expect(page.locator("g.node")).toHaveCount(retainedCount);
 });
 
+test("opens validated artifacts with Enter and Space", async ({ page }) => {
+  await page.addInitScript(() => {
+    const opened: string[] = [];
+    Object.defineProperty(window, "__openedArtifacts", {
+      configurable: false,
+      value: opened
+    });
+    window.open = ((url?: string | URL) => {
+      opened.push(String(url));
+      return null;
+    }) as typeof window.open;
+  });
+  await page.goto("/board/ui");
+  const artifact = page.locator('g.node[aria-label^="#101"]');
+
+  await artifact.focus();
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Space");
+
+  expect(await page.evaluate(() =>
+    (window as Window & { __openedArtifacts: string[] }).__openedArtifacts
+  )).toEqual([
+    "https://github.com/acme/demo/pull/101",
+    "https://github.com/acme/demo/pull/101"
+  ]);
+});
+
 test("copies the action list and reports clipboard success", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.goto("/board/ui");

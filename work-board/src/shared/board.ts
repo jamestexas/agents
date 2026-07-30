@@ -5,6 +5,20 @@ const State = z.enum(["opened", "active", "needs_you", "resolved"]);
 const Kind = z.enum(["pr", "issue", "event"]);
 const Role = z.enum(["author", "reviewer", "participant"]);
 const WaitingOn = z.enum(["me", "others"]);
+const HttpUrl = z.string().transform((value, context) => {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    context.addIssue({ code: "custom", message: "artifact URL is invalid" });
+    return z.NEVER;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    context.addIssue({ code: "custom", message: "artifact URL must use HTTP or HTTPS" });
+    return z.NEVER;
+  }
+  return parsed.href;
+});
 
 export type NextAction = "merge" | "ci" | "respond" | "review" | "promote" | "attend";
 
@@ -40,7 +54,7 @@ const RawItem = z.object({
   repo: z.string().optional(),
   number: z.number().int().positive().optional(),
   title: z.string().min(1),
-  url: z.string().url().optional().or(z.literal("")),
+  url: HttpUrl.optional().or(z.literal("")),
   state: State,
   role: Role.optional(),
   waiting_on: WaitingOn.optional(),

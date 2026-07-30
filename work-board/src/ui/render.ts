@@ -154,6 +154,9 @@ function addTooltip<T extends WorkBoardItem, P extends d3.BaseType>(
   nodes: d3.Selection<SVGGElement, T, P, unknown>
 ): void {
   const tooltip = d3.select<HTMLElement, unknown>("#tip");
+  const openArtifact = (item: WorkBoardItem) => {
+    if (item.url) window.open(item.url, "_blank", "noopener,noreferrer");
+  };
   const show = (event: MouseEvent | FocusEvent, item: WorkBoardItem) => {
     const [x, y] = event instanceof MouseEvent ? [event.clientX, event.clientY] : [24, 24];
     tooltip
@@ -163,12 +166,17 @@ function addTooltip<T extends WorkBoardItem, P extends d3.BaseType>(
       .text(tooltipText(item));
   };
   nodes
+    .attr("tabindex", (item) => item.url ? 0 : null)
+    .attr("role", (item) => item.url ? "link" : null)
     .attr("aria-label", tooltipText)
     .on("mouseenter focus", show)
     .on("mousemove", show)
     .on("mouseleave blur", () => tooltip.attr("hidden", ""))
-    .on("click", (_event, item) => {
-      if (item.url) window.open(item.url, "_blank", "noopener,noreferrer");
+    .on("click", (_event, item) => openArtifact(item))
+    .on("keydown", (event: KeyboardEvent, item) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      openArtifact(item);
     });
 }
 
@@ -184,7 +192,6 @@ function renderDial(
     .data(points, (item) => item.artifactUri)
     .join("g")
     .attr("class", "node")
-    .attr("tabindex", 0)
     .attr("color", (item) => stateColor[item.state])
     .attr("transform", (item) => `translate(${item.x},${item.y})`);
 
@@ -234,7 +241,6 @@ function renderStack(
     .data(layout.rows, (item) => item.artifactUri)
     .join("g")
     .attr("class", "node")
-    .attr("tabindex", 0)
     .attr("color", (item) => stateColor[item.state])
     .attr("transform", (item) => `translate(0,${item.y})`);
 
