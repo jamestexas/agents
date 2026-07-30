@@ -189,6 +189,24 @@ class SkillContractTests(unittest.TestCase):
     def skill_text(self):
         return (ROOT / "SKILL.md").read_text()
 
+    def test_resume_revalidates_before_restoring_or_working(self):
+        text = self.skill_text().lower()
+        for phrase in (
+            "latest parked receipt",
+            "revalidate live state",
+            "another active holder",
+            "missing checkpoint",
+            "record the resumed observation",
+            "begin work only after",
+        ):
+            self.assertIn(phrase, text)
+
+    def test_retry_and_partial_outcome_rules_are_explicit(self):
+        text = self.skill_text().lower()
+        self.assertIn("stable `intent_id`", text)
+        self.assertIn("independent episode", text)
+        self.assertIn("one unsafe episode", text)
+
     def test_skill_declares_all_three_modes_and_mcp_dependency(self):
         text = self.skill_text()
         required_opening = """---

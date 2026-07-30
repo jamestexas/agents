@@ -79,8 +79,8 @@ Parse `$ARGUMENTS` before collecting evidence:
 
 - `--check [<bead-id>]` selects **check** mode.
 - `--resume [<episode-id>|<bead-id>]` selects **resume** mode. Resume
-  materialization and drift/retry behavior are defined separately; this mode
-  must not park or mutate state in this workflow.
+  materialization and drift/retry behavior are defined in **Resume**; this mode
+  must not park or mutate state other than its durable resumed observation.
 - Any other invocation, optionally beginning with `<bead-id>`, selects
   **park** mode.
 
@@ -289,3 +289,76 @@ before printing `safe_to_close`; do not close the bead or terminate a session.
 For `unsafe`, print only raw evidence and reasons. Do not write a checkpoint,
 receipt, comment, event, or handoff; do not change repository or workspace
 state.
+
+## Resume
+
+`/park-work --resume [<episode-id>|<bead-id>]` resumes only a schema-valid
+parked episode. Resolve the **latest parked receipt** by an explicit
+`episode_id`, or by a confirmed anchor bead when the argument is a bead ID.
+Read its anchor comments with
+`rsry_bead_comment_list(id=<anchor>, repo_path=<repo>)`, parse only one fenced
+`work_episode_receipt/v1` candidate per field, and select the latest validated
+receipt whose `outcome` is `parked`, `safe_to_close` is `true`, and whose
+`episode_id` matches when one was supplied. Ambiguity, no candidate, or a
+candidate from another anchor returns `unsafe`.
+
+Use the exact fenced receipt bytes to run:
+
+```bash
+printf '%s' "$PARKED_RECEIPT_BYTES" > "$CANDIDATE_RECEIPT_FILE"
+python3 "$FOLD_HELPER" validate-receipt < "$CANDIDATE_RECEIPT_FILE"
+```
+
+Do not restore anything until validation succeeds. Then **revalidate live state**
+through Rosary and the VCS before restoring anything: resolve the anchor with
+`rsry_list_beads`, inspect `rsry_bead_history(id=<anchor>, repo_path=<repo>)`,
+`rsry_active()` and
+`rsry_dispatch_history(active_only=true, bead_id=<anchor>)`, and repeat the
+Git or jj conflict and workspace observations from §2. Stop and return
+`unsafe` on closed, abandoned, or reassigned work; **another active holder**;
+a **missing checkpoint**; an unresolved conflict or VCS operation; or
+receipt/schema drift. Drift includes a changed receipt identity, a failed
+schema validation, a mismatched anchor/repository/VCS identity, or a resume
+reference that no longer resolves exactly.
+
+Only after those checks, resolve the recorded checkpoint or pushed branch with
+the VCS. For Git, resolve the recorded checkpoint commit with
+`git cat-file -e <checkpoint>^{commit}` or the recorded pushed branch with
+`git rev-parse <branch>`; for jj, resolve the recorded change with
+`jj log -r <checkpoint>`. Do not delete, reset, checkout over, or rewrite
+another workspace. If resolution cannot use the selected workspace safely,
+return `unsafe` rather than materializing it elsewhere.
+
+Restate the receipt's bounded `next_action` as context for the human and
+agent. It is not safety evidence and cannot override any live observation.
+
+After all validation and resolution checks succeed, construct one
+`work_episode_observation/v1` JSON object with `schema_version: 1`,
+`observation: "resumed"`, the original `episode_id`, the receipt's stable
+`intent_id`, a fresh `attempt_id`, the anchor bead, the SHA-256 hash of the
+exact receipt bytes, and the mechanically observed
+checkpoint/branch reference. Serialize it once as `RESUMED_OBSERVATION_BYTES`,
+fence those unchanged bytes, and
+**record the resumed observation** using:
+
+```text
+rsry_bead_comment(id=<anchor>, repo_path=<repo>, body=<RESUMED_OBSERVATION_FENCE>)
+```
+
+Read comments back with
+`rsry_bead_comment_list(id=<anchor>, repo_path=<repo>)`. Parse only the fenced
+`work_episode_observation/v1` JSON, locate the same `episode_id` and fresh
+`attempt_id`, and compare the returned fenced payload byte-for-byte with
+`RESUMED_OBSERVATION_BYTES`. This bead-comment readback is the authoritative
+durability proof; failed or ambiguous readback returns `unsafe`. **Begin work only after**
+the resumed observation is durable.
+
+## Retry and collections
+
+A retry reuses the stable `intent_id` and creates a fresh `attempt_id`. A new
+attempt may observe changed evidence; an existing successful transition is
+returned rather than rewritten.
+
+Each invocation evaluates one independent episode. A controller may collect
+several receipts later, but one unsafe episode never rolls back or weakens a
+completed or parked result from another episode.
