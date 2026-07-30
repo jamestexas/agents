@@ -90,20 +90,3 @@ describe("live-source smoke", () => {
     expect(result.status).not.toBe(0);
   });
 });
-
-describe("Cloister smoke cleanup", () => {
-  it("reports cleanup failure without replacing the primary smoke failure", async () => {
-    const fakeBin = resolve("test/fixtures/fake-compose-bin");
-
-    const result = await runScript("scripts/cloister-smoke.mjs", {
-      CLOISTER_REPO: process.env.CLOISTER_REPO ?? resolve("../../../art/cloister"),
-      PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
-    });
-
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("PRIMARY_FAILURE_MARKER");
-    expect(result.stderr).toContain("CLEANUP_FAILURE_MARKER");
-    expect(result.stderr).toContain("AggregateError");
-    expect(result.stderr).toContain("compose cleanup failed with status 19");
-  });
-});

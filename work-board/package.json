@@ -11,7 +11,8 @@
     "test:unit": "vitest run --config vitest.config.ts",
     "test:worker": "vitest run --config vitest.worker.config.ts",
     "test:e2e": "pnpm build && playwright test",
-    "test:cloister": "node scripts/cloister-smoke.mjs",
+    "test:cloister:contracts": "vitest run --config vitest.cloister.config.ts",
+    "test:cloister": "pnpm test:cloister:contracts && node scripts/cloister-smoke.mjs",
     "test:live": "node scripts/live-source-smoke.mjs",
     "check": "pnpm typecheck && pnpm test:unit && pnpm test:worker && pnpm build"
   },

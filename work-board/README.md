@@ -47,12 +47,16 @@ browser.
 ```bash
 pnpm check
 pnpm test:e2e
+CLOISTER_REPO=../../../art/cloister pnpm test:cloister:contracts
 CLOISTER_REPO=../../../art/cloister pnpm test:cloister
 CANONICAL_HOURS_URL=http://127.0.0.1:8790 pnpm test:live
 ```
 
-The checks cover TypeScript, unit and Worker tests, the bundled browser UI, a
-real HTTP source adapter, and the two-bundle Cloister smoke topology.
+`pnpm check` is the standalone package gate and does not require a neighboring
+Cloister checkout. The explicit Cloister commands require `CLOISTER_REPO`;
+`test:cloister:contracts` validates manifest parsing, cleanup behavior, and the
+Docker context policy, while `test:cloister` runs those contracts before the
+two-bundle smoke topology.
 
 ## Security
 
