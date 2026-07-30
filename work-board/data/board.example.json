@@ -1,0 +1,28 @@
+{
+  "generated_at": "2026-01-01T09:00:00Z",
+  "tick_status": "example",
+  "window": { "since": "2025-12-29T09:00:00Z", "until": "2026-01-01T09:00:00Z" },
+  "items": [
+    { "kind": "pr", "number": 101, "title": "feat: add widget API", "url": "https://github.com/acme/demo/pull/101",
+      "state": "needs_you", "role": "author", "waiting_on": "me", "is_draft": false,
+      "last_activity": "2026-01-01T08:30:00Z", "merge_ready": true, "reason": "approved · clean · merge it", "bot": false },
+    { "kind": "pr", "number": 102, "title": "fix: handle nil config on startup", "url": "https://github.com/acme/demo/pull/102",
+      "state": "needs_you", "role": "author", "waiting_on": "me", "is_draft": false,
+      "last_activity": "2025-12-31T12:00:00Z", "merge_ready": false, "reason": "approved but 1 check(s) failing", "bot": false },
+    { "kind": "pr", "number": 103, "title": "wip: refactor the store layer", "url": "https://github.com/acme/demo/pull/103",
+      "state": "opened", "role": "author", "waiting_on": "me", "is_draft": true,
+      "last_activity": "2025-12-30T09:00:00Z", "merge_ready": false, "reason": "draft", "bot": false },
+    { "kind": "pr", "number": 204, "title": "feat: new dashboard view", "url": "https://github.com/acme/demo/pull/204",
+      "state": "needs_you", "role": "reviewer", "waiting_on": "me", "is_draft": false,
+      "last_activity": "2025-12-31T18:00:00Z", "merge_ready": false, "reason": "your review requested", "bot": false },
+    { "kind": "pr", "number": 205, "title": "chore(deps): bump lib from 1.0.0 to 1.1.0", "url": "https://github.com/acme/demo/pull/205",
+      "state": "needs_you", "role": "reviewer", "waiting_on": "me", "is_draft": false,
+      "last_activity": "2025-12-31T06:00:00Z", "merge_ready": false, "reason": "your review requested", "bot": true },
+    { "kind": "pr", "number": 206, "title": "docs: tidy up the readme", "url": "https://github.com/acme/demo/pull/206",
+      "state": "active", "role": "reviewer", "waiting_on": "others", "is_draft": false,
+      "last_activity": "2025-12-29T10:00:00Z", "merge_ready": false, "reason": "you reviewed · monitoring", "bot": false },
+    { "kind": "event", "title": "team standup", "url": "",
+      "state": "needs_you", "role": "author", "waiting_on": "me", "is_draft": false,
+      "start": "2026-01-01T09:30:00Z", "last_activity": "2026-01-01T09:30:00Z", "merge_ready": false, "reason": "in 30m", "bot": false }
+  ]
+}

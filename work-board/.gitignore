@@ -1,0 +1,11 @@
+# live board data — personal (your PRs + review load); regenerate with scripts/refresh.sh
+data/board.json
+
+# calendar / secrets (iCal URL is a bearer credential)
+.env
+.env.*
+
+# misc
+*.log
+.DS_Store
+.superpowers/
