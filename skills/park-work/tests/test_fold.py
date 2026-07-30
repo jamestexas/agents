@@ -32,6 +32,12 @@ def base_checks():
 
 
 class FoldTests(unittest.TestCase):
+    def test_non_object_document_raises_input_error(self):
+        with self.assertRaisesRegex(InputError, "document must be an object"):
+            evaluate([])
+        with self.assertRaisesRegex(InputError, "document must be an object"):
+            validate_receipt([])
+
     def test_completed_requires_unanimous_completion_evidence(self):
         document = {
             "schema_version": 1,
@@ -80,7 +86,7 @@ class FoldTests(unittest.TestCase):
         }
         result = evaluate(document)
         self.assertFalse(result["eligible"])
-        self.assertIn("completion evidence conflicts", result["reasons"])
+        self.assertIn("completion evidence conflicts or is unknown", result["reasons"])
 
     def test_missing_required_category_is_unsafe(self):
         checks = [c for c in base_checks() if c["category"] != "preservation"]
@@ -167,6 +173,16 @@ class ReceiptTests(unittest.TestCase):
             check=True,
         )
         self.assertEqual(json.loads(result.stdout)["candidate"], "completed")
+
+    def test_cli_rejects_non_object_json_with_input_error_exit_code(self):
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "fold.py"), "validate-receipt"],
+            input="[]",
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stderr, "document must be an object\n")
 
 
 if __name__ == "__main__":

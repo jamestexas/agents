@@ -12,6 +12,8 @@ class InputError(ValueError):
 
 
 def _checks(document):
+    if not isinstance(document, dict):
+        raise InputError("document must be an object")
     if document.get("schema_version") != 1:
         raise InputError("schema_version must be 1")
     checks = document.get("checks")
@@ -65,7 +67,7 @@ def evaluate(document):
         return {
             "candidate": None,
             "eligible": False,
-            "reasons": ["completion evidence conflicts"],
+            "reasons": ["completion evidence conflicts or is unknown"],
         }
 
     resume = _category(checks, "resume")

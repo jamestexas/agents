@@ -123,7 +123,7 @@ class FoldTests(unittest.TestCase):
         }
         result = evaluate(document)
         self.assertFalse(result["eligible"])
-        self.assertIn("completion evidence conflicts", result["reasons"])
+        self.assertIn("completion evidence conflicts or is unknown", result["reasons"])
 
     def test_missing_required_category_is_unsafe(self):
         checks = [c for c in base_checks() if c["category"] != "preservation"]
