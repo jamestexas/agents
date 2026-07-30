@@ -23,8 +23,15 @@ describe("work-board Worker", () => {
   });
 
   it("rejects unsupported methods and routes", async () => {
-    expect((await SELF.fetch("https://work-board.test/api/board", { method: "POST" })).status).toBe(405);
-    expect((await SELF.fetch("https://work-board.test/nope")).status).toBe(404);
+    const methodNotAllowed = await SELF.fetch("https://work-board.test/api/board", { method: "POST" });
+    expect(methodNotAllowed.status).toBe(405);
+    expect(methodNotAllowed.headers.get("cache-control")).toBe("no-store");
+    expect(await methodNotAllowed.json()).toEqual({ error: "method_not_allowed", message: "method not allowed" });
+
+    const notFound = await SELF.fetch("https://work-board.test/nope");
+    expect(notFound.status).toBe(404);
+    expect(notFound.headers.get("cache-control")).toBe("no-store");
+    expect(await notFound.json()).toEqual({ error: "not_found", message: "route not found" });
   });
 
   it("denies refresh by default outside explicit fixture/source-authorized modes", async () => {

@@ -39,10 +39,14 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     return json({ ok: true, source });
   }
   if (url.pathname === "/api/board") {
-    return request.method === "GET" ? boardResponse(request, env, false) : new Response(null, { status: 405 });
+    return request.method === "GET"
+      ? boardResponse(request, env, false)
+      : json({ error: "method_not_allowed", message: "method not allowed" }, 405);
   }
   if (url.pathname === "/api/refresh") {
-    if (request.method !== "POST") return new Response(null, { status: 405 });
+    if (request.method !== "POST") {
+      return json({ error: "method_not_allowed", message: "method not allowed" }, 405);
+    }
     const refreshAllowed = env.WORK_BOARD_FIXTURE === "true"
       || env.WORK_BOARD_REFRESH_MODE === "source-authorized";
     return refreshAllowed
@@ -54,7 +58,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     if (url.pathname === "/board/ui") assetUrl.pathname = "/";
     return env.ASSETS.fetch(new Request(assetUrl, request));
   }
-  return new Response(null, { status: 404 });
+  return json({ error: "not_found", message: "route not found" }, 404);
 }
 
 export default {
