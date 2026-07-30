@@ -382,7 +382,7 @@ Run:
 python3 skills/park-work/tests/test_fold.py
 ```
 
-Expected: 12 tests pass.
+Expected: 14 tests pass.
 
 - [ ] **Step 5: Run syntax and formatting checks**
 
@@ -620,7 +620,7 @@ Run:
 python3 skills/park-work/tests/test_fold.py
 ```
 
-Expected: 15 tests pass.
+Expected: 17 tests pass.
 
 - [ ] **Step 9: Regenerate and validate README registration**
 
@@ -735,7 +735,7 @@ scripts/build.sh check
 git diff --check
 ```
 
-Expected: 17 tests pass; repository check and diff check exit 0.
+Expected: 19 tests pass; repository check and diff check exit 0.
 
 - [ ] **Step 6: Commit resume behavior**
 
@@ -871,7 +871,7 @@ git status --short
 
 Expected:
 
-- 17 tests pass.
+- 19 tests pass.
 - Python compilation exits 0.
 - All agent/skill files pass lint and README is in sync.
 - `git diff --check` exits 0.
