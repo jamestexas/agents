@@ -185,5 +185,37 @@ class ReceiptTests(unittest.TestCase):
         self.assertEqual(result.stderr, "document must be an object\n")
 
 
+class SkillContractTests(unittest.TestCase):
+    def skill_text(self):
+        return (ROOT / "SKILL.md").read_text()
+
+    def test_skill_declares_all_three_modes_and_mcp_dependency(self):
+        text = self.skill_text()
+        for token in (
+            "--check",
+            "--resume",
+            "MCP dependency:",
+            "rsry_workspace_checkpoint",
+            "rsry_agent_session_message_record",
+        ):
+            self.assertIn(token, text)
+
+    def test_skill_requires_fold_helper_and_receipt_readback(self):
+        text = self.skill_text()
+        self.assertIn("scripts/fold.py evaluate", text)
+        self.assertIn("scripts/fold.py validate-receipt", text)
+        self.assertIn("read the receipt back", text.lower())
+        self.assertIn("safe_to_close", text)
+
+    def test_skill_forbids_destructive_terminal_actions(self):
+        text = self.skill_text()
+        for phrase in (
+            "never close a bead",
+            "never terminate a provider session",
+            "never delete a worktree",
+        ):
+            self.assertIn(phrase, text.lower())
+
+
 if __name__ == "__main__":
     unittest.main()
