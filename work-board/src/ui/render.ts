@@ -1,7 +1,7 @@
 import * as d3 from "d3";
 import type { WorkBoardItem, WorkBoardView } from "../shared/board";
 import { dialLayout, stackLayout, sweepLayout } from "./layouts";
-import { actionList, visibleItems, type BoardFilter } from "./state";
+import { actionList, filteredBoardState, type BoardFilter } from "./state";
 
 export type LayoutMode = "dial" | "sweep" | "stack";
 
@@ -269,7 +269,8 @@ function renderStack(
 }
 
 export function renderBoard(state: RenderState, now = Date.parse(state.board.generatedAt)): void {
-  const items = visibleItems(state.board.items, state.filter, state.showLowSignal);
+  const filtered = filteredBoardState(state.board.items, state.filter, state.showLowSignal);
+  const items = filtered.items;
   const svg = d3.select<SVGSVGElement, unknown>("#dial").attr("data-mode", state.mode);
   svg.selectAll("*").remove();
 
@@ -283,6 +284,7 @@ export function renderBoard(state: RenderState, now = Date.parse(state.board.gen
     `${items.length} items · ${need.length} need you · ${monitoring.length} monitoring · ${reviewing.length} reviewing`
     + ` · ${state.board.generatedAt.slice(0, 16).replace("T", " ")}`;
   document.querySelector("#listtext")!.textContent = actionList(items);
+  document.querySelector("#noisebtn")!.textContent = `⌁ low-signal · ${filtered.lowSignalCount}`;
   document.querySelector<HTMLElement>("#empty")!.hidden = items.length !== 0;
   document.querySelector<HTMLElement>("#note")!.textContent = modeNotes[state.mode];
   document.querySelector<HTMLElement>("#axes")!.innerHTML = modeAxes[state.mode];

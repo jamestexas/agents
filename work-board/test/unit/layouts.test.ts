@@ -42,4 +42,19 @@ describe("board layouts", () => {
     expect(result.nowMarkers).toBe(1);
     expect(new Set(result.rows.map((row) => row.y)).size).toBe(result.rows.length);
   });
+
+  it("places future events above now and past events below now", () => {
+    const result = stackLayout([
+      { ...base, kind: "event", artifactUri: "future", lastActivity: "2026-07-30T13:00:00Z" },
+      { ...base, kind: "event", artifactUri: "past", lastActivity: "2026-07-30T11:00:00Z" },
+      base
+    ], Date.parse("2026-07-30T12:00:00Z"));
+    const future = result.rows.find((row) => row.artifactUri === "future")!;
+    const past = result.rows.find((row) => row.artifactUri === "past")!;
+
+    expect(future.future).toBe(true);
+    expect(future.y).toBeLessThan(result.nowY);
+    expect(past.future).toBe(false);
+    expect(past.y).toBeGreaterThan(result.nowY);
+  });
 });

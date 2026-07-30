@@ -2,17 +2,30 @@ import type { WorkBoardItem } from "../shared/board";
 
 export type BoardFilter = "all" | "author" | "reviewer" | "needs";
 
+function matchesFilter(item: WorkBoardItem, filter: BoardFilter): boolean {
+  if (filter === "needs") return item.waitingOn === "me";
+  if (filter === "author" || filter === "reviewer") return item.role === filter;
+  return true;
+}
+
+export function filteredBoardState(
+  items: readonly WorkBoardItem[],
+  filter: BoardFilter,
+  showLowSignal: boolean
+): { items: WorkBoardItem[]; lowSignalCount: number } {
+  const matching = items.filter((item) => matchesFilter(item, filter));
+  return {
+    items: showLowSignal ? matching : matching.filter((item) => !item.lowSignal),
+    lowSignalCount: matching.filter((item) => item.lowSignal).length
+  };
+}
+
 export function visibleItems(
   items: readonly WorkBoardItem[],
   filter: BoardFilter,
   showLowSignal: boolean
 ): WorkBoardItem[] {
-  return items.filter((item) => {
-    if (!showLowSignal && item.lowSignal) return false;
-    if (filter === "needs") return item.waitingOn === "me";
-    if (filter === "author" || filter === "reviewer") return item.role === filter;
-    return true;
-  });
+  return filteredBoardState(items, filter, showLowSignal).items;
 }
 
 const rank = { attend: 0, merge: 1, respond: 2, ci: 3, review: 4, promote: 5 } as const;

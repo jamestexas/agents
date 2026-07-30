@@ -33,6 +33,8 @@ test("renders all layouts, filters, tooltip, and exact visual encoding", async (
   await expect(page.locator("#meta")).toContainText("need you");
   await expect(page.locator("g.node")).toHaveCount(6);
   await expect(page.getByRole("button", { name: "dial", exact: true })).toHaveAttribute("aria-pressed", "true");
+  const lowSignal = page.getByRole("button", { name: /low-signal/ });
+  await expect(lowSignal).toContainText("1");
 
   const exampleStatus = page.getByRole("status", { name: "Data status" });
   await expect(exampleStatus).toBeVisible();
@@ -76,11 +78,13 @@ test("renders all layouts, filters, tooltip, and exact visual encoding", async (
   await mine.click();
   await expect(mine).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("g.node")).toHaveCount(4);
+  await expect(lowSignal).toContainText("0");
 
   const needs = page.getByRole("button", { name: "needs me", exact: true });
   await needs.click();
   await expect(needs).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("g.node")).toHaveCount(5);
+  await expect(lowSignal).toContainText("1");
 
   const reviewing = page.getByRole("button", { name: "reviewing", exact: true });
   await reviewing.click();
@@ -88,8 +92,9 @@ test("renders all layouts, filters, tooltip, and exact visual encoding", async (
   await expect(page.getByRole("button", { name: "all", exact: true })).toHaveAttribute("aria-pressed", "false");
   await expect(page.locator("g.node")).toHaveCount(2);
 
-  await page.getByRole("button", { name: /low-signal/ }).click();
-  await expect(page.getByRole("button", { name: /low-signal/ })).toHaveAttribute("aria-pressed", "true");
+  await lowSignal.click();
+  await expect(lowSignal).toHaveAttribute("aria-pressed", "true");
+  await expect(lowSignal).toContainText("1");
   await expect(page.locator("g.node")).toHaveCount(3);
 
   await page.getByRole("button", { name: "stack", exact: true }).click();

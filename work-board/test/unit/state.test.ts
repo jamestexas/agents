@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actionList, visibleItems } from "../../src/ui/state";
+import { actionList, filteredBoardState, visibleItems } from "../../src/ui/state";
 import type { WorkBoardItem } from "../../src/shared/board";
 
 const item = (patch: Partial<WorkBoardItem>): WorkBoardItem => ({
@@ -33,6 +33,26 @@ describe("visibleItems", () => {
     const input = [item({ artifactUri: "noise", lowSignal: true })];
     expect(visibleItems(input, "all", false)).toEqual([]);
     expect(visibleItems(input, "all", true)).toHaveLength(1);
+  });
+
+  it("counts low-signal items within the active filter whether hidden or shown", () => {
+    const input = [
+      item({ artifactUri: "author-noise", role: "author", lowSignal: true }),
+      item({ artifactUri: "review-noise", role: "reviewer", lowSignal: true }),
+      item({ artifactUri: "review-visible", role: "reviewer" })
+    ];
+
+    expect(filteredBoardState(input, "reviewer", false)).toMatchObject({
+      lowSignalCount: 1,
+      items: [{ artifactUri: "review-visible" }]
+    });
+    expect(filteredBoardState(input, "reviewer", true)).toMatchObject({
+      lowSignalCount: 1,
+      items: [
+        { artifactUri: "review-noise" },
+        { artifactUri: "review-visible" }
+      ]
+    });
   });
 });
 

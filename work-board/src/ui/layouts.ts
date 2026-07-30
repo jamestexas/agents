@@ -50,18 +50,22 @@ export function sweepLayout(items: readonly WorkBoardItem[], now: number): Point
 }
 
 export function stackLayout(items: readonly WorkBoardItem[], now: number) {
-  const events = items.filter((item) => item.kind === "event")
+  const futureEvents = items.filter((item) =>
+    item.kind === "event" && Date.parse(item.lastActivity) > now
+  )
     .toSorted((a, b) => Date.parse(a.lastActivity) - Date.parse(b.lastActivity));
-  const work = items.filter((item) => item.kind !== "event")
+  const presentAndPast = items.filter((item) =>
+    item.kind !== "event" || Date.parse(item.lastActivity) <= now
+  )
     .toSorted((a, b) => Date.parse(b.lastActivity) - Date.parse(a.lastActivity));
-  const ordered = [...events, ...work];
+  const ordered = [...futureEvents, ...presentAndPast];
   const rowHeight = Math.max(24, Math.min(46, (700 - 64) / Math.max(ordered.length + 1, 1)));
   return {
     nowMarkers: 1,
-    nowY: 64 + events.length * rowHeight + rowHeight * 0.5,
+    nowY: 64 + futureEvents.length * rowHeight + rowHeight * 0.5,
     rows: ordered.map((item, index) => ({
       ...item,
-      y: 64 + (index + (index >= events.length ? 1 : 0)) * rowHeight,
+      y: 64 + (index + (index >= futureEvents.length ? 1 : 0)) * rowHeight,
       future: Date.parse(item.lastActivity) > now
     }))
   };
