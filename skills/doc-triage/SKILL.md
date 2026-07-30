@@ -170,7 +170,7 @@ Results:
   - 8 items → stale (referenced files deleted)
   - 20 items → context (historical, not actionable)
 
-Created 14 beads: crumb-xxx, crumb-yyy, ...
+Created 14 beads: assay-xxx, assay-yyy, ...
 Archived 3 files to .archive/doc-triage-2026-03-13/
 Kept INVESTIGATION_LOG.md (annotated)
 ```

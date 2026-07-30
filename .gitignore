@@ -1,9 +1,6 @@
 # Local Claude Code settings
 .claude/
 
-# Crumb knowledge capture
-.crumb/
-
 # OS files
 .DS_Store
 Thumbs.db
