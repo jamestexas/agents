@@ -35,6 +35,7 @@ const cluster = await parseTomlToCluster(
 );
 writeFileSync(composeFile, emitCompose(cluster));
 
+const failures = [];
 try {
   run(engine, ["build", "-t", "work-board:smoke", "-f", "Dockerfile", "."]);
   run(engine, [
@@ -82,20 +83,43 @@ try {
     throw new Error("board UI asset was not served");
   }
   console.log("cloister smoke ok: http bindings, normalized read, refresh, UI");
-} finally {
-  spawnSync(
-    engine,
-    [
-      ...composePrefix,
-      "-p",
-      project,
-      "-f",
-      composeFile,
-      "down",
-      "--volumes",
-      "--remove-orphans",
-    ],
-    { cwd: root, stdio: "inherit" }
-  );
+} catch (error) {
+  failures.push(error);
+}
+
+const cleanupResult = spawnSync(
+  engine,
+  [
+    ...composePrefix,
+    "-p",
+    project,
+    "-f",
+    composeFile,
+    "down",
+    "--volumes",
+    "--remove-orphans",
+  ],
+  { cwd: root, stdio: "inherit" }
+);
+if (cleanupResult.error) {
+  failures.push(new Error("compose cleanup failed to start", { cause: cleanupResult.error }));
+} else if (cleanupResult.status !== 0) {
+  const result = cleanupResult.status === null
+    ? `signal ${cleanupResult.signal ?? "unknown"}`
+    : `status ${cleanupResult.status}`;
+  failures.push(new Error(`compose cleanup failed with ${result}`));
+}
+
+try {
   rmSync(temp, { recursive: true, force: true });
+} catch (error) {
+  failures.push(new Error("temporary smoke artifacts could not be removed", { cause: error }));
+}
+
+if (failures.length === 1) throw failures[0];
+if (failures.length > 1) {
+  throw new AggregateError(
+    failures,
+    "cloister smoke failed and cleanup did not complete cleanly",
+  );
 }
