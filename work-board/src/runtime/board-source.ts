@@ -73,9 +73,15 @@ export function createBoardSource(
   return {
     read: (signal) => read(signal, false),
     refresh: async (signal) => {
-      const response = await call("/tick", "POST", signal);
-      if (!response.ok) throw new BoardSourceError(`tick source returned ${response.status}`, "upstream", 502);
-      return read(signal, true);
+      try {
+        const response = await call("/tick", "POST", signal);
+        if (!response.ok) throw new BoardSourceError(`tick source returned ${response.status}`, "upstream", 502);
+        return read(signal, true);
+      } catch (error) {
+        if (error instanceof BoardSourceError) throw error;
+        if (signal.aborted) throw new BoardSourceError("board source timed out", "timeout", 504);
+        throw new BoardSourceError(error instanceof Error ? error.message : String(error), "upstream", 502);
+      }
     }
   };
 }

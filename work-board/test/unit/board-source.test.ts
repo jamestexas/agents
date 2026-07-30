@@ -62,4 +62,34 @@ describe("createBoardSource", () => {
       tickStatus: "example"
     });
   });
+
+  it("normalizes a tick transport rejection as an upstream source error", async () => {
+    const source = createBoardSource({
+      CANONICAL_HOURS: fetcher(async () => {
+        throw new Error("canonical unavailable");
+      })
+    }, new Headers());
+
+    await expect(source.refresh(AbortSignal.timeout(1000))).rejects.toMatchObject({
+      kind: "upstream",
+      status: 502,
+      message: "canonical unavailable"
+    });
+  });
+
+  it("normalizes an aborted tick transport rejection as a timeout source error", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const source = createBoardSource({
+      CANONICAL_HOURS: fetcher(async () => {
+        throw new Error("canonical unavailable");
+      })
+    }, new Headers());
+
+    await expect(source.refresh(controller.signal)).rejects.toMatchObject({
+      kind: "timeout",
+      status: 504,
+      message: "board source timed out"
+    });
+  });
 });
