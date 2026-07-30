@@ -235,14 +235,22 @@ Claude session is evidence attached to that episode, not its identity.
     def test_skill_requires_fold_helper_and_receipt_readback(self):
         text = self.skill_text()
         for token in (
-            'SKILL_FILE="${SKILL_FILE:?set to the absolute path of this SKILL.md}"',
-            'SKILL_DIR="$(CDPATH= cd -- "$(dirname -- "$SKILL_FILE")" && pwd -P)"',
+            "LOADED_SKILL_FILE='<absolute SKILL.md path reported by the loader>'",
+            "return_unsafe() {",
+            'case "$LOADED_SKILL_FILE" in /*/park-work/SKILL.md)',
+            '[ -f "$LOADED_SKILL_FILE" ]',
+            'SKILL_DIR="$(CDPATH= cd -- "$(dirname -- "$LOADED_SKILL_FILE")" && pwd -P)"',
+            'FOLD_HELPER="$SKILL_DIR/scripts/fold.py"',
+            '[ -f "$FOLD_HELPER" ]',
             'CHECKS_FILE="$(mktemp)"',
-            'RECEIPT_FILE="$(mktemp)"',
+            'CANDIDATE_RECEIPT_FILE="$(mktemp)"',
             'printf \'%s\' "$CHECKS_JSON" > "$CHECKS_FILE"',
+            'printf \'%s\' "$CANDIDATE_RECEIPT_BYTES" > "$CANDIDATE_RECEIPT_FILE"',
+            'python3 "$FOLD_HELPER" validate-receipt < "$CANDIDATE_RECEIPT_FILE"',
+            'CANDIDATE_STATUS=$?',
             'printf \'%s\' "$RECEIPT_JSON" > "$RECEIPT_FILE"',
-            'python3 "$SKILL_DIR/scripts/fold.py" evaluate < "$CHECKS_FILE"',
-            'python3 "$SKILL_DIR/scripts/fold.py" validate-receipt < "$RECEIPT_FILE"',
+            'python3 "$FOLD_HELPER" evaluate < "$CHECKS_FILE"',
+            'python3 "$FOLD_HELPER" validate-receipt < "$RECEIPT_FILE"',
             'FOLD_STATUS=$?',
             'RECEIPT_STATUS=$?',
             'RECEIPT_BYTES="$(cat "$RECEIPT_FILE")"',
@@ -252,6 +260,14 @@ Claude session is evidence attached to that episode, not its identity.
             "same `RECEIPT_BYTES`",
         ):
             self.assertIn(token, text)
+        self.assertNotIn(
+            'SKILL_FILE="${SKILL_FILE:?set to the absolute path of this SKILL.md}"',
+            text,
+        )
+        self.assertLess(
+            text.index("LOADED_SKILL_FILE="),
+            text.index("Before evaluating or writing, search"),
+        )
 
     def test_skill_forbids_destructive_terminal_actions(self):
         text = self.skill_text()
@@ -283,6 +299,14 @@ Claude session is evidence attached to that episode, not its identity.
             "stop before checkpoint or receipt writes",
             "perform no transition",
             "leave all repositories and workspaces unchanged",
+            "pre-materialization capability",
+            "checkpointable",
+            "only an eligible `parked` candidate on the `checkpointable` branch",
+            "replace both preservation evidence items",
+            "rerun the fold",
+            "git cat-file -e <sha>^{commit}",
+            "jj log -r <id>",
+            "stable branch/checkpoint resume reference",
         ):
             self.assertIn(token, text)
 
@@ -298,6 +322,14 @@ Claude session is evidence attached to that episode, not its identity.
         self.assertLess(
             materialization.index("rsry_bead_comment_list(id=<anchor>"),
             materialization.index("Print the receipt and `safe_to_close=true`"),
+        )
+        self.assertLess(
+            materialization.index("only an eligible `parked` candidate on the `checkpointable` branch"),
+            materialization.index("rsry_workspace_checkpoint"),
+        )
+        self.assertLess(
+            materialization.index("replace both preservation evidence items"),
+            materialization.index("Construct the schema-v1 receipt"),
         )
 
 
