@@ -64,6 +64,7 @@ rsry_active()
 rsry_dispatch_history(active_only=true, bead_id=<anchor>)
 rsry_dispatch_history(bead_id=<anchor>)
 rsry_bead_history(id=<anchor>, repo_path=<repo>)
+rsry_repo_list()
 rsry_list_beads(repo=<repo-name>)
 rsry_bead_comment_list(id=<anchor>, repo_path=<repo>)
 rsry_agent_run_events(repo=<repo>, bead_id=<anchor>)
@@ -303,8 +304,16 @@ list its comments directly with
 `rsry_bead_comment_list(id=<bead-id>, repo_path=<repo>)`. For an explicit
 `--resume <episode-id>`, first mechanically resolve the current Rosary
 repository from the current Git/jj root: use `git rev-parse --show-toplevel`
-or `jj root`, match that canonical root to one configured Rosary repository,
-and return `unsafe` if the mapping is absent or ambiguous. Paginate
+or `jj root`, then obtain that root's authoritative origin with
+`git remote get-url origin` or the jj backing-Git equivalent `jj git remote list`.
+Call `rsry_repo_list()` before `rsry_list_beads`; require its successful payload
+to contain `repos[]` objects with `repos[].repo_name` and `repos[].repo_url`.
+Normalize SSH/HTTPS syntax and optional `.git` on both the authoritative remote
+URL and each `repos[].repo_url`, then require exactly one URL match and use that entry's
+`repo_name` as `<repo>`. Missing identity/auth, missing origin, malformed
+fields, zero/multiple URL matches, or a URL/path contradiction is `unsafe`
+before scanning. If identity/auth is unavailable, return `unsafe` before
+scanning. Never infer a repo name from a basename. Paginate
 `rsry_list_beads(repo=<repo>)` through all results and all statuses, then call
 `rsry_bead_comment_list(id=<candidate>, repo_path=<repo>)` on each candidate.
 Parse only fenced `work_episode_receipt/v1` fields and accept only
@@ -316,7 +325,7 @@ exactly one anchor: zero or multiple anchors is `unsafe`. On that anchor,
 select the latest parked receipt by Rosary metadata ordered by
 `(created_at, comment_id) descending`. Missing or malformed metadata, or an
 unresolved top tie, is `unsafe`. Never order by UUID/attempt text. Retain the
-selected `comment_id`, `PARKED_RECEIPT_BYTES`, parsed `episode_id`, stable
+selected `comment_id = returned comment.id`, `PARKED_RECEIPT_BYTES`, parsed `episode_id`, stable
 `intent_id`, and the exact recorded checkpoint or branch resume target.
 
 ### 2. RESUME_RECEIPT_VALIDATION
@@ -357,30 +366,37 @@ ordering, return `unsafe`: do not restore, write, or work.
 ### 5. RESUME_WORKSPACE_SELECTION
 
 Resolve the retained target without changing an existing workspace. For Git,
-first verify a checkpoint with `git cat-file -e <checkpoint-sha>^{commit}` or a
-pushed branch with `git rev-parse <branch>`; retain the resulting commit SHA as
-the normalized receipt target, then enumerate
-`git worktree list --porcelain`. For jj, first resolve `jj log -r <change-id>`
-and retain that exact change ID as the normalized receipt target, then enumerate
-`jj workspace list`. Choose only a unique existing quiescent workspace whose
-current HEAD/change equals the normalized receipt target.
+bind every checkpoint or branch target to immutable `receipt.repository.head`.
+For a Git checkpoint, require `git cat-file -e <checkpoint-sha>^{commit}` and
+`git rev-parse <checkpoint-sha>` to equal `receipt.repository.head`. For a
+branch receipt, require `git rev-parse <branch>` to equal
+`receipt.repository.head`; a moved branch is drift/unsafe, never silently
+accepted. Retain only the immutable recorded head as the normalized receipt
+target, then enumerate `git worktree list --porcelain`. For jj, require the
+recorded change ID and `jj log -r <change-id>` to equal the receipt's immutable
+`repository.head`, retain that exact change ID as the normalized receipt target,
+then enumerate `jj workspace list`. Choose only a unique existing quiescent
+workspace whose current HEAD/change equals the immutable recorded head.
 
 If no qualifying workspace exists, create one only at a brand-new absent path:
 use the deterministic safe parent `${TMPDIR:-/tmp}/park-work-resume` and a fresh
 suffix, verify `[ ! -e <new> ]`, then use
-`git worktree add --detach <new> <checkpoint-sha>` (or an equivalent new branch
-worktree) for Git, or `jj workspace add --revision <change-id> <new>` for jj.
-Never reuse a nonempty path. Backend creation failure, a non-unique candidate,
-or an unresolvable target is `unsafe`.
+`git worktree add --detach <new> <receipt.repository.head>` for Git, or
+`jj workspace add --revision <change-id> <new>` for jj. Never create a Git
+worktree at a mutable branch tip. Never reuse a nonempty path. Backend creation
+failure, a non-unique candidate, or an unresolvable target is `unsafe`.
 
 ### 6. RESUME_WORKSPACE_VERIFICATION
 
 Enter only the selected or newly created workspace and rerun its conflict and
-quiescence checks there. Require the current `git rev-parse HEAD` to equal the
-normalized receipt target for Git, or the current jj change ID to equal the
-normalized receipt target for jj. If this backend cannot create or verify that
-workspace, return
-`unsafe`. Never delete, reset, checkout-over, or rewrite an existing workspace.
+quiescence checks there. For Git, require `git rev-parse HEAD` to equal
+`receipt.repository.head`, `git status --porcelain=v2` to contain no non-header
+records, `git diff --quiet`, and `git diff --cached --quiet`; staged, unstaged,
+or untracked content is drift/unsafe. Apply the jj equivalent exact rule:
+require the current jj change ID to equal the immutable recorded change and
+`jj status` to show no working-copy changes. If this backend cannot create or
+verify that workspace, return `unsafe`. Never delete, reset, checkout-over, or
+rewrite an existing workspace.
 
 ### 7. RESUME_OBSERVATION_DEDUPE
 

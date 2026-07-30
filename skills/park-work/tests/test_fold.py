@@ -207,6 +207,14 @@ class SkillContractTests(unittest.TestCase):
             "rsry_bead_comment_list(id=<bead-id>, repo_path=<repo>)",
             "--resume <episode-id>",
             "current Git/jj root",
+            "rsry_repo_list()",
+            "repos[].repo_name",
+            "repos[].repo_url",
+            "git remote get-url origin",
+            "jj git remote list",
+            "Normalize SSH/HTTPS syntax and optional `.git`",
+            "zero/multiple URL matches",
+            "identity/auth is unavailable",
             "rsry_list_beads(repo=<repo>)",
             "all statuses",
             "on each candidate",
@@ -214,14 +222,20 @@ class SkillContractTests(unittest.TestCase):
             "(created_at, comment_id) descending",
             "unresolved top tie",
             "Never order by UUID/attempt text",
+            "comment_id = returned comment.id",
             "PARKED_RECEIPT_BYTES",
             "selected `comment_id`",
             "git worktree list --porcelain",
             "jj workspace list",
-            "git worktree add --detach <new> <checkpoint-sha>",
+            "git worktree add --detach <new> <receipt.repository.head>",
             "jj workspace add --revision <change-id> <new>",
             "Never reuse a nonempty path",
             "git rev-parse HEAD",
+            "receipt.repository.head",
+            "moved branch is drift/unsafe",
+            "git status --porcelain=v2",
+            "git diff --quiet",
+            "git diff --cached --quiet",
             "RESUME_RECEIPT_VALIDATION",
             "RESUME_LIVE_REVALIDATION",
             "RESUME_RECEIPT_RACE_RECHECK",
@@ -246,6 +260,10 @@ class SkillContractTests(unittest.TestCase):
             resume.index("RESUME_BEGIN_WORK"),
         ]
         self.assertEqual(positions, sorted(positions))
+        self.assertLess(
+            resume.index("rsry_repo_list()"),
+            resume.index("rsry_list_beads(repo=<repo>)"),
+        )
 
         validation = self.resume_step(
             resume, "RESUME_RECEIPT_VALIDATION", "RESUME_LIVE_REVALIDATION"
@@ -278,7 +296,15 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("selected `comment_id`", race)
         self.assertIn("git worktree list --porcelain", selection)
         self.assertIn("[ ! -e <new> ]", selection)
+        self.assertIn("receipt.repository.head", selection)
+        self.assertIn("moved branch is drift/unsafe", selection)
+        self.assertIn(
+            "git worktree add --detach <new> <receipt.repository.head>", selection
+        )
         self.assertIn("git rev-parse HEAD", verification)
+        self.assertIn("git status --porcelain=v2", verification)
+        self.assertIn("git diff --quiet", verification)
+        self.assertIn("git diff --cached --quiet", verification)
         self.assertIn("work_episode_observation/v1", dedupe)
         self.assertIn("rsry_bead_comment", append)
         self.assertIn("same comment/bytes", readback)
