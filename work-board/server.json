@@ -1,0 +1,28 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.jamestexas.agents-work-board-staging",
+  "title": "work-board staging",
+  "description": "Workerd-native visual projection of a Canonical Hours board; staged in agents before transfer.",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/jamestexas/agents",
+    "source": "github"
+  },
+  "packages": [{
+    "registryType": "oci",
+    "identifier": "work-board",
+    "version": "0.1.0"
+  }],
+  "_meta": {
+    "art.cloister/v1": {
+      "bundles": [{
+        "name": "work-board",
+        "tier": "cluster",
+        "kind": "external",
+        "package": "work-board",
+        "httpPort": 8791,
+        "rationale": "Read-only operational UI; no credential or trust mediation."
+      }]
+    }
+  }
+}
