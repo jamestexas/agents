@@ -51,7 +51,11 @@ function boardHandler(source: "fixture" | "http", tickStatus: "example" | "ok"):
       return;
     }
     if (request.method === "GET" && request.url === "/api/board") {
-      response.end(JSON.stringify({ items: [], tickStatus: "ok" }));
+      response.end(JSON.stringify({
+        items: [],
+        tickStatus: "ok",
+        generatedAt: "2026-07-30T12:00:00Z",
+      }));
       return;
     }
     if (request.method === "POST" && request.url === "/api/refresh") {
@@ -59,6 +63,69 @@ function boardHandler(source: "fixture" | "http", tickStatus: "example" | "ok"):
         items: [],
         tickStatus,
         generatedAt: "2026-07-30T12:01:00Z",
+      }));
+      return;
+    }
+    response.writeHead(404).end();
+  };
+}
+
+interface SourceState {
+  sourceGeneratedAt: string;
+  boardGeneratedAt: string;
+  title: string;
+  sourceReads: number;
+}
+
+function sourceHandler(state: SourceState): RequestListener {
+  return (request, response) => {
+    if (request.method !== "GET" || request.url !== "/private-source/board") {
+      response.writeHead(404).end();
+      return;
+    }
+    state.sourceReads += 1;
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({
+      generated_at: state.sourceGeneratedAt,
+      tick_status: "ok",
+      degradations: [],
+      items: [{
+        kind: "pr",
+        title: state.title,
+        state: "active"
+      }]
+    }));
+  };
+}
+
+function correlatedBoardHandler(
+  state: SourceState,
+  mutateSource: boolean
+): RequestListener {
+  return (request, response) => {
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && request.url === "/health") {
+      response.end(JSON.stringify({ ok: true, source: "http" }));
+      return;
+    }
+    if (request.method === "GET" && request.url === "/api/board") {
+      response.end(JSON.stringify({
+        items: [{ title: state.title }],
+        tickStatus: "ok",
+        generatedAt: state.boardGeneratedAt
+      }));
+      return;
+    }
+    if (request.method === "POST" && request.url === "/api/refresh") {
+      state.boardGeneratedAt = "2026-07-30T12:01:00Z";
+      if (mutateSource) {
+        state.sourceGeneratedAt = state.boardGeneratedAt;
+        state.title = "after refresh";
+      }
+      response.end(JSON.stringify({
+        items: [{ title: state.title }],
+        tickStatus: "ok",
+        generatedAt: state.boardGeneratedAt
       }));
       return;
     }
@@ -81,12 +148,62 @@ describe("live-source smoke", () => {
   });
 
   it("rejects an example board even when health claims an HTTP source", async () => {
+    const state: SourceState = {
+      sourceGeneratedAt: "2026-07-30T12:00:00Z",
+      boardGeneratedAt: "2026-07-30T12:00:00Z",
+      title: "before refresh",
+      sourceReads: 0
+    };
+    const sourceUrl = await listen(sourceHandler(state));
     const boardUrl = await listen(boardHandler("http", "example"));
     const result = await runScript("scripts/live-source-smoke.mjs", {
-      CANONICAL_HOURS_URL: "https://configured-source-must-not-be-logged.invalid",
+      CANONICAL_HOURS_URL: `${sourceUrl}/private-source`,
       WORK_BOARD_URL: boardUrl,
     });
 
     expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("example fixture mode");
+    expect(result.stderr).not.toContain("private-source");
+  });
+
+  it("rejects a work-board refresh that is not reflected by the declared source", async () => {
+    const state: SourceState = {
+      sourceGeneratedAt: "2026-07-30T12:00:00Z",
+      boardGeneratedAt: "2026-07-30T12:00:00Z",
+      title: "before refresh",
+      sourceReads: 0
+    };
+    const sourceUrl = await listen(sourceHandler(state));
+    const boardUrl = await listen(correlatedBoardHandler(state, false));
+
+    const result = await runScript("scripts/live-source-smoke.mjs", {
+      CANONICAL_HOURS_URL: `${sourceUrl}/private-source`,
+      WORK_BOARD_URL: boardUrl,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(state.sourceReads).toBe(2);
+    expect(`${result.stdout}${result.stderr}`).not.toContain("private-source");
+  });
+
+  it("accepts a refresh correlated with a changed declared-source snapshot", async () => {
+    const state: SourceState = {
+      sourceGeneratedAt: "2026-07-30T12:00:00Z",
+      boardGeneratedAt: "2026-07-30T12:00:00Z",
+      title: "before refresh",
+      sourceReads: 0
+    };
+    const sourceUrl = await listen(sourceHandler(state));
+    const boardUrl = await listen(correlatedBoardHandler(state, true));
+
+    const result = await runScript("scripts/live-source-smoke.mjs", {
+      CANONICAL_HOURS_URL: `${sourceUrl}/private-source`,
+      WORK_BOARD_URL: boardUrl,
+    });
+
+    expect(result.status).toBe(0);
+    expect(state.sourceReads).toBe(2);
+    expect(result.stdout).toContain("live source ok");
+    expect(`${result.stdout}${result.stderr}`).not.toContain("private-source");
   });
 });
