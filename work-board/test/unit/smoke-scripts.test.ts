@@ -1,8 +1,6 @@
 import { spawn } from "node:child_process";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type RequestListener } from "node:http";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -95,23 +93,7 @@ describe("live-source smoke", () => {
 
 describe("Cloister smoke cleanup", () => {
   it("reports cleanup failure without replacing the primary smoke failure", async () => {
-    const fakeBin = await mkdtemp(join(tmpdir(), "work-board-fake-compose-"));
-    cleanup.push(() => rm(fakeBin, { recursive: true, force: true }));
-    const docker = join(fakeBin, "docker");
-    await writeFile(docker, `#!/usr/bin/env node
-const args = process.argv.slice(2);
-if (args[0] === "compose" && args[1] === "version") process.exit(0);
-if (args.includes("down")) {
-  console.error("CLEANUP_FAILURE_MARKER");
-  process.exit(19);
-}
-if (args[0] === "build") {
-  console.error("PRIMARY_FAILURE_MARKER");
-  process.exit(17);
-}
-process.exit(23);
-`);
-    await chmod(docker, 0o755);
+    const fakeBin = resolve("test/fixtures/fake-compose-bin");
 
     const result = await runScript("scripts/cloister-smoke.mjs", {
       CLOISTER_REPO: process.env.CLOISTER_REPO ?? resolve("../../../art/cloister"),

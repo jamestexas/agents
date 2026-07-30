@@ -1,0 +1,15 @@
+#!/bin/sh
+if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
+  exit 0
+fi
+for arg in "$@"; do
+  if [ "$arg" = "down" ]; then
+    echo "CLEANUP_FAILURE_MARKER" >&2
+    exit 19
+  fi
+done
+if [ "$1" = "build" ]; then
+  echo "PRIMARY_FAILURE_MARKER" >&2
+  exit 17
+fi
+exit 23
