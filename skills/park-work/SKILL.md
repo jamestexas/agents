@@ -3,15 +3,16 @@ name: park-work
 description: >-
   Check whether the current human-agent work episode is mechanically safe to
   close, park incomplete work behind a verified durable checkpoint and receipt,
-  or resume a previously parked episode after revalidating live state.
-allowed-tools: "Bash,Read,Grep,Glob,mcp__rsry__*"
-argument-hint: "[<bead-id>] | --check [<bead-id>] | --resume [<episode-id>|<bead-id>]"
+  or inspect a previously parked episode before a fail-closed resume gate.
+allowed-tools: "Bash,Read,Grep,Glob,TaskList,mcp__rsry__*"
+argument-hint: "[--episode-id ep-UUID --intent-id park-UUID] [<bead-id>] | --check [<bead-id>] | --resume [<episode-id>|<bead-id>]"
 ---
 
 # Park Work
 
 `park-work` evaluates one logical work episode. A provider-native Codex or
-Claude session is evidence attached to that episode, not its identity.
+Claude session is evidence attached to that episode, not its identity. v1 is
+per-session; it does not discover or close other provider sessions.
 
 **MCP dependency:** rosary (`rsry_*`).
 
@@ -22,423 +23,353 @@ Claude session is evidence attached to that episode, not its identity.
 - Never delete a worktree.
 - Never discard, reset, stash, or rewrite user changes.
 - Never silently select or mint an anchor bead.
-- Never set or print `safe_to_close=true` until a schema-valid receipt has
-  been written and read back by its stable `intent_id`.
+- Never set or print `safe_to_close=true` until a schema-valid, durable-phase
+  receipt has been written and read back by its stable `intent_id`.
 - Never use model-authored prose as safety evidence.
+- Never start an active resume without a verified atomic episode claim/lease.
 
-## 0. Establish the helper before any receipt read
+Bulk discovery, provider termination, Canonical Hours projection, and the
+Rosary mechanisms named below remain out of scope.
 
-The absolute path from which the harness/agent loaded this `SKILL.md` is a
-required observed input. Bind the path reported by that loader exactly once;
-if it is unavailable, return `unsafe` before any write:
+## Helper and failure behavior
 
-```bash
-return_unsafe() {
-  printf 'unsafe: %s\n' "$1"
-  exit 1
+Resolve this loaded file's absolute path from the skill loader, derive
+`SKILL_DIR`, and require `$SKILL_DIR/scripts/fold.py`. Do not guess a checkout
+path or rely on a caller's current directory.
+
+The helper exposes:
+
+```text
+python3 "$SKILL_DIR/scripts/fold.py" prepare-attempt
+python3 "$SKILL_DIR/scripts/fold.py" evaluate
+python3 "$SKILL_DIR/scripts/fold.py" validate-receipt
+python3 "$SKILL_DIR/scripts/fold.py" confirm-readback
+python3 "$SKILL_DIR/scripts/fold.py" bind-repository
+python3 "$SKILL_DIR/scripts/fold.py" resume-gate
+```
+
+Every command reads exactly one JSON object from standard input. Schema,
+evidence, or correlation errors exit 2. Treat exit 2, malformed output, an
+unavailable tool, authentication failure, and contradictory evidence as
+`unsafe`. On `unsafe`, print the helper error or fold reasons and stop without
+a checkpoint, receipt, comment, event, workspace, or handoff write.
+
+## Invocation identity
+
+Modes are:
+
+```text
+/park-work --episode-id ep-<UUID> --intent-id park-<UUID> [<bead-id>]
+/park-work --check [<bead-id>]
+/park-work --resume [<episode-id>|<bead-id>]
+```
+
+An explicit bead is the anchor. Otherwise propose exactly one anchor using,
+in order, the current active dispatch, the current branch/bookmark, and the
+most recently touched bead. Require human confirmation of a detected anchor.
+Disagreement, no match, malformed results, or rejected confirmation is
+`unsafe`; never mint an anchor.
+
+Park mode requires caller-stable `--episode-id ep-<UUID>` and
+`--intent-id park-<UUID>`. After resolving the anchor, pass both inputs and
+the validated successful prior receipts to `prepare-attempt`.
+
+If either stable ID is absent, `prepare-attempt` mints the missing ID and
+returns `action=retry` with a command carrying both IDs. Print that retry
+command and stop before evaluation, checkpointing, or writes. Do not continue
+with an identity held only in process memory.
+
+Before minting an evaluation attempt, read all anchor comments, parse only a
+single fenced `work_episode_receipt/v1` JSON object per candidate, and validate
+matching-intent candidates. Pass those candidates to `prepare-attempt`.
+`action=return_existing` returns the exact prior durable success without a new
+transition. `action=evaluate` supplies a fresh `attempt-<UUID>`; every retry
+invocation gets a fresh attempt while preserving the episode and intent IDs.
+Malformed or identity-conflicting matching receipts are `unsafe`.
+
+`--check` is read-only and never needs a durable retry identity. It may report
+that a checkpoint would be required, but it never creates one.
+
+## Repository identity and command binding
+
+Resolve exactly one registered repository before collecting VCS evidence.
+Obtain the canonical current Git/jj root and its authoritative origin, call
+`rsry_repo_list`, normalize SSH/HTTPS syntax and optional `.git`, and require
+exactly one registered origin match. A basename is not repository identity.
+
+For resume, both an explicit bead selector and an episode selector use this
+same algorithm. Build the helper's `bind-repository` input from:
+
+- selector kind/value;
+- the selected receipt's strict repository object;
+- canonical observed root, Git common-dir, authoritative origin, and the
+  origin read through the common-dir identity; and
+- all registered repository names/URLs.
+
+The selected receipt path must equal the canonical observed root. The root
+origin, common-dir origin, and exactly one Rosary registration must agree.
+Reject path/root, common-dir, registration, or remote contradictions before
+live checks, workspace selection, or creation.
+
+After binding, use only the helper-returned `bound_root`. Every Git command is
+an argv-style `git -C <bound-root> ...` command. Every jj command uses its
+equivalent `jj --repository <bound-root> ...`. Never run an unbound VCS
+command against the caller's ambient directory.
+
+## Typed observation schema
+
+An evaluation object has exactly:
+
+```json
+{
+  "schema_version": 1,
+  "protocol_phase": "preflight or durable",
+  "pr_backed": false,
+  "bead": {
+    "acceptance_command": "the bead's declared command",
+    "pr_url": null
+  },
+  "checks": []
 }
-LOADED_SKILL_FILE='<absolute SKILL.md path reported by the loader>'
-case "$LOADED_SKILL_FILE" in /*/park-work/SKILL.md) ;; *) return_unsafe "loader path is not park-work/SKILL.md" ;; esac
-[ -f "$LOADED_SKILL_FILE" ] || return_unsafe "loader path does not exist"
-SKILL_DIR="$(CDPATH= cd -- "$(dirname -- "$LOADED_SKILL_FILE")" && pwd -P)"
-[ "$SKILL_DIR/SKILL.md" = "$LOADED_SKILL_FILE" ] || return_unsafe "loader path does not match derived directory"
-FOLD_HELPER="$SKILL_DIR/scripts/fold.py"
-[ -f "$FOLD_HELPER" ] || return_unsafe "fold helper is missing"
-CHECKS_FILE="$(mktemp)"
-CANDIDATE_RECEIPT_FILE="$(mktemp)"
-RECEIPT_FILE="$(mktemp)"
 ```
 
-`return_unsafe` means stop before checkpoint, receipt, comment, event, or
-handoff write and print only the observed failure. Do not assume a runtime
-`SKILL_FILE` variable.
+Derive the required `pr_backed` boolean only from the selected Rosary bead's
+structured PR URL field: it is true exactly when `bead.pr_url` is a valid
+nonempty HTTP(S) URL. Never infer PR backing from prose, branch names, or
+references.
 
-Rosary calls use the following exact arguments. `<repo>` is the repository
-path for comment calls and the Rosary repository name for event calls; resolve
-both from the selected anchor before continuing. Call
-`rsry_expand_ref(hash=<returned-demoted-ref-hash>)` only when a Rosary response
-contains a returned demoted reference; do not use it speculatively.
+Every check item has exactly `name`, `category`, `outcome`, `evidence`, and
+`observed_at`. Outcome is exactly `pass`, `fail`, or `unknown`;
+`observed_at` is a real timezone-bearing RFC3339 timestamp. Evidence is the
+nonempty typed object required by the helper, never a truthy string/list or a
+model summary.
+
+The exact unique checks and fixed categories are:
 
 ```text
-rsry_active()
-rsry_dispatch_history(active_only=true, bead_id=<anchor>)
-rsry_dispatch_history(bead_id=<anchor>)
-rsry_bead_history(id=<anchor>, repo_path=<repo>)
-rsry_repo_list()
-rsry_list_beads(repo=<repo-name>)
-rsry_bead_comment_list(id=<anchor>, repo_path=<repo>)
-rsry_agent_run_events(repo=<repo>, bead_id=<anchor>)
-rsry_agent_session_addresses(repo=<repo>, bead_id=<anchor>)
-rsry_workspace_checkpoint(bead_id=<anchor>, repo_path=<repo>)
-rsry_bead_comment(id=<anchor>, repo_path=<repo>, body=<RECEIPT_FENCE>)
-rsry_agent_session_message_record(repo=<repo>, bead_id=<anchor>, session_ref=<address>, id=<event-id>, event_type="work_episode_receipt", message=<RECEIPT_FENCE>, payload={"receipt": <RECEIPT_FENCE>})
+identity:
+  anchor_confirmed
+  repository_resolved
+
+quiescence:
+  no_active_dispatch
+  no_running_child_operation
+  no_vcs_operation_or_conflict
+
+preservation:
+  tree_preserved
+  commits_reachable_or_checkpoint_resolvable
+
+completion:
+  close_condition_satisfied
+  bead_terminal
+  pr_merged                 # required only when pr_backed=true
+
+resume:
+  resume_target_resolvable  # required only when all completion checks fail
 ```
 
-## 1. Resolve mode, anchor, and prior durable receipt
+Missing, duplicate, unknown, mis-categorized, or inapplicable checks are schema
+errors. A non-PR bead must omit `pr_merged`. A PR-backed bead must include it.
+`resume_target_resolvable` is present only when every applicable completion
+check is mechanically `fail`.
 
-Parse `$ARGUMENTS` before collecting evidence:
+## Authoritative evidence mapping
 
-- `--check [<bead-id>]` selects **check** mode.
-- `--resume [<episode-id>|<bead-id>]` selects **resume** mode. Resume
-  materialization and drift/retry behavior are defined in **Resume**; this mode
-  must not park or mutate state other than its durable resumed observation.
-- Any other invocation, optionally beginning with `<bead-id>`, selects
-  **park** mode.
+### Identity and VCS state
 
-An explicit bead ID is the anchor and needs no confirmation. Otherwise, propose
-exactly one detected anchor in this order: `rsry_active` and
-`rsry_dispatch_history`, current Git branch or jj bookmark matched against
-`rsry_list_beads`, then the most recently touched anchor from
-`rsry_bead_history`. Ask the human to confirm a detected anchor before any
-write. If detectors disagree or no anchor exists, return `unsafe`; do not mint
-a bead.
+`anchor_confirmed` names the explicit or confirmed anchor.
+`repository_resolved` contains the successful registered-repository binding,
+absolute root, and authoritative remote.
 
-Reuse a nonterminal `episode_id` and a successful receipt found on the anchor.
-Otherwise mint `ep-<uuid>`, `park-<uuid>`, and `attempt-<uuid>` for the
-episode, stable intent, and attempt.
+`no_active_dispatch` combines the current authoritative `rsry_active` and
+active-only dispatch-history results. Empty authoritative results pass;
+active records fail; unavailable, malformed, or contradictory reads are
+unknown.
 
-Before evaluating or writing, search the anchor's events and comments for the
-stable `intent_id`. If a schema-valid successful receipt already exists, read
-it back and return it; do not append a second semantic transition. The helper
-and candidate receipt file from §0 are already initialized.
-
-Use `rsry_bead_comment_list(id=<anchor>, repo_path=<repo>)` to read every live
-comment, and `rsry_agent_run_events(repo=<repo>, bead_id=<anchor>)` to read
-append-only session events. For either source, parse only fenced `work_episode_receipt/v1` JSON:
-the complete body between a matching opening
-````text
-```work_episode_receipt/v1
-<JSON>
-```
-````
-and closing fence. Reject prose, an untagged JSON object, malformed JSON,
-multiple receipt fences in one field, and candidates with a different
-`intent_id`; set `CANDIDATE_RECEIPT_BYTES` to the exact JSON bytes within that
-one fence, then validate each candidate mechanically:
-
-```bash
-printf '%s' "$CANDIDATE_RECEIPT_BYTES" > "$CANDIDATE_RECEIPT_FILE"
-CANDIDATE_VALIDATION="$(python3 "$FOLD_HELPER" validate-receipt < "$CANDIDATE_RECEIPT_FILE")"
-CANDIDATE_STATUS=$?
-```
-
-If `CANDIDATE_STATUS` is nonzero or its output is malformed, reject that
-candidate. A successful candidate has `outcome` `completed` or `parked` and
-`safe_to_close=true`.
-
-Only `rsry_bead_comment_list` proves durable receipt readback. A matching event
-from `rsry_agent_run_events` is additional evidence only; it never substitutes
-for a matching, validated comment. If comments and events contain distinct
-successful bytes for the same intent, return `unsafe`. If the matching valid
-receipt is found in comments, return its exact parsed receipt and do not write.
-
-## 2. Collect evidence mechanically
-
-Append every observation to one JSON `checks` array. Each item has `name`,
-`category`, `outcome`, compact raw `evidence`, and RFC3339 `observed_at`. Use
-the timestamp returned by the observed system (or the command completion time)
-and include the relevant raw status, identifiers, and hashes. Do not summarize
-or infer a `pass` from model-authored prose.
-
-For Git, collect every command below. The direct Git-dir path checks are
-allowed only after `git rev-parse --git-dir` succeeds.
-
-```bash
-git status --porcelain=v2 --branch
-git diff --name-only --diff-filter=U
-git rev-parse --git-dir
-git rev-parse --git-common-dir
-git branch --show-current
-git rev-parse HEAD
-git rev-parse '@{upstream}'
-git merge-base --is-ancestor HEAD '@{upstream}'
-```
-
-For jj, collect every command below:
-
-```bash
-jj status
-jj resolve --list
-jj log -r @ --no-graph -T 'change_id ++ "\n"'
-jj bookmark list
-```
-
-### Source-to-check decision table
-
-| Check | Mechanical source | `pass` | `fail` | `unknown` |
-|---|---|---|---|---|
-| `anchor_confirmed` | Explicit `<anchor>` resolved by `rsry_list_beads`, or the recorded human confirmation of the single detector result | Exact bead ID exists and is explicit, or the user confirmed it | No such bead, rejected confirmation, or detectors disagree | Read failure, malformed result, or required demoted ref cannot expand |
-| `repository_resolved` | `git rev-parse --git-dir`, `git rev-parse --git-common-dir`, `git branch --show-current`, or `jj status` and `jj bookmark list` | Commands exit 0 and identify the selected repository/workspace | Command identifies a different repository/workspace | Command unavailable, nonzero without an authoritative absence, or malformed output |
-| `no_active_dispatch` | `rsry_active()` plus `rsry_dispatch_history(active_only=true, bead_id=<anchor>)` | Both authoritative results contain no active dispatch/session/pipeline record for the anchor | Either result names an active record for the anchor | Either read unavailable, malformed, or contradictory |
-| `no_running_child_operation` | Same `rsry_active()` result and active-only dispatch history | No live child operation, session, or active dispatch is returned for the anchor | Any live child operation/session/dispatch is returned for the anchor | The active-state shape is unavailable or ambiguous |
-| `no_vcs_operation_or_conflict` | Git porcelain-v2, unmerged-name list, Git-dir operation markers (`MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `rebase-merge`, `rebase-apply`), or `jj status` and `jj resolve --list` | No unmerged record/name, operation marker, or jj conflict | Any unmerged record/name, marker, or jj conflict | Required command/path unreadable or output malformed |
-| `tree_preserved` | Pre/post `git status --porcelain=v2 --branch` or `jj status` snapshots; resolved workspace/anchor and checkpoint availability | **Already durable:** snapshots agree. **Checkpointable:** label the evidence `pre-materialization capability`; the resolved workspace/anchor matches, quiescence passes, and exact current HEAD/tree/status (or jj change/status) is captured before the available checkpoint operation | A deletion, reset, conflict, mismatched workspace/anchor, or unavailable checkpoint operation | Missing/contradictory snapshot or unresolved workspace/anchor |
-| `commits_reachable_or_checkpoint_resolvable` | Git `HEAD`, upstream, `merge-base`, captured `HEAD^{tree}`; jj `jj log`, bookmark, and available checkpoint operation | **Already durable:** Git `HEAD` is an ancestor of upstream, or a recorded jj checkpoint resolves. **Checkpointable:** label the evidence `pre-materialization capability`; the same resolved workspace/anchor, captured exact tree/change identity, quiescence, and available checkpoint operation prove a checkpoint-needed tree can be materialized | The durable branch is disproven and checkpointability is disproven | VCS/auth/network failure, malformed result, or contradiction |
-| `close_condition_satisfied` | Authoritative `rsry_bead_history` verdict and anchor acceptance-condition result returned by Rosary | Rosary records the anchor's acceptance condition as satisfied | Rosary records it unsatisfied/failed | Missing, unavailable, or non-authoritative result |
-| `pr_merged` (PR-backed only) | Rosary's resolved anchor/PR state, expanding a returned demoted ref only if present | Resolved PR state is exactly merged | Resolved PR state is open, closed-unmerged, or failed | No resolvable authoritative PR state |
-| `bead_terminal` | Selected bead record from `rsry_list_beads` | Status is Rosary-terminal (`closed` or `done`) | Status is nonterminal | Missing/malformed bead record |
-| `resume_target_resolvable` (only when all completion checks fail) | Returned checkpoint/change ID or recorded branch resolved by the VCS commands above | Checkpoint/change ID or branch resolves exactly | Neither recorded checkpoint nor branch resolves | Resolver unavailable or malformed |
-
-Before the first fold, the two preservation checks may be `pass` only through
-one of those table branches. The `checkpointable` branch is explicitly a
-pre-materialization capability, not completed durability: it records
-`checkpointable=true`, the resolved Rosary workspace/anchor, no VCS
-conflict/operation, exact current Git `HEAD`, `HEAD^{tree}`, and status (or jj
-change/status), plus an available `rsry_workspace_checkpoint`. Unknown or
-contradictory capability is `unknown` or `fail`, never `pass`.
-
-An unavailable command, authentication failure, malformed response, active
-operation, or contradictory source becomes `unknown` or `fail` according to
-the table; it is never coerced to `pass`.
-
-## 3. Build files and fold the candidate
-
-Serialize the exact observation object once as `CHECKS_JSON` (with
-`schema_version: 1` and the complete `checks` array), then write it without
-adding or removing bytes:
-
-```bash
-printf '%s' "$CHECKS_JSON" > "$CHECKS_FILE"
-FOLD_RESULT="$(python3 "$FOLD_HELPER" evaluate < "$CHECKS_FILE")"
-FOLD_STATUS=$?
-```
-
-If `FOLD_STATUS` is nonzero, or `FOLD_RESULT` is malformed, return `unsafe`.
-Treat `eligible=false` as `unsafe`, print the exact `reasons`, perform no transition,
-and leave all repositories and workspaces unchanged. In `--check`
-mode, print the candidate and its evidence, then stop before checkpoint or receipt writes:
-do not write a checkpoint, receipt, comment, event, or handoff.
-
-The fold is run over those preconditions. Its `parked` candidate is eligible
-only when every base category, including the mechanically labelled
-pre-materialization capability if needed, is `pass` and the completion/resume
-rows meet `fold.py`'s deterministic rules.
-
-## 4. Materialize a parked receipt
-
-For an eligible `parked` candidate, use this exact order:
-
-1. The already-durable branch skips checkpointing; only an eligible `parked` candidate on the `checkpointable` branch may call
-   `rsry_workspace_checkpoint`; an ineligible, unknown, or contradictory state
-   returns `unsafe` without a checkpoint.
-2. After the returned checkpoint/change ID, replace both preservation evidence items with fresh post-checkpoint observations and rerun the fold. For Git,
-   `git cat-file -e <sha>^{commit}` must resolve the returned checkpoint SHA;
-   the checkpoint MCP result must represent the captured HEAD/tree/status, and
-   a stable branch/checkpoint resume reference must be recorded. For jj,
-   `jj log -r <id>` must resolve the returned change ID and it must be
-   recorded as the resume reference. Any failed lookup, mismatch, or missing
-   reference is `unsafe` and no receipt is written. The post-checkpoint fold
-   must be eligible before constructing a receipt.
-
-   ```bash
-   git cat-file -e "$CHECKPOINT_SHA^{commit}"
-   jj log -r "$CHECKPOINT_CHANGE_ID"
-   ```
-3. Construct the schema-v1 receipt from the candidate and mechanical evidence.
-   Serialize it once as `RECEIPT_JSON`, then write and validate those exact
-   bytes:
-
-   ```bash
-   printf '%s' "$RECEIPT_JSON" > "$RECEIPT_FILE"
-   RECEIPT_VALIDATION="$(python3 "$FOLD_HELPER" validate-receipt < "$RECEIPT_FILE")"
-   RECEIPT_STATUS=$?
-   RECEIPT_BYTES="$(cat "$RECEIPT_FILE")"
-   RECEIPT_FENCE="$(printf '```work_episode_receipt/v1\n%s\n```' "$RECEIPT_BYTES")"
-   ```
-
-   If `RECEIPT_STATUS` is nonzero or validation output is malformed, return
-   `unsafe` without writing. Build `RECEIPT_FENCE` from the same
-   `RECEIPT_BYTES`; never reserialize or edit it:
-
-   ````text
-   ```work_episode_receipt/v1
-   <RECEIPT_BYTES>
-   ```
-   ````
-
-4. Write `RECEIPT_FENCE` with
-   `rsry_bead_comment(id=<anchor>, repo_path=<repo>, body=<RECEIPT_FENCE>)`.
-5. Read comments back with
-   `rsry_bead_comment_list(id=<anchor>, repo_path=<repo>)`; parse only its
-   fenced receipt JSON, validate it, find the exact `intent_id`, and compare
-   `episode_id`, `outcome`, and checkpoint/branch fields byte-for-byte with
-   `RECEIPT_BYTES`. This comment-list readback is mandatory durability proof.
-6. If `rsry_agent_session_addresses` returns an address, write the same
-   `RECEIPT_FENCE` and same `RECEIPT_BYTES` through
-   `rsry_agent_session_message_record` using stable `event_id =
-   "receipt-" + intent_id`. Then read
-   `rsry_agent_run_events(repo=<repo>, bead_id=<anchor>)` and compare the
-   matching event fence byte-for-byte. This optional event read is additional
-   evidence, never a substitute for step 5.
-7. Render `/tmp/park-<date>-<slug>.md` from the same `RECEIPT_BYTES`.
-8. Print the receipt and `safe_to_close=true` only after steps 3–6 succeed.
-
-The receipt contains `schema_version`, `episode_id`, `intent_id`, `attempt_id`,
-`anchor_bead`, `repository` (`path`, `vcs`, `branch`, `head`), `checks`,
-`outcome`, `safe_to_close`, `resume` for `parked` (a `checkpoint` or `branch`
-and `next_action`), and `references`.
-
-If a write times out, the next attempt searches by `intent_id` before writing.
-If readback cannot prove durability, return `unsafe` and do not tell the human
-to close the provider session.
-
-## 5. Completed and unsafe results
-
-For an eligible `completed` candidate, use the same exact receipt validation,
-comment write, mandatory comment-list readback, and optional event evidence
-before printing `safe_to_close`; do not close the bead or terminate a session.
-For `unsafe`, print only raw evidence and reasons. Do not write a checkpoint,
-receipt, comment, event, or handoff; do not change repository or workspace
-state.
-
-## Resume
-
-`/park-work --resume [<episode-id>|<bead-id>]` resumes one schema-valid parked
-episode. It does not infer an anchor, restore into the current checkout, or
-write until every step below has succeeded.
-
-### 1. Resolve one parked receipt and anchor
-
-For an explicit `--resume <bead-id>`, use that explicit bead as the anchor and
-list its comments directly with
-`rsry_bead_comment_list(id=<bead-id>, repo_path=<repo>)`. For an explicit
-`--resume <episode-id>`, first mechanically resolve the current Rosary
-repository from the current Git/jj root: use `git rev-parse --show-toplevel`
-or `jj root`, then obtain that root's authoritative origin with
-`git remote get-url origin` or the jj backing-Git equivalent `jj git remote list`.
-Call `rsry_repo_list()` before `rsry_list_beads`; require its successful payload
-to contain `repos[]` objects with `repos[].repo_name` and `repos[].repo_url`.
-Normalize SSH/HTTPS syntax and optional `.git` on both the authoritative remote
-URL and each `repos[].repo_url`, then require exactly one URL match and use that entry's
-`repo_name` as `<repo>`. Missing identity/auth, missing origin, malformed
-fields, zero/multiple URL matches, or a URL/path contradiction is `unsafe`
-before scanning. If identity/auth is unavailable, return `unsafe` before
-scanning. Never infer a repo name from a basename. Paginate
-`rsry_list_beads(repo=<repo>)` through all results and all statuses, then call
-`rsry_bead_comment_list(id=<candidate>, repo_path=<repo>)` on each candidate.
-Parse only fenced `work_episode_receipt/v1` fields and accept only
-helper-valid, parked, `safe_to_close=true` receipts matching that exact
-`episode_id`.
-
-For either selector, retain every candidate's Rosary comment metadata. Require
-exactly one anchor: zero or multiple anchors is `unsafe`. On that anchor,
-select the latest parked receipt by Rosary metadata ordered by
-`(created_at, comment_id) descending`. Missing or malformed metadata, or an
-unresolved top tie, is `unsafe`. Never order by UUID/attempt text. Retain the
-selected `comment_id = returned comment.id`, `PARKED_RECEIPT_BYTES`, parsed `episode_id`, stable
-`intent_id`, and the exact recorded checkpoint or branch resume target.
-
-### 2. RESUME_RECEIPT_VALIDATION
-
-Validate the selected exact receipt bytes before live checks, workspace
-selection, restoration, or writes:
-
-```bash
-printf '%s' "$PARKED_RECEIPT_BYTES" > "$CANDIDATE_RECEIPT_FILE"
-python3 "$FOLD_HELPER" validate-receipt < "$CANDIDATE_RECEIPT_FILE"
-```
-
-Validation failure is `unsafe`.
-
-### 3. RESUME_LIVE_REVALIDATION
-
-**Revalidate live state** through Rosary and the VCS before restoration: read
-the selected anchor with `rsry_list_beads`,
-`rsry_bead_history(id=<anchor>, repo_path=<repo>)`, `rsry_active()`, and
-`rsry_dispatch_history(active_only=true, bead_id=<anchor>)`; then run the Git
-or jj conflict, operation, and quiescence observations from §2 against the
-current workspace. Return `unsafe` for closed, abandoned, or reassigned work;
-**another active holder**; a **missing checkpoint** or branch; an unresolved
-conflict or VCS operation; or receipt/schema drift. These observations are
-safety evidence; the receipt's `next_action` is context only.
-
-### 4. RESUME_RECEIPT_RACE_RECHECK
-
-Immediately before workspace selection or restoration, call authoritative
-`rsry_bead_comment_list(id=<anchor>, repo_path=<repo>)` again. Refetch the
-selected `comment_id`, reparse its sole fenced receipt, rerun
-`validate-receipt`, and compare its exact bytes, `episode_id`, `intent_id`, and
-checkpoint/branch target with `PARKED_RECEIPT_BYTES` and the retained fields.
-If the comment was edited or deleted, any comparison differs, or a newer
-validated receipt for the same episode now exists by `(created_at, comment_id)`
-ordering, return `unsafe`: do not restore, write, or work.
-
-### 5. RESUME_WORKSPACE_SELECTION
-
-Resolve the retained target without changing an existing workspace. For Git,
-bind every checkpoint or branch target to immutable `receipt.repository.head`.
-For a Git checkpoint, require `git cat-file -e <checkpoint-sha>^{commit}` and
-`git rev-parse <checkpoint-sha>` to equal `receipt.repository.head`. For a
-branch receipt, require `git rev-parse <branch>` to equal
-`receipt.repository.head`; a moved branch is drift/unsafe, never silently
-accepted. Retain only the immutable recorded head as the normalized receipt
-target, then enumerate `git worktree list --porcelain`. For jj, require the
-recorded change ID and `jj log -r <change-id>` to equal the receipt's immutable
-`repository.head`, retain that exact change ID as the normalized receipt target,
-then enumerate `jj workspace list`. Choose only a unique existing quiescent
-workspace whose current HEAD/change equals the immutable recorded head.
-
-If no qualifying workspace exists, create one only at a brand-new absent path:
-use the deterministic safe parent `${TMPDIR:-/tmp}/park-work-resume` and a fresh
-suffix, verify `[ ! -e <new> ]`, then use
-`git worktree add --detach <new> <receipt.repository.head>` for Git, or
-`jj workspace add --revision <change-id> <new>` for jj. Never create a Git
-worktree at a mutable branch tip. Never reuse a nonempty path. Backend creation
-failure, a non-unique candidate, or an unresolvable target is `unsafe`.
-
-### 6. RESUME_WORKSPACE_VERIFICATION
-
-Enter only the selected or newly created workspace and rerun its conflict and
-quiescence checks there. For Git, require `git rev-parse HEAD` to equal
-`receipt.repository.head`, `git status --porcelain=v2` to contain no non-header
-records, `git diff --quiet`, and `git diff --cached --quiet`; staged, unstaged,
-or untracked content is drift/unsafe. Apply the jj equivalent exact rule:
-require the current jj change ID to equal the immutable recorded change and
-`jj status` to show no working-copy changes. If this backend cannot create or
-verify that workspace, return `unsafe`. Never delete, reset, checkout-over, or
-rewrite an existing workspace.
-
-### 7. RESUME_OBSERVATION_DEDUPE
-
-Before minting a fresh resume attempt or writing, reread `rsry_bead_comment_list(id=<anchor>, repo_path=<repo>)`
-and parse only fenced `work_episode_observation/v1` payloads. A schema-valid successful `resumed`
-observation has `schema_version: 1`, `observation: "resumed"`, and the
-recorded episode, intent, anchor, attempt, and exact resume target fields. If
-one matches `episode_id`, stable `intent_id`, anchor, and exact resume target,
-read it back and return it; do not append another transition or
-start a distinct attempt. Only when none exists mint a fresh `attempt_id`.
-
-### 8. RESUME_OBSERVATION_APPEND
-
-Construct one successful `work_episode_observation/v1` JSON object with the
-original `episode_id`, stable `intent_id`, fresh `attempt_id`, anchor, exact
-target, and the SHA-256 hash of `PARKED_RECEIPT_BYTES`. Serialize it once as
-`RESUMED_OBSERVATION_BYTES`, fence those unchanged bytes, and **record the
-resumed observation** exactly once:
+Run the bound VCS observations:
 
 ```text
-rsry_bead_comment(id=<anchor>, repo_path=<repo>, body=<RESUMED_OBSERVATION_FENCE>)
+git -C <bound-root> status --porcelain=v2 --branch
+git -C <bound-root> diff --name-only --diff-filter=U
+git -C <bound-root> rev-parse --git-dir
+git -C <bound-root> rev-parse --git-common-dir
+git -C <bound-root> branch --show-current
+git -C <bound-root> rev-parse HEAD
+git -C <bound-root> rev-parse '@{upstream}'
+git -C <bound-root> merge-base --is-ancestor HEAD '@{upstream}'
+
+jj --repository <bound-root> status
+jj --repository <bound-root> resolve --list
+jj --repository <bound-root> log -r @ --no-graph -T 'change_id ++ "\n"'
+jj --repository <bound-root> bookmark list
 ```
 
-### 9. RESUME_OBSERVATION_READBACK
+Any merge, rebase, cherry-pick, revert, unresolved path, or jj conflict makes
+`no_vcs_operation_or_conflict=fail`. Unreadable operation state or malformed
+output is unknown.
 
-Call `rsry_bead_comment_list(id=<anchor>, repo_path=<repo>)`, refetch the
-appended comment, and compare the same comment/bytes byte-for-byte with
-`RESUMED_OBSERVATION_BYTES`. Failed or ambiguous authoritative bead-comment
-readback is `unsafe`.
+### Current-client child operation
 
-### 10. RESUME_BEGIN_WORK
+`no_running_child_operation` must come from an authoritative current-client
+query, not Rosary dispatch history:
 
-**Begin work only after** the resumed observation is durable and the verified
-target workspace remains selected. Restate the bounded `next_action` as context
-only; it is not safety evidence.
+- Codex adapter: query the current root thread's child/subagent tree through
+  the exposed `collaboration.list_agents`/current-child operation capability.
+  The typed evidence source is `codex.current_child_operations`; any
+  running child makes the check fail.
+- Claude adapter: query the current Claude session's exposed task/subagent
+  registry (for example `TaskList` when it is the authoritative session
+  registry). The typed evidence source is `claude.current_child_operations`;
+  any running child makes the check fail.
 
-### Retry and collections
+The response must be explicitly authoritative for this current session and
+contain a well-formed running-operation array. If the adapter is not exposed,
+does not scope to the current session, errors, or returns a malformed shape,
+the outcome is `unknown`. Empty Rosary dispatch history alone is never a pass.
 
-A retry reuses the stable `intent_id` and creates a fresh `attempt_id`. A new
-attempt may observe changed evidence; an existing successful transition is
-returned rather than rewritten.
+### Completion
+
+Read the structured bead record to obtain the exact declared acceptance
+command, status, and PR URL.
+
+`close_condition_satisfied` may pass or fail only from the latest explicit
+Rosary `verify` observation whose observed command exactly equals the bead's
+declared acceptance command. Record the verify verdict ID and both command
+fields. No matching observation, a prose conclusion, stale/non-latest result,
+command mismatch, malformed history, or unavailable history is `unknown`.
+
+`bead_terminal` passes only for the structured Rosary status `closed` or
+`done`; a known nonterminal status fails; missing/malformed status is unknown.
+
+For a PR-backed bead, run exactly this read-only provider query (or a provider
+adapter returning the identical typed fields):
+
+```text
+gh pr view <bead.pr_url> --json state,mergedAt,url
+```
+
+`pr_merged` passes only when `state` is `MERGED`, `url` exactly matches the
+bead's structured PR URL, and `mergedAt` is a valid RFC3339 timestamp. `OPEN`
+or `CLOSED` with no merge timestamp is fail. Authentication errors, command
+errors, URL mismatch, missing fields, or malformed output are unknown. A
+non-PR bead does not invent `pr_merged`.
+
+Completed is possible only when every completion check passes. Parked is
+possible only when every completion check explicitly fails and the resume
+resolver passes. Mixed or unknown completion evidence is unsafe; an open bead
+is not guessed to be incomplete.
+
+## Checkpoint before any receipt
+
+The helper's explicit `protocol_phase` distinguishes checkpoint authorization
+from durable evidence:
+
+- A checkpoint-needed observation uses `protocol_phase=preflight`. Both
+  preservation checks must be passing typed `state=checkpointable` evidence
+  for the exact bound workspace. The helper returns `eligible=false` and
+  `action=checkpoint`. It can identify a logical completed or parked
+  candidate, but it can authorize only the checkpoint action.
+- An already durable observation, or a fresh post-checkpoint observation,
+  uses `protocol_phase=durable`. Both preservation checks must contain actual
+  resolved `state=durable` references. Only this phase can return
+  `eligible=true, action=write_receipt`.
+
+A preflight object is never receipt-eligible and `validate-receipt` rejects it.
+This applies equally to logically completed and parked work.
+
+For park mode only, when a valid preflight returns `action=checkpoint`, call
+`rsry_workspace_checkpoint` for the exact anchor and bound root. Verify the
+returned Git commit/change or jj change mechanically with bound commands.
+Then replace both preservation observations—not merely their prose—with fresh
+post-checkpoint durable evidence, set `protocol_phase=durable`, and rerun
+`evaluate`. If either replacement is missing, mismatched, unresolved, or
+unknown, stop unsafe before receipt construction.
+
+`--check` prints the preflight result and stops before the checkpoint action.
+
+## Durable receipt
+
+Construct a receipt only from `eligible=true, action=write_receipt`. It
+contains the observation fields plus:
+
+- canonical `ep-<UUID>`, `park-<UUID>`, and `attempt-<UUID>`;
+- a nonempty anchor;
+- provider sessions as unique `{provider: codex|claude, id: nonempty-string}`
+  objects;
+- repository with normalized absolute path, VCS `git|jj`, nonempty string
+  branch, and full immutable head/change ID;
+- `outcome=completed|parked` and literal `safe_to_close=true`;
+- references as nonempty strings; and
+- for parked, a nonempty string `next_action` and exactly one nonempty string
+  target: `checkpoint` or `branch`.
+
+The parked target and its resolved immutable head must equal the target and
+`repository.head` in the passing `resume_target_resolvable` evidence. Both
+durable preservation references must also equal `repository.head`. Completed
+receipts omit `resume`.
+Serialize once, run `validate-receipt` on those exact bytes, and stop on exit
+2 or malformed output.
+
+Fence the unchanged bytes as `work_episode_receipt/v1`, append them with
+`rsry_bead_comment`, then read all comments back with
+`rsry_bead_comment_list`. Pass the exact serialized receipt bytes and returned
+comment IDs/bodies to `confirm-readback`; it accepts only an exact sole fence,
+validates it again, and rejects missing or conflicting same-intent bytes.
+Comment readback is mandatory durability proof.
+
+When a provider session address exists, the same exact fence may also be sent
+through `rsry_agent_session_message_record` and read through session events.
+That is additional evidence only and never substitutes for bead-comment
+readback. A write timeout is retried with the caller-stable IDs; search the
+intent before writing again.
+
+Only after validation and mandatory readback may the skill render a
+human-readable `/tmp/park-<date>-<slug>.md` and print
+`safe_to_close=true`. Never close the bead or provider session.
+
+## Resume is inspection-only in v1
+
+`--resume` may locate and validate the latest parked receipt and report drift,
+but it must fail closed before workspace creation, a resumed observation, or
+work.
+
+First use the common registered-repository/origin algorithm and
+`bind-repository` for either selector. Then perform read-only inspection:
+validate the receipt, re-read its exact comment, verify the immutable
+checkpoint/branch against `repository.head`, and query live Rosary, current
+client, and bound VCS state. A missing checkpoint, moved branch, edited/deleted
+receipt, reassignment, terminal bead, active holder, active child, conflict,
+or schema/repository drift is unsafe.
+
+After read-only inspection, call `resume-gate`. The required contract is an
+atomic episode claim/lease with:
+
+- a caller-stable claim ID;
+- uniqueness on the episode;
+- compare-and-set ownership against the current episode state;
+- an owner identity and lease expiry;
+- authoritative readback; and
+- explicit release/terminal semantics.
+
+That Rosary primitive does not yet exist and is tracked by `rosary-04faf5`.
+Therefore the helper returns `authorized=false`, allows only
+`read_only_inspection`, and blocks `workspace_creation`,
+`resumed_observation`, and `work`. Stop there.
+
+Comment search, read-before-write dedupe, a prior resumed comment, or an empty
+active view cannot prove a single holder and must never impersonate the atomic
+claim. When Rosary supplies the named primitive in a future version, the skill
+and executable gate must be upgraded and reviewed before active resume is
+enabled.
+
+## Retry and independent results
+
+An unsafe attempt writes no transition. The caller repeats the printed command
+with the same episode/intent IDs; `prepare-attempt` mints a fresh attempt. A
+prior durable success for those IDs is returned unchanged without another
+transition.
 
 Each invocation evaluates one independent episode. A controller may collect
-several receipts later, but one unsafe episode never rolls back or weakens a
-completed or parked result from another episode.
+results, but one unsafe episode never rolls back or weakens a completed or
+parked result from another episode.
