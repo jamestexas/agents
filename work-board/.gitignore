@@ -9,3 +9,8 @@ data/board.json
 *.log
 .DS_Store
 .superpowers/
+node_modules/
+dist/
+.wrangler/
+playwright-report/
+test-results/
