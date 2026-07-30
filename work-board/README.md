@@ -1,36 +1,98 @@
 # work-board
 
-A local, at-a-glance board of *your* work: "how are my PRs, and does anything
-need me?" — the [canonical-hours](https://github.com/agentic-research/canonical-hours)
-board question, rendered as an interactive graph instead of a flat list.
+`work-board` is the staging implementation of Canonical Hours' visual board.
+It runs as a workerd Worker, reads Canonical Hours through a service binding or
+explicit HTTP URL, and serves the UI at `/board/ui`.
 
-Every open PR (and, later, calendar event) is a node. **One data model,
-several interchangeable layouts.**
+This package is intentionally staged in `agents/`. Once the workerd, browser,
+live-source, and Cloister proofs pass, its portable files move to
+`canonical-hours`. The `/pr-board` skill remains available during that move.
 
-## Run (no build step)
+## Run with fixtures
 
 ```bash
-cd work-board
-export WORKBOARD_REPO=owner/repo  # the repo whose PRs you want boarded
-python3 scripts/serve.py          # http://localhost:8787
+pnpm install --frozen-lockfile
+pnpm build
+pnpm dev
+open http://127.0.0.1:8787/board/ui
 ```
 
-`serve.py` serves the static page **and** exposes `POST /refresh`, so the
-in-page **↻ refresh (live)** button re-pulls your PRs without a shell. (A plain
-`python3 -m http.server` also works, but then the button can only re-read the
-file — it can't run `gh`.)
+Wrangler starts the Worker in its local workerd runtime. Fixture mode is the
+checked-in default in `wrangler.toml`.
 
-A fresh clone with no `data/board.json` renders `data/board.example.json` so you
-see the shape immediately.
+## Run with Canonical Hours
+
+Set `WORK_BOARD_FIXTURE=false` and provide either the
+`CANONICAL_HOURS` service binding or
+`CANONICAL_HOURS_URL=http://127.0.0.1:2000`. Refresh remains disabled unless
+fixture mode is active or `WORK_BOARD_REFRESH_MODE=source-authorized` delegates
+authorization to the configured source.
+
+The upstream source contract is fixed HTTP semantics: `GET /board` reads the
+Canonical Hours projection and `POST /tick` refreshes it. The Worker validates
+and normalizes both fixture and real-source payloads before they reach the
+browser.
+
+## Routes
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/board/ui` | bundled visual board |
+| GET | `/api/board` | validated presentation projection |
+| POST | `/api/refresh` | upstream tick followed by board read |
+| GET | `/health` | host/source configuration liveness |
+
+## Verification
+
+```bash
+pnpm check
+pnpm test:e2e
+CLOISTER_REPO=../../../art/cloister pnpm test:cloister:contracts
+CLOISTER_REPO=../../../art/cloister pnpm test:cloister
+CANONICAL_HOURS_URL=http://127.0.0.1:8790 pnpm test:live
+```
+
+`pnpm check` is the standalone package gate and does not require a neighboring
+Cloister checkout. The explicit Cloister commands require `CLOISTER_REPO`;
+`test:cloister:contracts` validates manifest parsing, cleanup behavior, and the
+Docker context policy, while `test:cloister` runs those contracts before the
+two-bundle smoke topology.
+
+Pnpm lifecycle scripts remain denied by default. Do not approve lifecycle
+scripts for `esbuild`, `sharp`, or `workerd` merely to silence the install
+warning: the verified optional native binary packages support the current
+development and container platforms without granting install-time execution.
+
+## Security
+
+The browser receives board data, never provider credentials. The Worker cannot
+spawn a CLI. A future CLI collector must run as a sibling Cloister bundle
+behind the same fixed `read`/`refresh` source contract.
+
+Board reads and refresh authority are separate. Refresh is default-deny outside
+fixture mode. In a real deployment, `source-authorized` means authorization is
+delegated to the configured source; it does not grant the browser provider
+credentials.
+
+## Cloister topology
+
+`cloister/cluster.toml` is authoritative for this non-MCP UI. It declares
+separate `canonical-hours-fixture` and `work-board` external bundles connected
+by the fixed HTTP adapter. `server.json` advertises OCI packaging and
+documentary Cloister metadata, but the current Cloister server resolver
+generates MCP groups only, so it does not materialize this UI topology.
+
+A future CLI collector, if needed, is another sibling bundle exposing the same
+fixed HTTP or UDS adapter. The Worker never spawns it.
 
 ## Encodings
 
-- **colour** = lifecycle state — `opened` · `active` · `needs_you` · `resolved`
-- **radius / vertical** = staleness (older = toward the rim / bottom)
-- **shape** = your role — ● you authored · ◆ you're reviewing · ▢ calendar event
-- **fill** = whose court — **solid** = waiting on *you* · **hollow** = *monitoring* (on others)
-- **label / tag** = the next action — `merge` · `fix ci` · `respond` · `review` · `ready?` · `attend`
-- **green ring** = merge-ready · **dashed** = draft
+- **colour** = `state` — `opened` · `active` · `needs_you` · `resolved`
+- **radius / vertical** = `lastActivity` staleness (older = toward the rim / bottom)
+- **shape** = `role` / `kind` — ● `author` · ◆ `reviewer` · ▢ `event`
+- **fill** = `waitingOn` — **solid** = `me` · **hollow** = `others`
+- **label / tag** = `nextAction` — `merge` · `ci` · `respond` · `review` · `promote` · `attend`
+- **green ring** = `mergeReady` · **dashed** = `isDraft`
 
 ### Layouts (toggle top-left)
 
@@ -41,30 +103,15 @@ see the shape immediately.
 ### Filters + low-signal bucket
 
 `all · mine · reviewing · needs me`, plus a **⌁ low-signal** chip that collapses
-bot/dependabot PRs and review asks gone stale (>14d) so they don't bury the
-handful of PRs that actually want your eyes. Click to reveal.
-
-## Refresh with your live PRs
-
-`data/board.json` is **gitignored** (it's your real PRs + review load). Populate it:
-
-```bash
-scripts/refresh.sh owner/repo      # or: export WORKBOARD_REPO=owner/repo && scripts/refresh.sh
-```
-
-or just hit **↻ refresh (live)** in the page. It folds three slices —
-authored, `user-review-requested:@me` (direct asks, not team fan-out), and
-`reviewed-by:@me` (monitoring) — running concurrently, and detects bot PRs.
-Requires an authenticated `gh` + `jq`. Writes only `data/board.json`; **pushes nothing.**
+items where `lowSignal` is true, including bot PRs and review asks gone stale
+(>14d), so they don't bury the handful of PRs that actually want your eyes.
+Click to reveal.
 
 ## Data shape
 
-`data/board.json` mirrors the canonical-hours board item, plus `role`,
-`waiting_on`, `last_activity`, `merge_ready`, and `bot`. See
-`data/board.example.json` for a runnable sample. Swap in any board that matches
-the shape — this is a *view*, not a reimplementation.
-
-## Status
-
-Personal prototype, local only. Calendar (iCal) source is designed but not yet
-wired.
+Canonical Hours supplies snake_case source fields. The Worker exposes a
+validated camelCase presentation model: `generatedAt`, `tickStatus`,
+`degradations`, and `items`, with item fields including `artifactUri`,
+`waitingOn`, `lastActivity`, `nextAction`, `isDraft`, `mergeReady`,
+`lowSignal`, and `reason`. This package remains a view, not a second work-state
+implementation.

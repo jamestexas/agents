@@ -1,0 +1,30 @@
+[metadata]
+name = "work-board-smoke"
+version = "0.1.0"
+
+[[bundles]]
+name = "canonical-hours-fixture"
+description = "Deterministic Canonical Hours-compatible HTTP source"
+kind = "external"
+tier = "cluster"
+
+  [bundles.external]
+  image = "canonical-hours-fixture:work-board-smoke"
+  httpPort = 8790
+
+[[bundles]]
+name = "work-board"
+description = "Staged workerd UI and BoardSource adapter"
+kind = "external"
+tier = "cluster"
+
+  [bundles.external]
+  image = "work-board:smoke"
+  httpPort = 8791
+  env = [
+    { name = "CANONICAL_HOURS_URL", value = "http://canonical-hours-fixture:8790" },
+    { name = "WORK_BOARD_FIXTURE", value = "false" },
+    { name = "WORK_BOARD_REFRESH_MODE", value = "source-authorized" },
+  ]
+
+[storage]
