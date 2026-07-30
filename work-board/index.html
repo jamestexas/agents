@@ -3,26 +3,55 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0d1117" />
     <title>work-board · canonical-hours</title>
   </head>
   <body>
     <main class="wrap">
-      <header>
-        <h1>work-board</h1>
-        <span class="meta" id="meta">loading…</span>
+      <header class="masthead">
+        <div class="identity">
+          <span class="eyebrow">canonical-hours / operational view</span>
+          <h1>work-board</h1>
+        </div>
+        <span class="meta" id="meta" aria-live="polite">loading board…</span>
       </header>
-      <div id="error" role="status" hidden></div>
-      <nav id="controls" aria-label="Board controls"></nav>
+
+      <div id="provenance" class="provenance" role="status" aria-label="Data status" hidden></div>
+      <div id="error" role="alert" hidden></div>
+
+      <nav id="controls" class="controls" aria-label="Board controls"></nav>
       <p class="note" id="note"></p>
-      <p id="empty" hidden>No work in this view.</p>
-      <svg id="dial" viewBox="0 0 900 760" aria-label="Work board"></svg>
-      <div class="axes" id="axes"></div>
-      <section class="listwrap" id="listwrap">
-        <button id="copybtn" type="button">⧉ copy list</button>
+
+      <section class="instrument" aria-label="Temporal work instrument">
+        <p id="empty" class="empty" hidden>No work in this view.</p>
+        <svg id="dial" viewBox="0 0 900 760" role="img" aria-label="Work board time dial"></svg>
+        <div class="axes" id="axes"></div>
+      </section>
+
+      <aside class="legend" aria-label="Visual encoding">
+        <span><i class="shape circle"></i>circle author</span>
+        <span><i class="shape diamond"></i>diamond reviewer</span>
+        <span><i class="shape square"></i>square event</span>
+        <span class="sep" aria-hidden="true"></span>
+        <span><i class="shape filled"></i>filled waiting on me</span>
+        <span><i class="shape hollow"></i>hollow waiting on others</span>
+        <span><i class="shape dashed"></i>dashed draft</span>
+        <span><i class="shape ready"></i>green outline merge-ready</span>
+      </aside>
+
+      <section class="listwrap" id="listwrap" aria-labelledby="list-heading">
+        <div class="listhead">
+          <div>
+            <span class="eyebrow">copy surface</span>
+            <h2 id="list-heading">Current action list</h2>
+          </div>
+          <button id="copybtn" type="button" aria-live="polite">⧉ copy list</button>
+        </div>
         <pre id="listtext" class="listtext"></pre>
       </section>
     </main>
-    <div class="tip" id="tip" hidden></div>
+
+    <div class="tip" id="tip" role="tooltip" hidden></div>
     <script type="module" src="/src/ui/app.ts"></script>
   </body>
 </html>
