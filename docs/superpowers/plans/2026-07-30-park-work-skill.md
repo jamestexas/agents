@@ -411,7 +411,7 @@ git commit -m "[agents-dba741] feat(park-work): add deterministic safety fold"
 
 **Interfaces:**
 - Consumes: `fold.py evaluate` and `fold.py validate-receipt` from Task 1.
-- Consumes Rosary MCP: `rsry_active`, `rsry_dispatch_history`, `rsry_bead_history`, `rsry_list_beads`, `rsry_expand_ref`, `rsry_bead_comment`, `rsry_agent_session_addresses`, `rsry_agent_session_message_record`, and `rsry_workspace_checkpoint`.
+- Consumes Rosary MCP: `rsry_active`, `rsry_dispatch_history`, `rsry_bead_history`, `rsry_list_beads`, `rsry_expand_ref`, `rsry_bead_comment`, `rsry_bead_comment_list` (durable comment readback), `rsry_agent_session_addresses`, `rsry_agent_session_message_record`, `rsry_agent_run_events` (optional session-event readback), and `rsry_workspace_checkpoint`.
 - Produces: `/park-work [<bead-id>]` and `/park-work --check [<bead-id>]`.
 - Produces: a schema-v1 receipt matching the design specification.
 
