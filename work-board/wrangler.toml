@@ -1,0 +1,11 @@
+name = "work-board-staging"
+main = "src/worker.ts"
+compatibility_date = "2026-03-01"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+run_worker_first = true
+
+[vars]
+WORK_BOARD_FIXTURE = "true"
