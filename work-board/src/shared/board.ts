@@ -28,7 +28,7 @@ export interface WorkBoardItem {
 
 export interface WorkBoardView {
   generatedAt: string;
-  tickStatus: "ok" | "degraded" | "live" | "all_clear";
+  tickStatus: "ok" | "degraded" | "live" | "all_clear" | "example";
   degradations: string[];
   items: WorkBoardItem[];
 }
@@ -76,14 +76,16 @@ export function normalizeBoard(input: unknown): WorkBoardView {
   const board = RawBoard.parse(input);
   return {
     generatedAt: board.generated_at,
-    tickStatus: board.tick_status === "example" ? "live" : board.tick_status,
+    tickStatus: board.tick_status,
     degradations: board.degradations.map((d) => typeof d === "string" ? d : `${d.source}: ${d.error}`),
     items: board.items.map((item) => {
       const role = item.role ?? (item.kind === "pr" ? "author" : "participant");
       const waitingOn = item.waiting_on ?? (item.state === "needs_you" ? "me" : "others");
       const activity = item.last_activity
         ?? item.start
-        ?? item.new_items?.map((entry) => entry.at).sort().at(-1)
+        ?? item.new_items?.reduce<string | undefined>((latest, entry) =>
+          !latest || Date.parse(entry.at) > Date.parse(latest) ? entry.at : latest,
+        undefined)
         ?? board.generated_at;
       const ageMs = Date.parse(board.generated_at) - Date.parse(activity);
       return {

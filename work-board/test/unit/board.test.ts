@@ -57,6 +57,36 @@ describe("normalizeBoard", () => {
     });
   });
 
+  it("preserves the example fixture status for the UI banner", () => {
+    const board = normalizeBoard({
+      generated_at: "2026-07-30T12:00:00Z",
+      tick_status: "example",
+      items: []
+    });
+
+    expect(board.tickStatus).toBe("example");
+  });
+
+  it("uses chronological time rather than ISO text order for activity entries", () => {
+    const board = normalizeBoard({
+      generated_at: "2026-07-30T12:00:00Z",
+      tick_status: "ok",
+      items: [{
+        kind: "pr",
+        title: "mixed timestamp offsets",
+        state: "active",
+        new_items: [
+          { at: "2026-07-30T11:00:00+02:00" },
+          { at: "2026-07-30T10:00:00Z" }
+        ]
+      }]
+    });
+
+    expect(board.items[0]).toMatchObject({
+      lastActivity: "2026-07-30T10:00:00Z"
+    });
+  });
+
   it("rejects invalid timestamps and unknown kinds", () => {
     expect(() => normalizeBoard({
       generated_at: "not-a-time",
