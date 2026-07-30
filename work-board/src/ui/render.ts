@@ -280,5 +280,4 @@ export function renderBoard(state: RenderState, now = Date.parse(state.board.gen
   document.querySelector<HTMLElement>("#empty")!.hidden = items.length !== 0;
   document.querySelector<HTMLElement>("#note")!.textContent = modeNotes[state.mode];
   document.querySelector<HTMLElement>("#axes")!.innerHTML = modeAxes[state.mode];
-  document.querySelector<HTMLElement>("#listwrap")!.hidden = state.mode === "stack";
 }

@@ -1,5 +1,23 @@
 import { expect, test } from "@playwright/test";
 
+function rgb(cssColor: string): [number, number, number] {
+  const channels = cssColor.match(/\d+(?:\.\d+)?/g)?.slice(0, 3).map(Number);
+  if (!channels || channels.length !== 3) throw new Error(`expected an RGB color, got ${cssColor}`);
+  return channels as [number, number, number];
+}
+
+function contrastRatio(foreground: string, background: string): number {
+  const luminance = (color: string) => {
+    const channels = rgb(color).map((channel) => {
+      const value = channel / 255;
+      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * channels[0]! + 0.7152 * channels[1]! + 0.0722 * channels[2]!;
+  };
+  const values = [luminance(foreground), luminance(background)].toSorted((a, b) => b - a);
+  return (values[0]! + 0.05) / (values[1]! + 0.05);
+}
+
 test("renders all layouts, filters, tooltip, and exact visual encoding", async ({ page }) => {
   const consoleErrors: string[] = [];
   const externalRequests: string[] = [];
@@ -30,13 +48,41 @@ test("renders all layouts, filters, tooltip, and exact visual encoding", async (
   await expect(legend.getByText("dashed draft", { exact: true })).toBeVisible();
   await expect(legend.getByText("green outline merge-ready", { exact: true })).toBeVisible();
 
+  const authorPath = page.locator('g.node[aria-label^="#101"] path');
+  const reviewerPath = page.locator('g.node[aria-label^="#204"] path');
+  const eventPath = page.locator('g.node[aria-label^="team standup"] path');
+  const [circleGeometry, diamondGeometry, squareGeometry] = await Promise.all([
+    authorPath.getAttribute("d"),
+    reviewerPath.getAttribute("d"),
+    eventPath.getAttribute("d")
+  ]);
+  expect(circleGeometry).toMatch(/A/);
+  expect(diamondGeometry).toMatch(/L/);
+  expect(diamondGeometry).not.toMatch(/[hv]/);
+  expect(squareGeometry).toMatch(/h.*v/);
+  await expect(authorPath).toHaveAttribute("fill", "currentColor");
+  await expect(page.locator('g.node[aria-label^="#206"] path')).toHaveAttribute("fill", "none");
+  await expect(page.locator('g.node[aria-label^="#103"] path')).toHaveAttribute("stroke-dasharray", "3,2.5");
+  await expect(authorPath).toHaveAttribute("stroke", "#238636");
+  await expect(authorPath).toHaveAttribute("stroke-width", "3");
+
   await page.locator("g.node").first().focus();
   await expect(page.locator("#tip")).toBeVisible();
   await expect(page.locator("#tip")).toContainText(/approved|review|draft|standup/i);
 
-  const reviewing = page.getByRole("button", { name: "reviewing", exact: true });
-  await reviewing.focus();
+  const mine = page.getByRole("button", { name: "mine", exact: true });
+  await mine.focus();
   await expect(page.locator("#tip")).toBeHidden();
+  await mine.click();
+  await expect(mine).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("g.node")).toHaveCount(4);
+
+  const needs = page.getByRole("button", { name: "needs me", exact: true });
+  await needs.click();
+  await expect(needs).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("g.node")).toHaveCount(5);
+
+  const reviewing = page.getByRole("button", { name: "reviewing", exact: true });
   await reviewing.click();
   await expect(reviewing).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "all", exact: true })).toHaveAttribute("aria-pressed", "false");
@@ -49,12 +95,30 @@ test("renders all layouts, filters, tooltip, and exact visual encoding", async (
   await page.getByRole("button", { name: "stack", exact: true }).click();
   await expect(page.getByRole("button", { name: "stack", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("[data-now-line]")).toHaveCount(1);
+  await expect(page.locator("#listwrap")).toBeVisible();
+  await expect(page.getByRole("button", { name: /copy list/ })).toBeVisible();
 
   await page.getByRole("button", { name: "sweep", exact: true }).click();
   await expect(page.locator("svg#dial")).toHaveAttribute("data-mode", "sweep");
   await expect(page.getByRole("button", { name: "sweep", exact: true })).toHaveAttribute("aria-pressed", "true");
   expect(consoleErrors).toEqual([]);
   expect(externalRequests).toEqual([]);
+});
+
+test("quiet instrument labels meet small-text contrast", async ({ page }) => {
+  await page.goto("/board/ui");
+  const background = await page.locator("body").evaluate((element) =>
+    getComputedStyle(element).backgroundColor
+  );
+  const eyebrow = await page.locator(".eyebrow").first().evaluate((element) =>
+    getComputedStyle(element).color
+  );
+  const ringLabel = await page.locator(".ring-label").first().evaluate((element) =>
+    getComputedStyle(element).fill
+  );
+
+  expect(contrastRatio(eyebrow, background)).toBeGreaterThanOrEqual(4.5);
+  expect(contrastRatio(ringLabel, background)).toBeGreaterThanOrEqual(4.5);
 });
 
 test("refresh is single-flight and preserves the last board on failure", async ({ page }) => {
