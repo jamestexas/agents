@@ -163,6 +163,30 @@ test("refresh is single-flight and preserves the last board on failure", async (
   await expect(page.locator("g.node")).toHaveCount(retainedCount);
 });
 
+test("times out a non-resolving refresh and restores the previous board", async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as Window & { __WORK_BOARD_REQUEST_TIMEOUT_MS__?: number })
+      .__WORK_BOARD_REQUEST_TIMEOUT_MS__ = 50;
+  });
+  await page.route("**/api/refresh", async () => {
+    await new Promise<void>(() => {});
+  });
+  await page.goto("/board/ui");
+  const refresh = page.getByRole("button", { name: /refresh/ });
+  const retainedCount = await page.locator("g.node").count();
+  const retainedMeta = await page.locator("#meta").textContent();
+
+  await refresh.click();
+  await expect(refresh).toBeDisabled();
+  await expect(refresh).toHaveAttribute("aria-busy", "true");
+  await expect(page.locator("#error")).toContainText(/timed out/i);
+  await expect(page.locator("#error")).toContainText(/last successful board/i);
+  await expect(refresh).toBeEnabled();
+  await expect(refresh).toHaveAttribute("aria-busy", "false");
+  await expect(page.locator("g.node")).toHaveCount(retainedCount);
+  await expect(page.locator("#meta")).toHaveText(retainedMeta ?? "");
+});
+
 test("opens validated artifacts with Enter and Space", async ({ page }) => {
   await page.addInitScript(() => {
     const opened: string[] = [];

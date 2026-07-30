@@ -7,6 +7,13 @@ import type { BoardFilter } from "./state";
 
 let state: RenderState | null = null;
 let refreshPromise: Promise<void> | null = null;
+const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
+
+declare global {
+  interface Window {
+    __WORK_BOARD_REQUEST_TIMEOUT_MS__?: number;
+  }
+}
 
 const controls = document.querySelector<HTMLElement>("#controls")!;
 controls.innerHTML = `
@@ -79,12 +86,31 @@ async function requestBoard(
   path: "/api/board" | "/api/refresh",
   method: "GET" | "POST"
 ): Promise<WorkBoardView> {
-  const response = await fetch(path, { method, cache: "no-store" });
-  const body = await response.json() as WorkBoardView | { message?: string };
-  if (!response.ok) {
-    throw new Error("message" in body && body.message ? body.message : `request failed: ${response.status}`);
+  const override = window.__WORK_BOARD_REQUEST_TIMEOUT_MS__;
+  const timeoutMs = typeof override === "number" && Number.isFinite(override) && override > 0
+    ? override
+    : DEFAULT_REQUEST_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(path, {
+      method,
+      cache: "no-store",
+      signal: controller.signal
+    });
+    const body = await response.json() as WorkBoardView | { message?: string };
+    if (!response.ok) {
+      throw new Error("message" in body && body.message ? body.message : `request failed: ${response.status}`);
+    }
+    return body as WorkBoardView;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("Board request timed out; the source may be degraded.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
   }
-  return body as WorkBoardView;
 }
 
 async function load(): Promise<void> {
