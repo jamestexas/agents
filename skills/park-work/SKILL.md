@@ -292,68 +292,132 @@ state.
 
 ## Resume
 
-`/park-work --resume [<episode-id>|<bead-id>]` resumes only a schema-valid
-parked episode. Resolve the **latest parked receipt** by an explicit
-`episode_id`, or by a confirmed anchor bead when the argument is a bead ID.
-Read its anchor comments with
-`rsry_bead_comment_list(id=<anchor>, repo_path=<repo>)`, parse only one fenced
-`work_episode_receipt/v1` candidate per field, and select the latest validated
-receipt whose `outcome` is `parked`, `safe_to_close` is `true`, and whose
-`episode_id` matches when one was supplied. Ambiguity, no candidate, or a
-candidate from another anchor returns `unsafe`.
+`/park-work --resume [<episode-id>|<bead-id>]` resumes one schema-valid parked
+episode. It does not infer an anchor, restore into the current checkout, or
+write until every step below has succeeded.
 
-Use the exact fenced receipt bytes to run:
+### 1. Resolve one parked receipt and anchor
+
+For an explicit `--resume <bead-id>`, use that explicit bead as the anchor and
+list its comments directly with
+`rsry_bead_comment_list(id=<bead-id>, repo_path=<repo>)`. For an explicit
+`--resume <episode-id>`, first mechanically resolve the current Rosary
+repository from the current Git/jj root: use `git rev-parse --show-toplevel`
+or `jj root`, match that canonical root to one configured Rosary repository,
+and return `unsafe` if the mapping is absent or ambiguous. Paginate
+`rsry_list_beads(repo=<repo>)` through all results and all statuses, then call
+`rsry_bead_comment_list(id=<candidate>, repo_path=<repo>)` on each candidate.
+Parse only fenced `work_episode_receipt/v1` fields and accept only
+helper-valid, parked, `safe_to_close=true` receipts matching that exact
+`episode_id`.
+
+For either selector, retain every candidate's Rosary comment metadata. Require
+exactly one anchor: zero or multiple anchors is `unsafe`. On that anchor,
+select the latest parked receipt by Rosary metadata ordered by
+`(created_at, comment_id) descending`. Missing or malformed metadata, or an
+unresolved top tie, is `unsafe`. Never order by UUID/attempt text. Retain the
+selected `comment_id`, `PARKED_RECEIPT_BYTES`, parsed `episode_id`, stable
+`intent_id`, and the exact recorded checkpoint or branch resume target.
+
+### 2. RESUME_RECEIPT_VALIDATION
+
+Validate the selected exact receipt bytes before live checks, workspace
+selection, restoration, or writes:
 
 ```bash
 printf '%s' "$PARKED_RECEIPT_BYTES" > "$CANDIDATE_RECEIPT_FILE"
 python3 "$FOLD_HELPER" validate-receipt < "$CANDIDATE_RECEIPT_FILE"
 ```
 
-Do not restore anything until validation succeeds. Then **revalidate live state**
-through Rosary and the VCS before restoring anything: resolve the anchor with
-`rsry_list_beads`, inspect `rsry_bead_history(id=<anchor>, repo_path=<repo>)`,
-`rsry_active()` and
-`rsry_dispatch_history(active_only=true, bead_id=<anchor>)`, and repeat the
-Git or jj conflict and workspace observations from §2. Stop and return
-`unsafe` on closed, abandoned, or reassigned work; **another active holder**;
-a **missing checkpoint**; an unresolved conflict or VCS operation; or
-receipt/schema drift. Drift includes a changed receipt identity, a failed
-schema validation, a mismatched anchor/repository/VCS identity, or a resume
-reference that no longer resolves exactly.
+Validation failure is `unsafe`.
 
-Only after those checks, resolve the recorded checkpoint or pushed branch with
-the VCS. For Git, resolve the recorded checkpoint commit with
-`git cat-file -e <checkpoint>^{commit}` or the recorded pushed branch with
-`git rev-parse <branch>`; for jj, resolve the recorded change with
-`jj log -r <checkpoint>`. Do not delete, reset, checkout over, or rewrite
-another workspace. If resolution cannot use the selected workspace safely,
-return `unsafe` rather than materializing it elsewhere.
+### 3. RESUME_LIVE_REVALIDATION
 
-Restate the receipt's bounded `next_action` as context for the human and
-agent. It is not safety evidence and cannot override any live observation.
+**Revalidate live state** through Rosary and the VCS before restoration: read
+the selected anchor with `rsry_list_beads`,
+`rsry_bead_history(id=<anchor>, repo_path=<repo>)`, `rsry_active()`, and
+`rsry_dispatch_history(active_only=true, bead_id=<anchor>)`; then run the Git
+or jj conflict, operation, and quiescence observations from §2 against the
+current workspace. Return `unsafe` for closed, abandoned, or reassigned work;
+**another active holder**; a **missing checkpoint** or branch; an unresolved
+conflict or VCS operation; or receipt/schema drift. These observations are
+safety evidence; the receipt's `next_action` is context only.
 
-After all validation and resolution checks succeed, construct one
-`work_episode_observation/v1` JSON object with `schema_version: 1`,
-`observation: "resumed"`, the original `episode_id`, the receipt's stable
-`intent_id`, a fresh `attempt_id`, the anchor bead, the SHA-256 hash of the
-exact receipt bytes, and the mechanically observed
-checkpoint/branch reference. Serialize it once as `RESUMED_OBSERVATION_BYTES`,
-fence those unchanged bytes, and
-**record the resumed observation** using:
+### 4. RESUME_RECEIPT_RACE_RECHECK
+
+Immediately before workspace selection or restoration, call authoritative
+`rsry_bead_comment_list(id=<anchor>, repo_path=<repo>)` again. Refetch the
+selected `comment_id`, reparse its sole fenced receipt, rerun
+`validate-receipt`, and compare its exact bytes, `episode_id`, `intent_id`, and
+checkpoint/branch target with `PARKED_RECEIPT_BYTES` and the retained fields.
+If the comment was edited or deleted, any comparison differs, or a newer
+validated receipt for the same episode now exists by `(created_at, comment_id)`
+ordering, return `unsafe`: do not restore, write, or work.
+
+### 5. RESUME_WORKSPACE_SELECTION
+
+Resolve the retained target without changing an existing workspace. For Git,
+first verify a checkpoint with `git cat-file -e <checkpoint-sha>^{commit}` or a
+pushed branch with `git rev-parse <branch>`; retain the resulting commit SHA as
+the normalized receipt target, then enumerate
+`git worktree list --porcelain`. For jj, first resolve `jj log -r <change-id>`
+and retain that exact change ID as the normalized receipt target, then enumerate
+`jj workspace list`. Choose only a unique existing quiescent workspace whose
+current HEAD/change equals the normalized receipt target.
+
+If no qualifying workspace exists, create one only at a brand-new absent path:
+use the deterministic safe parent `${TMPDIR:-/tmp}/park-work-resume` and a fresh
+suffix, verify `[ ! -e <new> ]`, then use
+`git worktree add --detach <new> <checkpoint-sha>` (or an equivalent new branch
+worktree) for Git, or `jj workspace add --revision <change-id> <new>` for jj.
+Never reuse a nonempty path. Backend creation failure, a non-unique candidate,
+or an unresolvable target is `unsafe`.
+
+### 6. RESUME_WORKSPACE_VERIFICATION
+
+Enter only the selected or newly created workspace and rerun its conflict and
+quiescence checks there. Require the current `git rev-parse HEAD` to equal the
+normalized receipt target for Git, or the current jj change ID to equal the
+normalized receipt target for jj. If this backend cannot create or verify that
+workspace, return
+`unsafe`. Never delete, reset, checkout-over, or rewrite an existing workspace.
+
+### 7. RESUME_OBSERVATION_DEDUPE
+
+Before minting a fresh resume attempt or writing, reread `rsry_bead_comment_list(id=<anchor>, repo_path=<repo>)`
+and parse only fenced `work_episode_observation/v1` payloads. A schema-valid successful `resumed`
+observation has `schema_version: 1`, `observation: "resumed"`, and the
+recorded episode, intent, anchor, attempt, and exact resume target fields. If
+one matches `episode_id`, stable `intent_id`, anchor, and exact resume target,
+read it back and return it; do not append another transition or
+start a distinct attempt. Only when none exists mint a fresh `attempt_id`.
+
+### 8. RESUME_OBSERVATION_APPEND
+
+Construct one successful `work_episode_observation/v1` JSON object with the
+original `episode_id`, stable `intent_id`, fresh `attempt_id`, anchor, exact
+target, and the SHA-256 hash of `PARKED_RECEIPT_BYTES`. Serialize it once as
+`RESUMED_OBSERVATION_BYTES`, fence those unchanged bytes, and **record the
+resumed observation** exactly once:
 
 ```text
 rsry_bead_comment(id=<anchor>, repo_path=<repo>, body=<RESUMED_OBSERVATION_FENCE>)
 ```
 
-Read comments back with
-`rsry_bead_comment_list(id=<anchor>, repo_path=<repo>)`. Parse only the fenced
-`work_episode_observation/v1` JSON, locate the same `episode_id` and fresh
-`attempt_id`, and compare the returned fenced payload byte-for-byte with
-`RESUMED_OBSERVATION_BYTES`. This bead-comment readback is the authoritative
-durability proof; failed or ambiguous readback returns `unsafe`. **Begin work only after**
-the resumed observation is durable.
+### 9. RESUME_OBSERVATION_READBACK
 
-## Retry and collections
+Call `rsry_bead_comment_list(id=<anchor>, repo_path=<repo>)`, refetch the
+appended comment, and compare the same comment/bytes byte-for-byte with
+`RESUMED_OBSERVATION_BYTES`. Failed or ambiguous authoritative bead-comment
+readback is `unsafe`.
+
+### 10. RESUME_BEGIN_WORK
+
+**Begin work only after** the resumed observation is durable and the verified
+target workspace remains selected. Restate the bounded `next_action` as context
+only; it is not safety evidence.
+
+### Retry and collections
 
 A retry reuses the stable `intent_id` and creates a fresh `attempt_id`. A new
 attempt may observe changed evidence; an existing successful transition is

@@ -189,23 +189,123 @@ class SkillContractTests(unittest.TestCase):
     def skill_text(self):
         return (ROOT / "SKILL.md").read_text()
 
+    def resume_section(self):
+        text = self.skill_text()
+        start = text.index("\n## Resume\n")
+        end = text.find("\n## ", start + 1)
+        return text[start:] if end == -1 else text[start:end]
+
+    def resume_step(self, resume, label, next_label):
+        start = resume.index(label)
+        end = resume.index(next_label, start) if next_label else len(resume)
+        return resume[start:end]
+
     def test_resume_revalidates_before_restoring_or_working(self):
-        text = self.skill_text().lower()
-        for phrase in (
-            "latest parked receipt",
-            "revalidate live state",
-            "another active holder",
-            "missing checkpoint",
-            "record the resumed observation",
-            "begin work only after",
+        resume = self.resume_section()
+        for token in (
+            "--resume <bead-id>",
+            "rsry_bead_comment_list(id=<bead-id>, repo_path=<repo>)",
+            "--resume <episode-id>",
+            "current Git/jj root",
+            "rsry_list_beads(repo=<repo>)",
+            "all statuses",
+            "on each candidate",
+            "exactly one anchor",
+            "(created_at, comment_id) descending",
+            "unresolved top tie",
+            "Never order by UUID/attempt text",
+            "PARKED_RECEIPT_BYTES",
+            "selected `comment_id`",
+            "git worktree list --porcelain",
+            "jj workspace list",
+            "git worktree add --detach <new> <checkpoint-sha>",
+            "jj workspace add --revision <change-id> <new>",
+            "Never reuse a nonempty path",
+            "git rev-parse HEAD",
+            "RESUME_RECEIPT_VALIDATION",
+            "RESUME_LIVE_REVALIDATION",
+            "RESUME_RECEIPT_RACE_RECHECK",
+            "RESUME_WORKSPACE_SELECTION",
+            "RESUME_WORKSPACE_VERIFICATION",
+            "RESUME_OBSERVATION_DEDUPE",
+            "RESUME_OBSERVATION_APPEND",
+            "RESUME_OBSERVATION_READBACK",
+            "RESUME_BEGIN_WORK",
         ):
-            self.assertIn(phrase, text)
+            self.assertIn(token, resume)
+
+        positions = [
+            resume.index("RESUME_RECEIPT_VALIDATION"),
+            resume.index("RESUME_LIVE_REVALIDATION"),
+            resume.index("RESUME_RECEIPT_RACE_RECHECK"),
+            resume.index("RESUME_WORKSPACE_SELECTION"),
+            resume.index("RESUME_WORKSPACE_VERIFICATION"),
+            resume.index("RESUME_OBSERVATION_DEDUPE"),
+            resume.index("RESUME_OBSERVATION_APPEND"),
+            resume.index("RESUME_OBSERVATION_READBACK"),
+            resume.index("RESUME_BEGIN_WORK"),
+        ]
+        self.assertEqual(positions, sorted(positions))
+
+        validation = self.resume_step(
+            resume, "RESUME_RECEIPT_VALIDATION", "RESUME_LIVE_REVALIDATION"
+        )
+        live = self.resume_step(
+            resume, "RESUME_LIVE_REVALIDATION", "RESUME_RECEIPT_RACE_RECHECK"
+        )
+        race = self.resume_step(
+            resume, "RESUME_RECEIPT_RACE_RECHECK", "RESUME_WORKSPACE_SELECTION"
+        )
+        selection = self.resume_step(
+            resume, "RESUME_WORKSPACE_SELECTION", "RESUME_WORKSPACE_VERIFICATION"
+        )
+        verification = self.resume_step(
+            resume, "RESUME_WORKSPACE_VERIFICATION", "RESUME_OBSERVATION_DEDUPE"
+        )
+        dedupe = self.resume_step(
+            resume, "RESUME_OBSERVATION_DEDUPE", "RESUME_OBSERVATION_APPEND"
+        )
+        append = self.resume_step(
+            resume, "RESUME_OBSERVATION_APPEND", "RESUME_OBSERVATION_READBACK"
+        )
+        readback = self.resume_step(
+            resume, "RESUME_OBSERVATION_READBACK", "RESUME_BEGIN_WORK"
+        )
+        begin = self.resume_step(resume, "RESUME_BEGIN_WORK", None)
+        self.assertIn("validate-receipt", validation)
+        self.assertIn("rsry_active()", live)
+        self.assertIn("rsry_bead_comment_list", race)
+        self.assertIn("selected `comment_id`", race)
+        self.assertIn("git worktree list --porcelain", selection)
+        self.assertIn("[ ! -e <new> ]", selection)
+        self.assertIn("git rev-parse HEAD", verification)
+        self.assertIn("work_episode_observation/v1", dedupe)
+        self.assertIn("rsry_bead_comment", append)
+        self.assertIn("same comment/bytes", readback)
+        self.assertIn("Begin work only after", begin)
 
     def test_retry_and_partial_outcome_rules_are_explicit(self):
-        text = self.skill_text().lower()
-        self.assertIn("stable `intent_id`", text)
-        self.assertIn("independent episode", text)
-        self.assertIn("one unsafe episode", text)
+        resume = self.resume_section()
+        for token in (
+            "work_episode_observation/v1",
+            "Before minting a fresh resume attempt or writing",
+            "matches `episode_id`, stable `intent_id`, anchor, and exact resume target",
+            "read it back and return it; do not append another transition",
+            "mint a fresh `attempt_id`",
+            "same comment/bytes",
+            "A retry reuses the stable `intent_id`",
+            "Each invocation evaluates one independent episode",
+            "one unsafe episode never rolls back or weakens",
+        ):
+            self.assertIn(token, resume)
+        self.assertLess(
+            resume.index("RESUME_OBSERVATION_DEDUPE"),
+            resume.index("mint a fresh `attempt_id`"),
+        )
+        self.assertLess(
+            resume.index("mint a fresh `attempt_id`"),
+            resume.index("RESUME_OBSERVATION_APPEND"),
+        )
 
     def test_skill_declares_all_three_modes_and_mcp_dependency(self):
         text = self.skill_text()
