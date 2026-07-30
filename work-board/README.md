@@ -58,15 +58,21 @@ Cloister checkout. The explicit Cloister commands require `CLOISTER_REPO`;
 Docker context policy, while `test:cloister` runs those contracts before the
 two-bundle smoke topology.
 
+Pnpm lifecycle scripts remain denied by default. Do not approve lifecycle
+scripts for `esbuild`, `sharp`, or `workerd` merely to silence the install
+warning: the verified optional native binary packages support the current
+development and container platforms without granting install-time execution.
+
 ## Security
 
 The browser receives board data, never provider credentials. The Worker cannot
 spawn a CLI. A future CLI collector must run as a sibling Cloister bundle
 behind the same fixed `read`/`refresh` source contract.
 
-Refresh is default-deny outside fixture mode. In a real deployment,
-`source-authorized` means authorization is delegated to the configured source;
-it does not grant the browser provider credentials.
+Board reads and refresh authority are separate. Refresh is default-deny outside
+fixture mode. In a real deployment, `source-authorized` means authorization is
+delegated to the configured source; it does not grant the browser provider
+credentials.
 
 ## Cloister topology
 
