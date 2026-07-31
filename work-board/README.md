@@ -33,6 +33,31 @@ Canonical Hours projection and `POST /tick` refreshes it. The Worker validates
 and normalizes both fixture and real-source payloads before they reach the
 browser.
 
+## Run as a Cloister cluster
+
+The board is hosted as a cluster bundle; it is not a Claude Code harness. Build
+the two local images from this package root, then use Cloister's native cluster
+verb against the checked-in cluster directory:
+
+```bash
+docker build -t work-board:smoke -f Dockerfile .
+docker build -t canonical-hours-fixture:work-board-smoke \
+  -f cloister/fixture.Dockerfile .
+
+cloister cluster up \
+  --dir "$PWD/cloister" \
+  --detach
+
+open http://127.0.0.1:8791/board/ui
+
+cloister cluster down --dir "$PWD/cloister"
+```
+
+`cloister run --harness ... --repo ...` is a separate door for running a
+confined coding harness. It is not needed to host this Worker. `cluster.toml`
+is the operator-readable declaration; `cluster.compose.yaml` is the generated
+artifact consumed by `cloister cluster up`.
+
 ## Routes
 
 | Method | Path | Purpose |
@@ -78,9 +103,12 @@ credentials.
 
 `cloister/cluster.toml` is authoritative for this non-MCP UI. It declares
 separate `canonical-hours-fixture` and `work-board` external bundles connected
-by the fixed HTTP adapter. `server.json` advertises OCI packaging and
-documentary Cloister metadata, but the current Cloister server resolver
-generates MCP groups only, so it does not materialize this UI topology.
+by the fixed HTTP adapter. `server.json` carries the producer-side OCI artifact
+and `art.cloister/v1.bundles[]` facts; the operator-owned TOML supplies the
+deployment choice. Cloister resolves the producer image when registry-backed
+and validates the operator's tier, kind, and port against those producer facts.
+This staging cluster uses explicit local image tags, so it can be run without
+publishing an OCI artifact first.
 
 A future CLI collector, if needed, is another sibling bundle exposing the same
 fixed HTTP or UDS adapter. The Worker never spawns it.

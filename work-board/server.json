@@ -8,12 +8,14 @@
     "url": "https://github.com/jamestexas/agents",
     "source": "github"
   },
-  "packages": [{
-    "registryType": "oci",
-    "identifier": "work-board",
-    "version": "0.1.0"
-  }],
   "_meta": {
+    "io.modelcontextprotocol.registry/publisher-provided": {
+      "artifacts": [{
+        "registryType": "oci",
+        "identifier": "work-board",
+        "version": "0.1.0"
+      }]
+    },
     "art.cloister/v1": {
       "bundles": [{
         "name": "work-board",
