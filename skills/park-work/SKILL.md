@@ -84,8 +84,9 @@ single fenced `work_episode_receipt/v1` JSON object per candidate, and validate
 every matching-intent candidate. Pass each as `receipt` plus its exact
 `source_bytes` and `comment_id` to `prepare-attempt`. The helper inspects all
 matching successes before deciding: semantic disagreement in episode, anchor,
-outcome, repository/binding, head, or resume data is `unsafe`, independent of
-comment order. Semantically identical duplicates return
+outcome, exact bead acceptance/PR contract, derived `pr_backed` applicability,
+repository/binding, head, or resume data is `unsafe`, independent of comment
+order. Semantically identical duplicates return
 `action=return_existing` with their exact source metadata in deterministic
 comment-ID order and no new transition. `action=evaluate` supplies a fresh
 `attempt-<UUID>`; every retry invocation gets a fresh attempt while preserving
@@ -176,13 +177,13 @@ completion:
   pr_merged                 # required only when pr_backed=true
 
 resume:
-  resume_target_resolvable  # required only when all completion checks fail
+  resume_target_resolvable  # required when bead_terminal mechanically fails
 ```
 
 Missing, duplicate, unknown, mis-categorized, or inapplicable checks are schema
 errors. A non-PR bead must omit `pr_merged`. A PR-backed bead must include it.
-`resume_target_resolvable` is present only when every applicable completion
-check is mechanically `fail`.
+`resume_target_resolvable` is present only when `bead_terminal` mechanically
+fails from an enumerated nonterminal status.
 
 ## Authoritative evidence mapping
 
@@ -245,14 +246,13 @@ the outcome is `unknown`. Empty Rosary dispatch history alone is never a pass.
 Read the structured bead record to obtain the exact declared acceptance
 command, status, and PR URL.
 
-`close_condition_satisfied` receives the complete authoritative Rosary verify
-history with exact record IDs, commands, verdicts, RFC3339 times, and unique
-ascending sequence values. The helper itself selects the last record whose
-command exactly equals the bead's declared acceptance command and derives pass
-or fail. Never pass a caller-authored `latest` boolean or summary verdict.
-No matching observation derives unknown; reversed/tied sequences, a prose
-conclusion, command mismatch, malformed/incomplete history, or unavailable
-history is an error or unknown and cannot authorize a receipt.
+The live `rsry_bead_history` response does not expose an exact command-bound,
+authoritatively ordered verify history. Therefore
+`close_condition_satisfied` must be `unknown` with typed unavailable evidence.
+Never invent `command`, `kind`, `sequence`, `latest`, `authoritative`, or
+`complete` fields from prose or array position. Completed receipt production
+is unavailable until `rosary-a6166d` supplies the missing event identity,
+declared-command correlation, complete ordering, and latest-verdict proof.
 
 `bead_terminal` passes only for the structured Rosary status `closed` or
 `done`; the enumerated nonterminal statuses `open`, `in_progress`, and
@@ -272,10 +272,15 @@ or `CLOSED` with no merge timestamp is fail. Authentication errors, command
 errors, URL mismatch, missing fields, or malformed output are unknown. A
 non-PR bead does not invent `pr_merged`.
 
-Completed is possible only when every completion check passes. Parked is
-possible only when every completion check explicitly fails and the resume
-resolver passes. Mixed or unknown completion evidence is unsafe; an open bead
-is not guessed to be incomplete.
+In v1, `completed` is unavailable because the close condition cannot be
+mechanically proven. A structured `open`, `in_progress`, or `blocked` status
+is itself a decisive failure of `bead_terminal`; with all base evidence
+durable, every other applicable completion check known, and the resume
+resolver passing, it produces `parked` even though
+`close_condition_satisfied=unknown`. This does not coerce or fabricate a
+close-condition failure. `done` or `closed` with unavailable history remains
+unsafe, never completed or parked. Unknown PR evidence, terminal mixed/unknown
+completion, and malformed status remain unsafe.
 
 ## Checkpoint before any receipt
 
@@ -285,15 +290,16 @@ from durable evidence:
 - A checkpoint-needed observation uses `protocol_phase=preflight`. Both
   preservation checks must be passing typed `state=checkpointable` evidence
   for the exact bound workspace. The helper returns `eligible=false` and
-  `action=checkpoint`. It can identify a logical completed or parked
-  candidate, but it can authorize only the checkpoint action.
+  `action=checkpoint` only for a mechanically nonterminal parked candidate.
+  A terminal bead without `rosary-a6166d` remains unsafe and does not authorize
+  a receipt or checkpoint through this protocol.
 - An already durable observation, or a fresh post-checkpoint observation,
   uses `protocol_phase=durable`. Both preservation checks must contain actual
   resolved `state=durable` references. Only this phase can return
   `eligible=true, action=write_receipt`.
 
 A preflight object is never receipt-eligible and `validate-receipt` rejects it.
-This applies equally to logically completed and parked work.
+Only a nonterminal parked candidate can authorize checkpoint creation in v1.
 
 For park mode only, when a valid preflight returns `action=checkpoint`, call
 `rsry_workspace_checkpoint` for the exact anchor and bound root. Verify the
@@ -328,6 +334,8 @@ receipt anchor must equal `anchor_confirmed`; its full repository object must
 equal the embedded validated `repository_resolved` binding; and all VCS,
 preservation, and resume evidence must use that same backend, bound root, and
 workspace. Completed receipts omit `resume`.
+Although the schema reserves `completed`, v1 cannot validate or write one
+until `rosary-a6166d` exists.
 Serialize once, run `validate-receipt` on those exact bytes, and stop on exit
 2 or malformed output.
 

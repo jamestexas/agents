@@ -273,36 +273,46 @@ def preservation_check(name, phase="durable", outcome="pass", reference=HEAD):
     return check(name, "preservation", outcome, payload)
 
 
-def verify_record(sequence, verdict, command="task check", record_id=None):
-    return {
-        "id": record_id or f"verify-{sequence}",
-        "kind": "verify",
-        "command": command,
-        "verdict": verdict,
-        "observed_at": f"2026-07-30T18:00:{sequence:02d}Z",
-        "sequence": sequence,
-    }
-
-
-def close_check(outcome, records=None):
-    if records is None:
-        records = [] if outcome == "unknown" else [verify_record(1, outcome)]
+def close_check(outcome="unknown"):
     payload = evidence(
         "rsry_bead_history",
-        "complete authoritative verify history",
-        acceptance_command="task check",
-        ordering={
-            "key": "sequence",
-            "direction": "ascending",
-            "authoritative": True,
-            "complete": True,
-        },
-        records=records,
+        "command-bound ordered verify history is unavailable",
+        error="required Rosary mechanism rosary-a6166d is unavailable",
     )
     return check("close_condition_satisfied", "completion", outcome, payload)
 
 
-def terminal_check(outcome):
+def synthetic_close_check(outcome="pass"):
+    return check(
+        "close_condition_satisfied",
+        "completion",
+        outcome,
+        evidence(
+            "rsry_bead_history",
+            "caller-synthesized history is forbidden",
+            error="required Rosary mechanism rosary-a6166d is unavailable",
+            acceptance_command="task check",
+            ordering={
+                "key": "sequence",
+                "direction": "ascending",
+                "authoritative": True,
+                "complete": True,
+            },
+            records=[
+                {
+                    "id": "verify-1",
+                    "kind": "verify",
+                    "command": "task check",
+                    "verdict": outcome,
+                    "observed_at": NOW,
+                    "sequence": 1,
+                }
+            ],
+        ),
+    )
+
+
+def terminal_check(outcome, status=None):
     if outcome == "unknown":
         payload = evidence(
             "rsry_list_beads",
@@ -313,7 +323,7 @@ def terminal_check(outcome):
         payload = evidence(
             "rsry_list_beads",
             "structured bead status",
-            status="done" if outcome == "pass" else "open",
+            status=status or ("done" if outcome == "pass" else "open"),
         )
     return check("bead_terminal", "completion", outcome, payload)
 
@@ -375,7 +385,7 @@ def observation(
     pr_backed=False,
     checkpoint_required=False,
 ):
-    completion_outcome = "pass" if completed else "fail"
+    terminal_outcome = "pass" if completed else "fail"
     preservation_phase = "preflight" if checkpoint_required else "durable"
     checks = [
         anchor_check(),
@@ -387,11 +397,11 @@ def observation(
         preservation_check(
             "commits_reachable_or_checkpoint_resolvable", preservation_phase
         ),
-        close_check(completion_outcome),
-        terminal_check(completion_outcome),
+        close_check(),
+        terminal_check(terminal_outcome),
     ]
     if pr_backed:
-        checks.append(pr_check(completion_outcome))
+        checks.append(pr_check(terminal_outcome))
     if not completed:
         checks.append(resume_check())
     return {
@@ -445,22 +455,21 @@ def cli(command, payload):
 
 
 class FoldTests(unittest.TestCase):
-    def test_durable_non_pr_completion_is_eligible(self):
-        self.assertEqual(
-            evaluate(observation(completed=True)),
-            {
-                "protocol_phase": "durable",
-                "candidate": "completed",
-                "eligible": True,
-                "action": "write_receipt",
-                "reasons": [],
-            },
+    def test_durable_non_pr_completion_is_unsafe_without_authoritative_history(self):
+        result = evaluate(observation(completed=True))
+        self.assertFalse(result["eligible"])
+        self.assertIsNone(result["candidate"])
+        self.assertTrue(
+            any("rosary-a6166d" in reason for reason in result["reasons"])
         )
 
-    def test_durable_pr_backed_completion_requires_exact_pr_evidence(self):
+    def test_durable_pr_backed_completion_is_unsafe_despite_exact_pr_evidence(self):
         result = evaluate(observation(completed=True, pr_backed=True))
-        self.assertTrue(result["eligible"])
-        self.assertEqual(result["candidate"], "completed")
+        self.assertFalse(result["eligible"])
+        self.assertIsNone(result["candidate"])
+        self.assertTrue(
+            any("rosary-a6166d" in reason for reason in result["reasons"])
+        )
 
     def test_durable_parked_work_is_eligible(self):
         result = evaluate(observation())
@@ -468,15 +477,18 @@ class FoldTests(unittest.TestCase):
         self.assertEqual(result["candidate"], "parked")
         self.assertEqual(result["action"], "write_receipt")
 
-    def test_checkpointable_completed_preflight_only_authorizes_checkpoint(self):
+    def test_checkpointable_terminal_preflight_is_unsafe_without_history(self):
         result = evaluate(
             observation(
                 phase="preflight", completed=True, checkpoint_required=True
             )
         )
-        self.assertEqual(result["candidate"], "completed")
+        self.assertIsNone(result["candidate"])
         self.assertFalse(result["eligible"])
-        self.assertEqual(result["action"], "checkpoint")
+        self.assertIsNone(result["action"])
+        self.assertTrue(
+            any("rosary-a6166d" in reason for reason in result["reasons"])
+        )
 
     def test_checkpointable_parked_preflight_only_authorizes_checkpoint(self):
         result = evaluate(
@@ -583,35 +595,37 @@ class FoldTests(unittest.TestCase):
             evaluate(document)
 
     def test_mixed_completion_evidence_is_unsafe(self):
-        document = observation()
-        document["checks"][7] = close_check("pass")
-        document["checks"] = document["checks"][:-1]
+        document = observation(completed=True, pr_backed=True)
+        document["checks"][-1] = pr_check("fail")
         result = evaluate(document)
         self.assertFalse(result["eligible"])
-        self.assertIn("completion evidence conflicts or is unknown", result["reasons"])
+        self.assertIsNone(result["candidate"])
 
-    def test_open_work_requires_mechanical_failed_completion(self):
-        document = observation()
-        document["checks"][7] = close_check("unknown")
-        document["checks"] = document["checks"][:-1]
+    def test_each_mechanical_nonterminal_status_parks_with_unavailable_history(self):
+        for status in ("open", "in_progress", "blocked"):
+            with self.subTest(status=status):
+                document = observation()
+                document["checks"][8] = terminal_check("fail", status=status)
+                result = evaluate(document)
+                self.assertTrue(result["eligible"])
+                self.assertEqual(result["candidate"], "parked")
+
+    def test_terminal_mixed_or_unknown_completion_is_unsafe(self):
+        document = observation(completed=True, pr_backed=True)
+        document["checks"][-1] = pr_check("fail")
         result = evaluate(document)
         self.assertFalse(result["eligible"])
-        self.assertNotEqual(result["candidate"], "parked")
-
-    def test_closed_unmerged_pr_is_parked_not_completed(self):
-        result = evaluate(observation(pr_backed=True))
-        self.assertTrue(result["eligible"])
-        self.assertEqual(result["candidate"], "parked")
+        self.assertIsNone(result["candidate"])
 
     def test_mixed_collection_preserves_independent_results(self):
-        completed = evaluate(observation(completed=True))
+        terminal = evaluate(observation(completed=True))
         parked = evaluate(observation())
         unsafe_document = observation()
         unsafe_document["checks"][2] = dispatch_check("fail")
         unsafe = evaluate(unsafe_document)
         self.assertEqual(
-            [completed["candidate"], parked["candidate"], unsafe["candidate"]],
-            ["completed", "parked", None],
+            [terminal["candidate"], parked["candidate"], unsafe["candidate"]],
+            [None, "parked", None],
         )
 
     def test_missing_or_drifted_checkpoint_is_unsafe(self):
@@ -627,75 +641,43 @@ class FoldTests(unittest.TestCase):
         with self.assertRaisesRegex(InputError, "unrecognized Rosary bead status"):
             evaluate(document)
 
-    def test_latest_matching_verify_failure_wins_over_stale_pass(self):
-        document = observation()
-        document["checks"][7] = close_check(
-            "fail", [verify_record(1, "pass"), verify_record(2, "fail")]
-        )
-        result = evaluate(document)
-        self.assertTrue(result["eligible"])
-        self.assertEqual(result["candidate"], "parked")
+    def test_done_and_closed_are_unsafe_without_command_bound_history(self):
+        for status in ("done", "closed"):
+            with self.subTest(status=status):
+                document = observation(completed=True)
+                document["checks"][8] = terminal_check("pass", status=status)
+                result = evaluate(document)
+                self.assertFalse(result["eligible"])
+                self.assertIsNone(result["candidate"])
+                self.assertTrue(
+                    any("rosary-a6166d" in reason for reason in result["reasons"])
+                )
 
-    def test_stale_pass_claim_is_rejected_when_newer_verify_failed(self):
-        document = observation(completed=True)
-        document["checks"][7] = close_check(
-            "pass", [verify_record(1, "pass"), verify_record(2, "fail")]
-        )
-        with self.assertRaisesRegex(InputError, "latest matching verify verdict"):
+    def test_synthetic_history_fields_are_rejected(self):
+        document = observation()
+        document["checks"][7] = synthetic_close_check()
+        with self.assertRaisesRegex(InputError, "unknown field acceptance_command"):
             evaluate(document)
 
-    def test_reversed_verify_history_is_rejected(self):
+    def test_unavailable_history_cannot_claim_pass_or_fail(self):
         document = observation()
-        document["checks"][7] = close_check(
-            "fail", [verify_record(2, "fail"), verify_record(1, "pass")]
-        )
-        with self.assertRaisesRegex(InputError, "strictly ascending"):
-            evaluate(document)
-
-    def test_tied_verify_history_is_rejected(self):
-        document = observation()
-        document["checks"][7] = close_check(
-            "fail",
-            [
-                verify_record(1, "pass", record_id="verify-a"),
-                verify_record(1, "fail", record_id="verify-b"),
-            ],
-        )
-        with self.assertRaisesRegex(InputError, "unique sequence"):
-            evaluate(document)
-
-    def test_mismatched_verify_commands_derive_unknown(self):
-        document = observation()
-        document["checks"][7] = close_check(
-            "unknown", [verify_record(1, "pass", command="pytest")]
-        )
-        document["checks"] = document["checks"][:-1]
-        result = evaluate(document)
-        self.assertFalse(result["eligible"])
-        self.assertIn("completion evidence conflicts or is unknown", result["reasons"])
-
-    def test_missing_verify_history_derives_unknown(self):
-        document = observation()
-        document["checks"][7] = close_check("unknown", [])
-        document["checks"] = document["checks"][:-1]
-        self.assertFalse(evaluate(document)["eligible"])
-
-    def test_valid_latest_verify_pass_and_fail_are_derived(self):
-        passed = evaluate(observation(completed=True))
-        failed = evaluate(observation())
-        self.assertEqual(passed["candidate"], "completed")
-        self.assertEqual(failed["candidate"], "parked")
+        for outcome in ("pass", "fail"):
+            with self.subTest(outcome=outcome):
+                document["checks"][7] = close_check(outcome)
+                with self.assertRaisesRegex(InputError, "must be unknown"):
+                    evaluate(document)
 
 
 class ReceiptTests(unittest.TestCase):
     def test_valid_durable_parked_receipt(self):
         validate_receipt(receipt())
 
-    def test_valid_durable_completed_receipt(self):
-        validate_receipt(receipt(completed=True))
+    def test_completed_receipt_is_unavailable_without_authoritative_history(self):
+        with self.assertRaisesRegex(InputError, "rosary-a6166d"):
+            validate_receipt(receipt(completed=True))
 
     def test_preflight_checkpoint_required_receipt_cannot_validate(self):
-        candidate = receipt(completed=True)
+        candidate = receipt()
         candidate["protocol_phase"] = "preflight"
         candidate["checks"][5] = preservation_check("tree_preserved", "preflight")
         candidate["checks"][6] = preservation_check(
@@ -1025,11 +1007,30 @@ class RetryIdentityTests(unittest.TestCase):
     def test_conflicting_prior_successes_fail_closed_in_reverse_order(self):
         first = receipt()
         second = copy.deepcopy(first)
-        second["outcome"] = "completed"
-        second.pop("resume")
-        second["checks"] = observation(completed=True)["checks"]
+        second["resume"]["next_action"] = "Resolve a different continuation."
         with self.assertRaisesRegex(InputError, "conflicting prior successes"):
             prepare_attempt(self.invocation([second, first]))
+
+    def test_acceptance_command_conflict_fails_in_both_orders(self):
+        first = receipt()
+        second = copy.deepcopy(first)
+        second["bead"]["acceptance_command"] = "pytest"
+        for candidates in ([first, second], [second, first]):
+            with self.subTest(first_command=candidates[0]["bead"]["acceptance_command"]):
+                with self.assertRaisesRegex(
+                    InputError, "conflicting prior successes"
+                ):
+                    prepare_attempt(self.invocation(candidates))
+
+    def test_pr_applicability_conflict_fails_in_both_orders(self):
+        non_pr = receipt()
+        pr_backed = receipt(pr_backed=True)
+        for candidates in ([non_pr, pr_backed], [pr_backed, non_pr]):
+            with self.subTest(first_pr_backed=candidates[0]["pr_backed"]):
+                with self.assertRaisesRegex(
+                    InputError, "conflicting prior successes"
+                ):
+                    prepare_attempt(self.invocation(candidates))
 
     def test_semantically_identical_duplicates_preserve_all_source_metadata(self):
         first = receipt()

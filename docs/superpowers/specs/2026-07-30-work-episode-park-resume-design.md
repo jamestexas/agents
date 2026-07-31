@@ -46,7 +46,9 @@ The skill lives at `skills/park-work/SKILL.md` and supports:
 /park-work --resume [<episode-id>|<bead-id>]
 ```
 
-- Park mode evaluates and may write one completed or parked receipt.
+- Park mode evaluates and may write one parked receipt. The completed receipt
+  variant is reserved but unavailable until Rosary supplies command-bound
+  ordered verification history.
 - Check mode is read-only, including when it reports that a checkpoint would
   be needed.
 - Resume mode may perform read-only receipt, repository, checkpoint, and live
@@ -74,8 +76,9 @@ for the intent:
 - every matching-intent success is inspected before returning;
 - semantically identical duplicates are returned with their exact source
   bytes/comment IDs in deterministic order;
-- any disagreement in episode, anchor, outcome, repository/binding, head, or
-  resume semantics is unsafe independent of input order; and
+- any disagreement in episode, anchor, outcome, repository/binding, head,
+  resume semantics, or the exact bead acceptance/PR applicability contract is
+  unsafe independent of input order; and
 - otherwise a fresh attempt ID is minted.
 
 An unsafe evaluation writes no transition. A process-separated retry reuses
@@ -162,7 +165,7 @@ completion:
   pr_merged                 # exactly when pr_backed=true
 
 resume:
-  resume_target_resolvable  # exactly when all completion checks fail
+  resume_target_resolvable  # exactly when bead_terminal mechanically fails
 ```
 
 Schema and evidence errors fail closed with helper CLI exit 2.
@@ -196,13 +199,13 @@ or malformed output are unknown.
 The selected structured bead record supplies its acceptance command, status,
 and PR URL.
 
-`close_condition_satisfied` receives the complete authoritative Rosary verify
-history with exact IDs, commands, verdicts, timestamps, and unique ascending
-sequence values. The helper derives the latest verdict for the exact declared
-acceptance command; it never trusts a caller-authored `latest` assertion.
-Absence derives unknown. Mismatch, reversed/tied ordering, stale summary
-claims, malformed/incomplete history, or unavailable history cannot authorize
-a receipt.
+The current `rsry_bead_history` contract does not expose a command-bound,
+authoritatively ordered verify history. It has no exact acceptance command,
+record kind/ID, or stable sequence/completeness proof. The helper therefore
+accepts only `close_condition_satisfied=unknown` with unavailable evidence.
+Callers must not synthesize `command`, `kind`, `sequence`, `latest`,
+`authoritative`, or `complete` facts. `rosary-a6166d` tracks the missing
+mechanism required before completion can be enabled.
 
 `bead_terminal` passes only for structured Rosary status `closed` or `done`;
 enumerated `open`, `in_progress`, and `blocked` statuses fail. Unknown status
@@ -219,9 +222,12 @@ for matching URL, `MERGED` state, and real RFC3339 `mergedAt`. Known open or
 closed-unmerged state fails. Auth/error/malformed/mismatched data is unknown.
 Non-PR work omits this check.
 
-Open work can park only when every applicable completion check is mechanically
-fail. Mixed or unknown completion evidence is unsafe; nonterminal work is not
-guessed from prose or status alone.
+A mechanically valid `open`, `in_progress`, or `blocked` status decisively
+fails `bead_terminal`. It can park with unknown close history when base
+evidence is durable, every other applicable completion check is known, and the
+resume target resolves. The close condition remains unknown rather than being
+fabricated as fail. A `done` or `closed` bead with unavailable close history
+is unsafe, as is terminal mixed/unknown completion or unknown PR evidence.
 
 ## Preflight and durable phases
 
@@ -230,13 +236,13 @@ A checkpointable preflight is not preservation:
 ```text
 protocol_phase=preflight
 both preservation checks = pass with typed state=checkpointable
-all other required checks fold to completed or parked
+the nonterminal status and resume checks fold to parked
     => eligible=false, action=checkpoint
 ```
 
 This authorizes only checkpoint creation. It never authorizes a receipt and
-cannot validate as safe. The rule applies to both logically completed and
-parked candidates.
+cannot validate as safe. A terminal candidate cannot pass the completed gate
+until `rosary-a6166d` exists and remains unsafe in either phase.
 
 After checkpoint creation, the caller must verify the returned immutable Git
 commit/change or jj change against the captured workspace, replace both
@@ -248,12 +254,9 @@ Already reachable state may begin directly in durable phase. Only:
 ```text
 protocol_phase=durable
 all identity/quiescence/preservation checks pass
-all completion checks pass
-    => candidate=completed, eligible=true, action=write_receipt
-
-protocol_phase=durable
-all identity/quiescence/preservation checks pass
-all completion checks fail
+bead_terminal fails from open|in_progress|blocked
+close_condition_satisfied is unknown because rosary-a6166d is unavailable
+every other applicable completion check is known
 resume_target_resolvable passes
     => candidate=parked, eligible=true, action=write_receipt
 
@@ -261,7 +264,8 @@ otherwise
     => unsafe
 ```
 
-No receipt is constructed before the durable refold succeeds.
+No receipt is constructed before the durable refold succeeds. In particular,
+`done|closed` plus unknown close history is never completed or parked.
 
 ## Receipt schema and durability
 
@@ -285,6 +289,7 @@ repository binding; and VCS, preservation, and resume evidence all use that
 same backend, bound root, workspace, and immutable head. Completed receipts
 omit resume data. Receipt outcome must equal the deterministic fold. Receipt
 validation accepts only durable-phase evidence.
+The completed variant cannot validate in v1 while `rosary-a6166d` is absent.
 
 The caller serializes once, validates those exact bytes, writes one fenced
 `work_episode_receipt/v1` anchor comment, reads comments back, validates again,
@@ -324,9 +329,9 @@ checks cannot prove a single holder.
 
 Executable regressions cover:
 
-1. durable non-PR and PR-backed completed work;
-2. durable parked work;
-3. checkpoint-required completed and parked preflights;
+1. non-PR and PR-backed terminal work blocked by the completed gate;
+2. durable parked work for `open`, `in_progress`, and `blocked`;
+3. checkpoint-required parked preflight and terminal preflight blocking;
 4. active Rosary dispatch;
 5. active and unavailable current-client child queries;
 6. VCS conflict and dirty/unpreserved work;
@@ -337,12 +342,13 @@ Executable regressions cover:
 10. receipt/fold outcome mismatch and missing/malformed exact comment readback;
 11. process-separated unsafe retry then success with stable identity and fresh
     attempts;
-12. order-independent duplicate/conflicting prior durable successes with exact
-    source metadata preservation;
+12. order-independent acceptance-command, PR-applicability, and other
+    duplicate/conflicting prior durable successes with exact source metadata
+    preservation;
 13. bead and episode repository binding plus selector/path/backend/Git-dir/
     common-dir/remote/port contradictions;
-14. authoritative ordered Rosary verify-history folding and enumerated terminal
-    statuses;
+14. absence of synthetic Rosary history fields, completed-gate blocking, and
+    enumerated terminal/nonterminal statuses;
 15. receipt anchor/repository/backend/workspace/head correlation;
 16. missing/drifted checkpoint resolver evidence; and
 17. atomic resume gating before every resume mutation.
@@ -354,6 +360,7 @@ executable helper tests and targeted CLI probes.
 
 - `agents-1259a5` — align handoff with the live session mailbox contract.
 - `rosary-04faf5` — provider-neutral episode state and atomic claim/lease.
+- `rosary-a6166d` — command-bound, authoritatively ordered verify history.
 - `rosary-b64523` — distinguish actively held from forgotten open work.
 - `canonical-hours-fd6926` — project start/interim/end observations.
 - `vigil-8870d4` — typed observation/evidence capsules.

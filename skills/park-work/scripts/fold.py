@@ -50,6 +50,7 @@ RFC3339_PATTERN = re.compile(
 )
 GIT_HEAD_PATTERN = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 ATOMIC_RESUME_MECHANISM = "rosary-04faf5"
+ROSARY_VERIFY_MECHANISM = "rosary-a6166d"
 ROSARY_BEAD_STATUSES = {"open", "in_progress", "blocked", "done", "closed"}
 
 
@@ -372,72 +373,12 @@ def _validate_close_evidence(evidence, item, index, bead):
     label = f"checks[{index}].evidence"
     if evidence["source"] != "rsry_bead_history":
         raise InputError(f"checks[{index}] close condition source is not Rosary verify")
-    _require_exact_keys(
-        evidence,
-        {
-            "source",
-            "detail",
-            "acceptance_command",
-            "ordering",
-            "records",
-        },
-        label,
-    )
-    command = bead["acceptance_command"]
-    if evidence["acceptance_command"] != command:
+    _require_exact_keys(evidence, {"source", "detail", "error"}, label)
+    _nonempty_string(evidence["error"], f"{label}.error")
+    if item["outcome"] != "unknown":
         raise InputError(
-            f"checks[{index}] history command must match declared acceptance command"
-        )
-    ordering = _require_object(evidence["ordering"], f"{label}.ordering")
-    _require_exact_keys(
-        ordering,
-        {"key", "direction", "authoritative", "complete"},
-        f"{label}.ordering",
-    )
-    if ordering != {
-        "key": "sequence",
-        "direction": "ascending",
-        "authoritative": True,
-        "complete": True,
-    }:
-        raise InputError(
-            f"checks[{index}] verify history ordering must be authoritative and complete"
-        )
-    records = evidence["records"]
-    if not isinstance(records, list):
-        raise InputError(f"{label}.records must be an array")
-    sequences = []
-    matching = []
-    for record_index, record in enumerate(records):
-        record_label = f"{label}.records[{record_index}]"
-        if not isinstance(record, dict):
-            raise InputError(f"{record_label} must be an object")
-        _require_exact_keys(
-            record,
-            {"id", "kind", "command", "verdict", "observed_at", "sequence"},
-            record_label,
-        )
-        _nonempty_string(record["id"], f"{record_label}.id")
-        if record["kind"] != "verify":
-            raise InputError(f"{record_label}.kind must be verify")
-        _nonempty_string(record["command"], f"{record_label}.command")
-        if record["verdict"] not in {"pass", "fail"}:
-            raise InputError(f"{record_label}.verdict must be pass or fail")
-        _rfc3339(record["observed_at"], f"{record_label}.observed_at")
-        sequence = record["sequence"]
-        if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0:
-            raise InputError(f"{record_label}.sequence must be a non-negative integer")
-        sequences.append(sequence)
-        if record["command"] == command:
-            matching.append(record)
-    if len(set(sequences)) != len(sequences):
-        raise InputError(f"checks[{index}] verify history must use unique sequence values")
-    if sequences != sorted(sequences):
-        raise InputError(f"checks[{index}] verify history must be strictly ascending")
-    derived = matching[-1]["verdict"] if matching else "unknown"
-    if item["outcome"] != derived:
-        raise InputError(
-            f"checks[{index}] outcome must match latest matching verify verdict"
+            f"checks[{index}] close condition must be unknown until "
+            f"{ROSARY_VERIFY_MECHANISM} supplies command-bound ordered history"
         )
 
 
@@ -633,15 +574,15 @@ def _validated_checks(document, allowed_document_keys):
     completion_names = set(COMPLETION_CHECKS)
     if document["pr_backed"]:
         completion_names.add("pr_merged")
-    completion_outcomes = {by_name[name]["outcome"] for name in completion_names}
-    if completion_outcomes == {"fail"}:
+    parking_applicable = by_name["bead_terminal"]["outcome"] == "fail"
+    if parking_applicable:
         if "resume_target_resolvable" not in by_name:
             raise InputError("missing required check resume_target_resolvable")
     elif "resume_target_resolvable" in by_name:
         raise InputError("resume_target_resolvable is not applicable")
 
     expected = required | (
-        {"resume_target_resolvable"} if completion_outcomes == {"fail"} else set()
+        {"resume_target_resolvable"} if parking_applicable else set()
     )
     unexpected = set(by_name) - expected
     if unexpected:
@@ -659,14 +600,36 @@ def _decision(document, by_name, completion_names):
         for name in sorted(BASE_CHECKS - PRESERVATION_CHECKS)
         if by_name[name]["outcome"] != "pass"
     ]
-    completion_outcomes = {by_name[name]["outcome"] for name in completion_names}
     candidate = None
-    if completion_outcomes == {"pass"}:
-        candidate = "completed"
-    elif completion_outcomes == {"fail"}:
+    terminal_outcome = by_name["bead_terminal"]["outcome"]
+    close_outcome = by_name["close_condition_satisfied"]["outcome"]
+    other_completion = completion_names - {
+        "bead_terminal",
+        "close_condition_satisfied",
+    }
+    unknown_other_completion = [
+        name
+        for name in sorted(other_completion)
+        if by_name[name]["outcome"] == "unknown"
+    ]
+    if (
+        terminal_outcome == "fail"
+        and close_outcome == "unknown"
+        and not unknown_other_completion
+    ):
         candidate = "parked"
     else:
-        reasons.append("completion evidence conflicts or is unknown")
+        if terminal_outcome == "pass" and close_outcome == "unknown":
+            reasons.append(
+                f"completed unavailable: required Rosary mechanism "
+                f"{ROSARY_VERIFY_MECHANISM} cannot prove the declared "
+                "acceptance command and latest verdict"
+            )
+        else:
+            reasons.append("completion evidence conflicts or is unknown")
+        reasons.extend(
+            f"{name}=unknown" for name in unknown_other_completion
+        )
 
     if phase == "preflight":
         if reasons or candidate is None:
@@ -919,6 +882,15 @@ def validate_receipt(receipt):
         or decision["candidate"] != receipt["outcome"]
         or decision["action"] != "write_receipt"
     ):
+        if (
+            receipt["outcome"] == "completed"
+            and by_name["bead_terminal"]["outcome"] == "pass"
+            and by_name["close_condition_satisfied"]["outcome"] == "unknown"
+        ):
+            raise InputError(
+                f"completed receipt unavailable until {ROSARY_VERIFY_MECHANISM} "
+                "supplies command-bound ordered history"
+            )
         raise InputError("receipt outcome does not match deterministic fold")
     if receipt["outcome"] == "parked":
         resume_evidence = by_name["resume_target_resolvable"]["evidence"]
@@ -1056,6 +1028,8 @@ def _success_semantics(receipt):
         "episode_id": receipt["episode_id"],
         "intent_id": receipt["intent_id"],
         "anchor_bead": receipt["anchor_bead"],
+        "pr_backed": receipt["pr_backed"],
+        "bead": receipt["bead"],
         "repository": receipt["repository"],
         "binding": binding,
         "outcome": receipt["outcome"],

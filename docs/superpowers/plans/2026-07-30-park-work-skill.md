@@ -1,7 +1,7 @@
 # Park-Work Skill Implementation Plan
 
-> **Revision:** 2026-07-30 second final fail-closed correction after scoped
-> re-review.
+> **Revision:** 2026-07-30 third final fail-closed correction after live
+> Rosary-contract review.
 
 **Goal:** Deliver a portable per-session `park-work` skill that returns
 `safe_to_close=true` only after strict durable evidence folds to completed or
@@ -27,15 +27,18 @@ commands, Rosary MCP, and existing Bash repository gates.
 - Never validate a preflight as receipt-safe.
 - Require current-client child evidence independent from Rosary dispatches.
 - Derive PR backing only from structured bead PR URL metadata.
-- Derive the latest matching Rosary verify verdict from complete,
-  authoritatively ordered history and require exact read-only provider merge
-  evidence.
+- Keep completion unavailable until `rosary-a6166d` supplies command-bound,
+  authoritatively ordered verify history; never synthesize missing history
+  fields.
+- Permit parking from a mechanically nonterminal Rosary status with unknown
+  close history, exact known PR applicability, and a passing resume resolver.
 - Bind both resume selectors to one registered repository/origin and bind
   every VCS command to its root.
 - Correlate successful receipt anchor, repository binding, backend, root,
   workspace, and immutable head.
 - Inspect all same-intent successes, reject semantic conflicts independent of
-  order, and preserve exact duplicate source bytes/comment IDs.
+  order—including exact acceptance/PR contracts—and preserve exact duplicate
+  source bytes/comment IDs.
 - Fail active resume closed until `rosary-04faf5` supplies an atomic episode
   claim/lease.
 - Never close a bead, terminate a provider, delete a worktree, or rewrite user
@@ -53,8 +56,8 @@ commands, Rosary MCP, and existing Bash repository gates.
 
 Add executable fixtures whose expected values are hand-derived from the design:
 
-- durable completed and parked;
-- checkpoint-required completed and parked;
+- terminal completed-gate blocking and durable parked;
+- checkpoint-required parked and blocked terminal preflight;
 - active dispatch, active/unavailable current-client child, conflict, and
   unpreserved work;
 - exact check-name/category/cardinality schema;
@@ -105,8 +108,8 @@ Encode check-specific authoritative evidence:
 - Codex/Claude current-client child arrays;
 - bound Git/jj conflict and operation arrays;
 - preflight checkpointable vs. durable preservation references;
-- complete authoritative ordered Rosary verify history, folded by the helper
-  for the acceptance command;
+- typed unavailable close-condition evidence without synthetic command/kind/
+  sequence/latest/authoritative/complete facts;
 - structured Rosary terminal status;
 - exact `gh pr view <url> --json state,mergedAt,url` response; and
 - exact resume resolver target.
@@ -115,9 +118,10 @@ Encode check-specific authoritative evidence:
 
 - Preflight with checkpointable preservation may return only
   `eligible=false, action=checkpoint`.
-- Durable unanimous completion returns completed/write-receipt.
-- Durable unanimous mechanical failure plus a resolved target returns
-  parked/write-receipt.
+- Terminal `done|closed` remains unsafe because completion cannot be proven
+  without `rosary-a6166d`.
+- Durable `open|in_progress|blocked` plus known applicable PR evidence and a
+  resolved target returns parked/write-receipt despite unknown close history.
 - Every other well-formed observation is unsafe.
 
 ### Receipt
@@ -138,8 +142,9 @@ unsafe.
 
 - Missing stable IDs produce a retry command and no attempt ID.
 - Inspect every matching prior durable success; reject semantic conflicts
-  independent of input order and return only semantically identical duplicates
-  with their exact source bytes/comment IDs.
+  independent of input order, including the exact bead object and derived
+  `pr_backed` contract, and return only semantically identical duplicates with
+  their exact source bytes/comment IDs.
 - Otherwise mint a fresh attempt.
 - Normalize registered origins without collapsing nondefault ports, require
   one match, correlate full receipt/selector/path/backend identity, validate
@@ -161,7 +166,7 @@ python3 -m py_compile \
   skills/park-work/tests/test_fold.py
 ```
 
-Expected GREEN: 81 tests, 0 failures; compilation exits 0.
+Expected GREEN: 79 tests, 0 failures; compilation exits 0.
 
 ## Task 3: Align the skill workflow
 
@@ -174,9 +179,10 @@ Document:
 - explicit stable invocation IDs and the stop/retry contract;
 - current-client Codex and Claude child adapters;
 - exact typed check schema/evidence mapping;
-- checkpoint-before-any-receipt for completed and parked;
+- checkpoint-before-any-receipt for an eligible nonterminal parked candidate;
 - durable-phase-only receipt construction/readback;
-- exact Rosary verify and provider PR evidence;
+- unavailable Rosary completion gating, nonterminal parking, and exact provider
+  PR evidence;
 - common registered-repository binding and explicit VCS roots;
 - read-only resume inspection; and
 - the missing atomic claim gate.
@@ -200,7 +206,7 @@ Replace prior behavior that:
 - used different resume selector binding; or
 - treated comments as single-holder resume safety.
 
-Update fixture totals to the executable 81-test suite. Prose/token tests remain
+Update fixture totals to the executable 79-test suite. Prose/token tests remain
 supplemental and do not substitute for executable behavior.
 
 ## Task 5: Required verification
@@ -226,8 +232,8 @@ Run targeted CLI probes:
    duplicate sources are preserved;
 4. different remote ports, selector mismatch, and false Git common-dir
    relationships exit 2; and
-5. stale/reversed/tied/mismatched Rosary verify histories and unknown statuses
-   cannot authorize a receipt.
+5. no synthetic Rosary history fields are accepted; `open|in_progress|blocked`
+   park, while `done|closed` remain unsafe without `rosary-a6166d`.
 
 Verify status contains only the intended skill/helper/tests/design/plan,
 README only if generated content changed, the final report, and the
@@ -236,7 +242,7 @@ pre-existing unrelated `.beads/beads.jsonl`.
 ## Task 6: Report and commit
 
 Write
-`.superpowers/sdd/2026-07-30-park-work-skill/final-fix-2-report.md` with:
+`.superpowers/sdd/2026-07-30-park-work-skill/final-fix-3-report.md` with:
 
 - exact RED and GREEN commands/output;
 - every final-review finding disposition;
@@ -250,5 +256,5 @@ Stage no `.beads/` data. Commit all final corrections once:
 
 ```bash
 git -c commit.gpgsign=false commit \
-  -m "[agents-dba741] fix(park-work): bind receipts to authoritative evidence"
+  -m "[agents-dba741] fix(park-work): gate completion on authoritative history"
 ```
