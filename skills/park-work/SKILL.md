@@ -81,11 +81,16 @@ with an identity held only in process memory.
 
 Before minting an evaluation attempt, read all anchor comments, parse only a
 single fenced `work_episode_receipt/v1` JSON object per candidate, and validate
-matching-intent candidates. Pass those candidates to `prepare-attempt`.
-`action=return_existing` returns the exact prior durable success without a new
-transition. `action=evaluate` supplies a fresh `attempt-<UUID>`; every retry
-invocation gets a fresh attempt while preserving the episode and intent IDs.
-Malformed or identity-conflicting matching receipts are `unsafe`.
+every matching-intent candidate. Pass each as `receipt` plus its exact
+`source_bytes` and `comment_id` to `prepare-attempt`. The helper inspects all
+matching successes before deciding: semantic disagreement in episode, anchor,
+outcome, repository/binding, head, or resume data is `unsafe`, independent of
+comment order. Semantically identical duplicates return
+`action=return_existing` with their exact source metadata in deterministic
+comment-ID order and no new transition. `action=evaluate` supplies a fresh
+`attempt-<UUID>`; every retry invocation gets a fresh attempt while preserving
+the episode and intent IDs. Malformed or identity-conflicting matching
+receipts are `unsafe`.
 
 `--check` is read-only and never needs a durable retry identity. It may report
 that a checkpoint would be required, but it never creates one.
@@ -95,21 +100,26 @@ that a checkpoint would be required, but it never creates one.
 Resolve exactly one registered repository before collecting VCS evidence.
 Obtain the canonical current Git/jj root and its authoritative origin, call
 `rsry_repo_list`, normalize SSH/HTTPS syntax and optional `.git`, and require
-exactly one registered origin match. A basename is not repository identity.
+exactly one registered origin match. Nondefault ports remain part of canonical
+remote identity. A basename is not repository identity.
 
 For resume, both an explicit bead selector and an episode selector use this
 same algorithm. Build the helper's `bind-repository` input from:
 
 - selector kind/value;
-- the selected receipt's strict repository object;
-- canonical observed root, Git common-dir, authoritative origin, and the
-  origin read through the common-dir identity; and
+- the selected receipt's complete episode ID, anchor, and strict repository
+  object;
+- exact command/stdout observations for canonical root, authoritative origin,
+  and, for Git, absolute Git dir and common dir; and
 - all registered repository names/URLs.
 
-The selected receipt path must equal the canonical observed root. The root
-origin, common-dir origin, and exactly one Rosary registration must agree.
-Reject path/root, common-dir, registration, or remote contradictions before
-live checks, workspace selection, or creation.
+The selector must equal the receipt episode or anchor as applicable. The
+selected receipt path must equal the canonical observed root. The exact
+root-bound Git observations must prove either the normal `<root>/.git`
+relationship or a linked-worktree `<common>/.git/worktrees/...` relationship.
+The observed origin and exactly one Rosary registration must agree. Reject
+selector, path/root, Git-dir/common-dir, backend, registration, or remote
+contradictions before live checks, workspace selection, or creation.
 
 After binding, use only the helper-returned `bound_root`. Every Git command is
 an argv-style `git -C <bound-root> ...` command. Every jj command uses its
@@ -192,8 +202,10 @@ Run the bound VCS observations:
 ```text
 git -C <bound-root> status --porcelain=v2 --branch
 git -C <bound-root> diff --name-only --diff-filter=U
-git -C <bound-root> rev-parse --git-dir
-git -C <bound-root> rev-parse --git-common-dir
+git -C <bound-root> rev-parse --show-toplevel
+git -C <bound-root> rev-parse --path-format=absolute --git-dir
+git -C <bound-root> rev-parse --path-format=absolute --git-common-dir
+git -C <bound-root> remote get-url origin
 git -C <bound-root> branch --show-current
 git -C <bound-root> rev-parse HEAD
 git -C <bound-root> rev-parse '@{upstream}'
@@ -233,14 +245,19 @@ the outcome is `unknown`. Empty Rosary dispatch history alone is never a pass.
 Read the structured bead record to obtain the exact declared acceptance
 command, status, and PR URL.
 
-`close_condition_satisfied` may pass or fail only from the latest explicit
-Rosary `verify` observation whose observed command exactly equals the bead's
-declared acceptance command. Record the verify verdict ID and both command
-fields. No matching observation, a prose conclusion, stale/non-latest result,
-command mismatch, malformed history, or unavailable history is `unknown`.
+`close_condition_satisfied` receives the complete authoritative Rosary verify
+history with exact record IDs, commands, verdicts, RFC3339 times, and unique
+ascending sequence values. The helper itself selects the last record whose
+command exactly equals the bead's declared acceptance command and derives pass
+or fail. Never pass a caller-authored `latest` boolean or summary verdict.
+No matching observation derives unknown; reversed/tied sequences, a prose
+conclusion, command mismatch, malformed/incomplete history, or unavailable
+history is an error or unknown and cannot authorize a receipt.
 
 `bead_terminal` passes only for the structured Rosary status `closed` or
-`done`; a known nonterminal status fails; missing/malformed status is unknown.
+`done`; the enumerated nonterminal statuses `open`, `in_progress`, and
+`blocked` fail. Missing status is unknown and any other status is a schema
+error.
 
 For a PR-backed bead, run exactly this read-only provider query (or a provider
 adapter returning the identical typed fields):
@@ -306,8 +323,11 @@ contains the observation fields plus:
 
 The parked target and its resolved immutable head must equal the target and
 `repository.head` in the passing `resume_target_resolvable` evidence. Both
-durable preservation references must also equal `repository.head`. Completed
-receipts omit `resume`.
+durable preservation references must also equal `repository.head`. The
+receipt anchor must equal `anchor_confirmed`; its full repository object must
+equal the embedded validated `repository_resolved` binding; and all VCS,
+preservation, and resume evidence must use that same backend, bound root, and
+workspace. Completed receipts omit `resume`.
 Serialize once, run `validate-receipt` on those exact bytes, and stop on exit
 2 or malformed output.
 

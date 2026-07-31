@@ -71,8 +71,11 @@ writes. It never proceeds with identity that exists only in process memory.
 Before a new attempt, the caller reads and validates prior successful receipts
 for the intent:
 
-- a matching durable success is returned unchanged;
-- an identity contradiction is unsafe; and
+- every matching-intent success is inspected before returning;
+- semantically identical duplicates are returned with their exact source
+  bytes/comment IDs in deterministic order;
+- any disagreement in episode, anchor, outcome, repository/binding, head, or
+  resume semantics is unsafe independent of input order; and
 - otherwise a fresh attempt ID is minted.
 
 An unsafe evaluation writes no transition. A process-separated retry reuses
@@ -94,13 +97,18 @@ or rejected confirmation is unsafe.
 Every repository operation is bound to exactly one registered repository:
 
 1. Resolve the canonical current Git/jj root and authoritative origin.
-2. Normalize SSH/HTTPS syntax and optional `.git`.
+2. Normalize SSH/HTTPS syntax and optional `.git` while retaining nondefault
+   ports.
 3. Require exactly one Rosary registration with that origin.
-4. On resume, require the selected receipt path to equal the canonical root.
-5. Require the root origin and Git common-dir origin to match the same
-   registration.
-6. Reject path/root/common-dir/remote contradictions before live checks or
-   workspace creation.
+4. Require the selector to equal the receipt episode or anchor as applicable,
+   and require the selected receipt path/backend to equal the canonical root
+   and observed backend.
+5. Retain exact root-bound command/stdout observations for root, origin, and
+   Git dir/common dir.
+6. Accept only normal `<root>/.git` or mechanically observed linked-worktree
+   `<common>/.git/worktrees/...` relationships.
+7. Reject selector/path/root/backend/Git-dir/common-dir/remote contradictions
+   before live checks or workspace creation.
 
 Both bead and episode resume selectors use this same algorithm. Git commands
 are always argv-style `git -C <bound-root> ...`; jj commands always use the
@@ -188,13 +196,17 @@ or malformed output are unknown.
 The selected structured bead record supplies its acceptance command, status,
 and PR URL.
 
-`close_condition_satisfied` may pass or fail only from the latest explicit
-Rosary verify observation whose observed command exactly equals the declared
-acceptance command. Absence, mismatch, stale/non-latest history, malformed
-history, or unavailable history is unknown.
+`close_condition_satisfied` receives the complete authoritative Rosary verify
+history with exact IDs, commands, verdicts, timestamps, and unique ascending
+sequence values. The helper derives the latest verdict for the exact declared
+acceptance command; it never trusts a caller-authored `latest` assertion.
+Absence derives unknown. Mismatch, reversed/tied ordering, stale summary
+claims, malformed/incomplete history, or unavailable history cannot authorize
+a receipt.
 
 `bead_terminal` passes only for structured Rosary status `closed` or `done`;
-a known nonterminal status fails.
+enumerated `open`, `in_progress`, and `blocked` statuses fail. Unknown status
+values are schema errors; unavailable status remains unknown.
 
 For PR-backed work, the provider read is exactly:
 
@@ -267,8 +279,11 @@ A successful receipt extends the durable observation with:
 
 The parked resume target and resolved immutable head must exactly equal the
 target and `repository.head` in the passing resolver evidence. Both durable
-preservation references also equal `repository.head`. Completed receipts omit
-resume data. Receipt outcome must equal the deterministic fold. Receipt
+preservation references also equal `repository.head`. The receipt anchor
+equals the confirmed anchor; its repository equals the complete validated
+repository binding; and VCS, preservation, and resume evidence all use that
+same backend, bound root, workspace, and immutable head. Completed receipts
+omit resume data. Receipt outcome must equal the deterministic fold. Receipt
 validation accepts only durable-phase evidence.
 
 The caller serializes once, validates those exact bytes, writes one fenced
@@ -322,11 +337,15 @@ Executable regressions cover:
 10. receipt/fold outcome mismatch and missing/malformed exact comment readback;
 11. process-separated unsafe retry then success with stable identity and fresh
     attempts;
-12. duplicate prior durable success;
-13. bead and episode repository binding plus path/common-dir/remote
-    contradictions;
-14. missing/drifted checkpoint resolver evidence; and
-15. atomic resume gating before every resume mutation.
+12. order-independent duplicate/conflicting prior durable successes with exact
+    source metadata preservation;
+13. bead and episode repository binding plus selector/path/backend/Git-dir/
+    common-dir/remote/port contradictions;
+14. authoritative ordered Rosary verify-history folding and enumerated terminal
+    statuses;
+15. receipt anchor/repository/backend/workspace/head correlation;
+16. missing/drifted checkpoint resolver evidence; and
+17. atomic resume gating before every resume mutation.
 
 Token checks of skill prose are supplemental only. Safety claims depend on the
 executable helper tests and targeted CLI probes.

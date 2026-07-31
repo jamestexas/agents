@@ -50,6 +50,7 @@ RFC3339_PATTERN = re.compile(
 )
 GIT_HEAD_PATTERN = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 ATOMIC_RESUME_MECHANISM = "rosary-04faf5"
+ROSARY_BEAD_STATUSES = {"open", "in_progress", "blocked", "done", "closed"}
 
 
 class InputError(ValueError):
@@ -130,17 +131,14 @@ def _validate_anchor_evidence(evidence, index):
 def _validate_repository_evidence(evidence, index):
     _require_exact_keys(
         evidence,
-        {"source", "detail", "bound_root", "remote"},
+        {"source", "detail", "binding"},
         f"checks[{index}].evidence",
     )
     if evidence["source"] != "registered_repository_binding":
         raise InputError(f"checks[{index}] repository source is not authoritative")
-    root = _nonempty_string(
-        evidence["bound_root"], f"checks[{index}].evidence.bound_root"
+    _validate_repository_binding(
+        evidence["binding"], f"checks[{index}].evidence.binding"
     )
-    if not os.path.isabs(root):
-        raise InputError(f"checks[{index}].evidence.bound_root must be absolute")
-    _nonempty_string(evidence["remote"], f"checks[{index}].evidence.remote")
 
 
 def _validate_dispatch_evidence(evidence, item, index):
@@ -201,13 +199,43 @@ def _validate_vcs_evidence(evidence, item, index):
     label = f"checks[{index}].evidence"
     if evidence["source"] not in {"git", "jj"}:
         raise InputError(f"checks[{index}] VCS evidence source must be git or jj")
+    if evidence.get("backend") != evidence["source"]:
+        raise InputError(f"checks[{index}] VCS source/backend mismatch")
+    root = _nonempty_string(evidence.get("bound_root"), f"{label}.bound_root")
+    if not os.path.isabs(root) or os.path.normpath(root) != root:
+        raise InputError(f"{label}.bound_root must be absolute and normalized")
     if item["outcome"] == "unknown":
-        _require_exact_keys(evidence, {"source", "detail", "error"}, label)
+        _require_exact_keys(
+            evidence, {"source", "detail", "backend", "bound_root", "error"}, label
+        )
         _nonempty_string(evidence["error"], f"{label}.error")
         return
     _require_exact_keys(
-        evidence, {"source", "detail", "conflicts", "operations"}, label
+        evidence,
+        {
+            "source",
+            "detail",
+            "backend",
+            "bound_root",
+            "commands",
+            "conflicts",
+            "operations",
+        },
+        label,
     )
+    expected_commands = (
+        [
+            ["git", "-C", root, "status", "--porcelain=v2", "--branch"],
+            ["git", "-C", root, "diff", "--name-only", "--diff-filter=U"],
+        ]
+        if evidence["backend"] == "git"
+        else [
+            ["jj", "--repository", root, "status"],
+            ["jj", "--repository", root, "resolve", "--list"],
+        ]
+    )
+    if evidence["commands"] != expected_commands:
+        raise InputError(f"{label}.commands must be exact bound VCS commands")
     for field in ("conflicts", "operations"):
         values = evidence[field]
         if not isinstance(values, list) or any(
@@ -221,36 +249,120 @@ def _validate_vcs_evidence(evidence, item, index):
 
 def _validate_preservation_evidence(evidence, item, index, phase):
     label = f"checks[{index}].evidence"
+    allowed_sources = {"git", "jj", "rsry_workspace_checkpoint"}
+    if evidence["source"] not in allowed_sources:
+        raise InputError(f"checks[{index}] authoritative preservation source required")
+    backend = evidence.get("backend")
+    if backend not in {"git", "jj"}:
+        raise InputError(f"{label}.backend must be git or jj")
+    if evidence["source"] in {"git", "jj"} and evidence["source"] != backend:
+        raise InputError(f"checks[{index}] preservation source/backend mismatch")
+    root = _nonempty_string(evidence.get("bound_root"), f"{label}.bound_root")
+    workspace = _nonempty_string(evidence.get("workspace"), f"{label}.workspace")
+    if any(
+        not os.path.isabs(path) or os.path.normpath(path) != path
+        for path in (root, workspace)
+    ):
+        raise InputError(f"{label} roots must be absolute and normalized")
     if phase == "preflight":
         _require_exact_keys(
-            evidence, {"source", "detail", "state", "workspace"}, label
+            evidence,
+            {
+                "source",
+                "detail",
+                "backend",
+                "bound_root",
+                "state",
+                "workspace",
+                "captured_head",
+                "checkpoint_available",
+            },
+            label,
         )
         if (
             item["outcome"] != "pass"
             or evidence["state"] != "checkpointable"
             or evidence["source"] != "rsry_workspace_checkpoint"
+            or evidence["checkpoint_available"] is not True
         ):
             raise InputError(
                 f"checks[{index}] preflight preservation must be checkpointable"
             )
-        workspace = _nonempty_string(evidence["workspace"], f"{label}.workspace")
-        if not os.path.isabs(workspace):
-            raise InputError(f"{label}.workspace must be absolute")
+        _nonempty_string(evidence["captured_head"], f"{label}.captured_head")
         return
     if item["outcome"] == "pass":
         if evidence.get("state") != "durable":
             raise InputError(f"checks[{index}] requires durable preservation evidence")
-        _require_exact_keys(
-            evidence, {"source", "detail", "state", "reference"}, label
+        required = {
+            "source",
+            "detail",
+            "backend",
+            "bound_root",
+            "workspace",
+            "state",
+            "reference",
+            "resolved_head",
+            "resolver_command",
+        }
+        if evidence["source"] == "rsry_workspace_checkpoint":
+            required.add("checkpoint_id")
+        _require_exact_keys(evidence, required, label)
+        reference = _nonempty_string(evidence["reference"], f"{label}.reference")
+        resolved_head = _nonempty_string(
+            evidence["resolved_head"], f"{label}.resolved_head"
         )
-        _nonempty_string(evidence["reference"], f"{label}.reference")
+        if reference != resolved_head:
+            raise InputError(f"checks[{index}] preservation resolver head mismatch")
+        expected_command = (
+            ["git", "-C", root, "cat-file", "-e", f"{reference}^{{commit}}"]
+            if backend == "git"
+            else [
+                "jj",
+                "--repository",
+                root,
+                "log",
+                "-r",
+                reference,
+                "--no-graph",
+            ]
+        )
+        if evidence["resolver_command"] != expected_command:
+            raise InputError(
+                f"checks[{index}] preservation resolver command is not exact"
+            )
+        if evidence["source"] == "rsry_workspace_checkpoint":
+            _nonempty_string(evidence["checkpoint_id"], f"{label}.checkpoint_id")
     elif item["outcome"] == "fail":
-        _require_exact_keys(evidence, {"source", "detail", "state", "error"}, label)
+        _require_exact_keys(
+            evidence,
+            {
+                "source",
+                "detail",
+                "backend",
+                "bound_root",
+                "workspace",
+                "state",
+                "error",
+            },
+            label,
+        )
         if evidence["state"] != "unpreserved":
             raise InputError(f"checks[{index}] failed evidence must be unpreserved")
         _nonempty_string(evidence["error"], f"{label}.error")
     else:
-        _require_exact_keys(evidence, {"source", "detail", "state", "error"}, label)
+        _require_exact_keys(
+            evidence,
+            {
+                "source",
+                "detail",
+                "backend",
+                "bound_root",
+                "workspace",
+                "state",
+                "error",
+            },
+            label,
+        )
         if evidence["state"] != "unknown":
             raise InputError(f"checks[{index}] unknown preservation state is invalid")
         _nonempty_string(evidence["error"], f"{label}.error")
@@ -260,37 +372,73 @@ def _validate_close_evidence(evidence, item, index, bead):
     label = f"checks[{index}].evidence"
     if evidence["source"] != "rsry_bead_history":
         raise InputError(f"checks[{index}] close condition source is not Rosary verify")
-    if item["outcome"] == "unknown":
-        _require_exact_keys(evidence, {"source", "detail", "error"}, label)
-        _nonempty_string(evidence["error"], f"{label}.error")
-        return
     _require_exact_keys(
         evidence,
         {
             "source",
             "detail",
-            "observation_kind",
-            "latest",
             "acceptance_command",
-            "observed_command",
-            "verdict",
-            "verdict_id",
+            "ordering",
+            "records",
         },
         label,
     )
-    if evidence["observation_kind"] != "verify" or evidence["latest"] is not True:
-        raise InputError(f"checks[{index}] must use the latest verify observation")
     command = bead["acceptance_command"]
-    if (
-        evidence["acceptance_command"] != command
-        or evidence["observed_command"] != command
-    ):
+    if evidence["acceptance_command"] != command:
         raise InputError(
-            f"checks[{index}] verify command must match declared acceptance command"
+            f"checks[{index}] history command must match declared acceptance command"
         )
-    if evidence["verdict"] != item["outcome"]:
-        raise InputError(f"checks[{index}] outcome must match verify verdict")
-    _nonempty_string(evidence["verdict_id"], f"{label}.verdict_id")
+    ordering = _require_object(evidence["ordering"], f"{label}.ordering")
+    _require_exact_keys(
+        ordering,
+        {"key", "direction", "authoritative", "complete"},
+        f"{label}.ordering",
+    )
+    if ordering != {
+        "key": "sequence",
+        "direction": "ascending",
+        "authoritative": True,
+        "complete": True,
+    }:
+        raise InputError(
+            f"checks[{index}] verify history ordering must be authoritative and complete"
+        )
+    records = evidence["records"]
+    if not isinstance(records, list):
+        raise InputError(f"{label}.records must be an array")
+    sequences = []
+    matching = []
+    for record_index, record in enumerate(records):
+        record_label = f"{label}.records[{record_index}]"
+        if not isinstance(record, dict):
+            raise InputError(f"{record_label} must be an object")
+        _require_exact_keys(
+            record,
+            {"id", "kind", "command", "verdict", "observed_at", "sequence"},
+            record_label,
+        )
+        _nonempty_string(record["id"], f"{record_label}.id")
+        if record["kind"] != "verify":
+            raise InputError(f"{record_label}.kind must be verify")
+        _nonempty_string(record["command"], f"{record_label}.command")
+        if record["verdict"] not in {"pass", "fail"}:
+            raise InputError(f"{record_label}.verdict must be pass or fail")
+        _rfc3339(record["observed_at"], f"{record_label}.observed_at")
+        sequence = record["sequence"]
+        if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0:
+            raise InputError(f"{record_label}.sequence must be a non-negative integer")
+        sequences.append(sequence)
+        if record["command"] == command:
+            matching.append(record)
+    if len(set(sequences)) != len(sequences):
+        raise InputError(f"checks[{index}] verify history must use unique sequence values")
+    if sequences != sorted(sequences):
+        raise InputError(f"checks[{index}] verify history must be strictly ascending")
+    derived = matching[-1]["verdict"] if matching else "unknown"
+    if item["outcome"] != derived:
+        raise InputError(
+            f"checks[{index}] outcome must match latest matching verify verdict"
+        )
 
 
 def _validate_terminal_evidence(evidence, item, index):
@@ -303,6 +451,8 @@ def _validate_terminal_evidence(evidence, item, index):
         return
     _require_exact_keys(evidence, {"source", "detail", "status"}, label)
     status = _nonempty_string(evidence["status"], f"{label}.status")
+    if status not in ROSARY_BEAD_STATUSES:
+        raise InputError(f"checks[{index}] unrecognized Rosary bead status {status}")
     terminal = status in {"closed", "done"}
     if (item["outcome"] == "pass") != terminal:
         raise InputError(f"checks[{index}] outcome contradicts bead status")
@@ -343,11 +493,29 @@ def _validate_resume_evidence(evidence, item, index):
     label = f"checks[{index}].evidence"
     if evidence["source"] not in {"git", "jj"}:
         raise InputError(f"checks[{index}] resume resolver must be git or jj")
+    if evidence.get("backend") != evidence["source"]:
+        raise InputError(f"checks[{index}] resume resolver source/backend mismatch")
+    root = _nonempty_string(evidence.get("bound_root"), f"{label}.bound_root")
+    if not os.path.isabs(root) or os.path.normpath(root) != root:
+        raise InputError(f"{label}.bound_root must be absolute and normalized")
     if item["outcome"] == "unknown":
-        _require_exact_keys(evidence, {"source", "detail", "error"}, label)
+        _require_exact_keys(
+            evidence, {"source", "detail", "backend", "bound_root", "error"}, label
+        )
         _nonempty_string(evidence["error"], f"{label}.error")
         return
-    _require_exact_keys(evidence, {"source", "detail", "target"}, label)
+    _require_exact_keys(
+        evidence,
+        {
+            "source",
+            "detail",
+            "backend",
+            "bound_root",
+            "resolver_command",
+            "target",
+        },
+        label,
+    )
     target = _require_object(evidence["target"], f"{label}.target")
     _require_exact_keys(
         target, {"kind", "value", "resolved_head"}, f"{label}.target"
@@ -356,6 +524,21 @@ def _validate_resume_evidence(evidence, item, index):
         raise InputError(f"{label}.target.kind is invalid")
     _nonempty_string(target["value"], f"{label}.target.value")
     _nonempty_string(target["resolved_head"], f"{label}.target.resolved_head")
+    expected_command = (
+        ["git", "-C", root, "rev-parse", target["value"]]
+        if evidence["backend"] == "git"
+        else [
+            "jj",
+            "--repository",
+            root,
+            "log",
+            "-r",
+            target["value"],
+            "--no-graph",
+        ]
+    )
+    if evidence["resolver_command"] != expected_command:
+        raise InputError(f"checks[{index}] resume resolver command is not exact")
 
 
 def _validate_check_evidence(item, index, phase, bead):
@@ -663,15 +846,68 @@ def validate_receipt(receipt):
     _nonempty_string(receipt["anchor_bead"], "anchor_bead")
     _validate_provider_sessions(receipt["provider_sessions"])
     repository = _validate_repository(receipt["repository"])
+    if (
+        receipt["anchor_bead"]
+        != by_name["anchor_confirmed"]["evidence"]["anchor"]
+    ):
+        raise InputError("anchor_bead must match the confirmed anchor evidence")
+
+    binding = by_name["repository_resolved"]["evidence"]["binding"]
+    binding_identity = binding["receipt_identity"]
+    if binding_identity["episode_id"] != receipt["episode_id"]:
+        raise InputError("episode_id must match the validated repository binding")
+    if binding_identity["anchor_bead"] != receipt["anchor_bead"]:
+        raise InputError("anchor_bead must match the validated repository binding")
+    if binding_identity["repository"] != repository:
+        raise InputError("repository must match the validated repository binding")
+    if binding["backend"] != repository["vcs"]:
+        raise InputError("repository binding backend must match repository.vcs")
+
+    vcs_evidence = by_name["no_vcs_operation_or_conflict"]["evidence"]
+    if (
+        vcs_evidence["backend"] != repository["vcs"]
+        or vcs_evidence["source"] != repository["vcs"]
+    ):
+        raise InputError("VCS evidence source/backend must match repository.vcs")
+    if vcs_evidence["bound_root"] != repository["path"]:
+        raise InputError("VCS evidence bound root must match repository.path")
+
+    preservation_bindings = []
     for name in PRESERVATION_CHECKS:
         item = by_name[name]
+        evidence = item["evidence"]
+        preservation_bindings.append(
+            (
+                evidence["backend"],
+                evidence["bound_root"],
+                evidence["workspace"],
+            )
+        )
         if (
             item["outcome"] == "pass"
-            and item["evidence"]["reference"] != repository["head"]
+            and (
+                evidence["reference"] != repository["head"]
+                or evidence["resolved_head"] != repository["head"]
+            )
         ):
             raise InputError(
                 f"{name} preservation reference must match repository.head"
             )
+    if len(set(preservation_bindings)) != 1:
+        raise InputError(
+            "both preservation checks must use the same bound workspace/backend"
+        )
+    preservation_backend, preservation_root, preservation_workspace = (
+        preservation_bindings[0]
+    )
+    if preservation_backend != repository["vcs"]:
+        raise InputError("preservation backend must match repository.vcs")
+    if (
+        preservation_root != repository["path"]
+        or preservation_workspace != repository["path"]
+    ):
+        raise InputError("preservation workspace must match validated repository path")
+
     _validate_references(receipt["references"])
     if receipt["outcome"] not in {"completed", "parked"}:
         raise InputError("outcome must be completed or parked")
@@ -685,6 +921,14 @@ def validate_receipt(receipt):
     ):
         raise InputError("receipt outcome does not match deterministic fold")
     if receipt["outcome"] == "parked":
+        resume_evidence = by_name["resume_target_resolvable"]["evidence"]
+        if (
+            resume_evidence["source"] != repository["vcs"]
+            or resume_evidence["backend"] != repository["vcs"]
+        ):
+            raise InputError("resume resolver must match repository.vcs")
+        if resume_evidence["bound_root"] != repository["path"]:
+            raise InputError("resume resolver root must match repository.path")
         _validate_resume(receipt, by_name)
 
 
@@ -770,6 +1014,56 @@ def _mint(prefix):
     return prefix + str(uuid.uuid4())
 
 
+def _prior_receipt_source(candidate, index):
+    if not isinstance(candidate, dict):
+        raise InputError(f"prior_receipts[{index}] must be an object")
+    wrapper_fields = {"receipt", "source_bytes", "comment_id"}
+    if set(candidate) & wrapper_fields:
+        _require_exact_keys(candidate, wrapper_fields, f"prior_receipts[{index}]")
+        receipt = _require_object(
+            candidate["receipt"], f"prior_receipts[{index}].receipt"
+        )
+        source_bytes = _nonempty_string(
+            candidate["source_bytes"], f"prior_receipts[{index}].source_bytes"
+        )
+        comment_id = _nonempty_string(
+            candidate["comment_id"], f"prior_receipts[{index}].comment_id"
+        )
+        try:
+            decoded = json.loads(source_bytes)
+        except json.JSONDecodeError as error:
+            raise InputError(
+                f"prior_receipts[{index}].source_bytes must be valid JSON"
+            ) from error
+        if decoded != receipt:
+            raise InputError(
+                f"prior_receipts[{index}].source_bytes must exactly encode receipt"
+            )
+        return receipt, {
+            "comment_id": comment_id,
+            "source_bytes": source_bytes,
+        }
+    return candidate, None
+
+
+def _success_semantics(receipt):
+    binding = next(
+        item["evidence"]["binding"]
+        for item in receipt["checks"]
+        if item["name"] == "repository_resolved"
+    )
+    return {
+        "episode_id": receipt["episode_id"],
+        "intent_id": receipt["intent_id"],
+        "anchor_bead": receipt["anchor_bead"],
+        "repository": receipt["repository"],
+        "binding": binding,
+        "outcome": receipt["outcome"],
+        "safe_to_close": receipt["safe_to_close"],
+        "resume": receipt.get("resume"),
+    }
+
+
 def prepare_attempt(invocation):
     """Plan a caller-stable park retry without persisting unsafe attempts."""
 
@@ -806,24 +1100,69 @@ def prepare_attempt(invocation):
             "retry_command": retry_command,
         }
 
-    for candidate in invocation["prior_receipts"]:
-        if not isinstance(candidate, dict):
-            raise InputError("prior_receipts items must be objects")
-        if candidate.get("intent_id") != intent_id:
+    matching = []
+    for index, candidate in enumerate(invocation["prior_receipts"]):
+        prior_receipt, source = _prior_receipt_source(candidate, index)
+        if prior_receipt.get("intent_id") != intent_id:
             continue
-        validate_receipt(candidate)
-        if (
-            candidate["episode_id"] == episode_id
-            and candidate["anchor_bead"] == anchor
-        ):
-            return {
-                "ready": True,
-                "action": "return_existing",
-                "episode_id": episode_id,
-                "intent_id": intent_id,
-                "receipt": candidate,
+        validate_receipt(prior_receipt)
+        matching.append(
+            {
+                "receipt": prior_receipt,
+                "source": source,
+                "semantics": _success_semantics(prior_receipt),
             }
-        raise InputError("prior successful receipt contradicts stable identity")
+        )
+
+    if matching:
+        semantics = {
+            json.dumps(item["semantics"], sort_keys=True, separators=(",", ":"))
+            for item in matching
+        }
+        if len(semantics) != 1:
+            raise InputError("conflicting prior successes for stable intent")
+        if any(
+            item["receipt"]["episode_id"] != episode_id
+            or item["receipt"]["anchor_bead"] != anchor
+            for item in matching
+        ):
+            raise InputError("conflicting prior successes for stable identity")
+
+        def prior_order(item):
+            source = item["source"]
+            if source is not None:
+                return (
+                    0,
+                    source["comment_id"],
+                    source["source_bytes"],
+                )
+            return (
+                1,
+                "",
+                json.dumps(
+                    item["receipt"], sort_keys=True, separators=(",", ":")
+                ),
+            )
+
+        matching.sort(key=prior_order)
+        result = {
+            "ready": True,
+            "action": "return_existing",
+            "episode_id": episode_id,
+            "intent_id": intent_id,
+            "receipt": matching[0]["receipt"],
+        }
+        sources = sorted(
+            (
+                item["source"]
+                for item in matching
+                if item["source"] is not None
+            ),
+            key=lambda source: (source["comment_id"], source["source_bytes"]),
+        )
+        if sources:
+            result["prior_sources"] = sources
+        return result
 
     return {
         "ready": True,
@@ -838,19 +1177,220 @@ def _normalize_remote(remote):
     remote = _nonempty_string(remote, "remote").strip()
     if re.match(r"^[^/@:\s]+@[^/:\s]+:.+$", remote):
         user_host, path = remote.split(":", 1)
-        host = user_host.split("@", 1)[1]
+        host = user_host.split("@", 1)[1].lower()
         normalized = f"{host}/{path}"
     else:
         parsed = urlparse(remote)
         if parsed.scheme in {"http", "https", "ssh", "git"} and parsed.hostname:
-            normalized = f"{parsed.hostname}{parsed.path}"
+            try:
+                port = parsed.port
+            except ValueError as error:
+                raise InputError("remote has an invalid port") from error
+            default_ports = {"http": 80, "https": 443, "ssh": 22, "git": 9418}
+            port_suffix = (
+                f":{port}"
+                if port is not None and port != default_ports[parsed.scheme]
+                else ""
+            )
+            normalized = f"{parsed.hostname.lower()}{port_suffix}{parsed.path}"
         elif parsed.scheme == "file":
             normalized = os.path.normpath(parsed.path)
         elif os.path.isabs(remote):
             normalized = os.path.normpath(remote)
         else:
             raise InputError("remote must be an authoritative URL or absolute path")
+    normalized = normalized.rstrip("/")
     return normalized[:-4] if normalized.endswith(".git") else normalized
+
+
+def _validate_command_observation(observations, key, expected_command, label):
+    observation = _require_object(observations.get(key), f"{label}.{key}")
+    _require_exact_keys(observation, {"command", "stdout"}, f"{label}.{key}")
+    if observation["command"] != expected_command:
+        raise InputError(f"{label}.{key} must use the exact bound command")
+    return _nonempty_string(observation["stdout"], f"{label}.{key}.stdout")
+
+
+def _validate_repository_binding(binding, label="repository binding"):
+    binding = _require_object(binding, label)
+    common_fields = {
+        "schema_version",
+        "selector",
+        "receipt_identity",
+        "registration",
+        "backend",
+        "bound_root",
+        "canonical_remote",
+        "observations",
+        "commands",
+    }
+    backend = binding.get("backend")
+    required = set(common_fields)
+    if backend == "git":
+        required.update({"git_dir", "common_dir"})
+    _require_exact_keys(binding, required, label)
+    if binding["schema_version"] != 1:
+        raise InputError(f"{label}.schema_version must be 1")
+
+    identity = _require_object(binding["receipt_identity"], f"{label}.receipt_identity")
+    _require_exact_keys(
+        identity,
+        {"episode_id", "anchor_bead", "repository"},
+        f"{label}.receipt_identity",
+    )
+    _identifier(identity["episode_id"], "ep-", f"{label}.receipt_identity.episode_id")
+    _nonempty_string(
+        identity["anchor_bead"], f"{label}.receipt_identity.anchor_bead"
+    )
+    repository = _validate_repository(identity["repository"])
+    if backend != repository["vcs"]:
+        raise InputError(f"{label} backend must match receipt repository.vcs")
+
+    selector = _require_object(binding["selector"], f"{label}.selector")
+    _require_exact_keys(selector, {"kind", "value"}, f"{label}.selector")
+    if selector["kind"] == "bead":
+        if selector["value"] != identity["anchor_bead"]:
+            raise InputError("bead selector must match receipt anchor")
+    elif selector["kind"] == "episode":
+        if selector["value"] != identity["episode_id"]:
+            raise InputError("episode selector must match receipt episode")
+    else:
+        raise InputError(f"{label}.selector.kind must be bead or episode")
+
+    root = _nonempty_string(binding["bound_root"], f"{label}.bound_root")
+    if (
+        not os.path.isabs(root)
+        or os.path.normpath(root) != root
+        or root != repository["path"]
+    ):
+        raise InputError("receipt path/root contradiction")
+    observations = _require_object(binding["observations"], f"{label}.observations")
+
+    if backend == "git":
+        _require_exact_keys(
+            observations, {"root", "git_dir", "common_dir", "remote"}, f"{label}.observations"
+        )
+        observed_root = _validate_command_observation(
+            observations,
+            "root",
+            ["git", "-C", root, "rev-parse", "--show-toplevel"],
+            f"{label}.observations",
+        )
+        git_dir = _validate_command_observation(
+            observations,
+            "git_dir",
+            [
+                "git",
+                "-C",
+                root,
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-dir",
+            ],
+            f"{label}.observations",
+        )
+        common_dir = _validate_command_observation(
+            observations,
+            "common_dir",
+            [
+                "git",
+                "-C",
+                root,
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+            ],
+            f"{label}.observations",
+        )
+        observed_remote = _validate_command_observation(
+            observations,
+            "remote",
+            ["git", "-C", root, "remote", "get-url", "origin"],
+            f"{label}.observations",
+        )
+        for path_name, path in (("git_dir", git_dir), ("common_dir", common_dir)):
+            if not os.path.isabs(path) or os.path.normpath(path) != path:
+                raise InputError(f"{label}.{path_name} must be absolute and normalized")
+        normal_git_dir = os.path.join(root, ".git")
+        linked_prefix = common_dir + os.sep + "worktrees" + os.sep
+        common_relationship = (
+            git_dir == normal_git_dir and common_dir == normal_git_dir
+        ) or (
+            os.path.basename(common_dir) == ".git"
+            and git_dir.startswith(linked_prefix)
+        )
+        if not common_relationship:
+            raise InputError("Git common-dir relationship is not proven")
+        if observed_root != root:
+            raise InputError("receipt path/root contradiction")
+        if binding["git_dir"] != git_dir or binding["common_dir"] != common_dir:
+            raise InputError(f"{label} restates Git directory observations")
+        commands = [
+            ["git", "-C", root, "status", "--porcelain=v2", "--branch"],
+            ["git", "-C", root, "diff", "--name-only", "--diff-filter=U"],
+            ["git", "-C", root, "rev-parse", "--path-format=absolute", "--git-dir"],
+            [
+                "git",
+                "-C",
+                root,
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+            ],
+            ["git", "-C", root, "rev-parse", "HEAD"],
+        ]
+    elif backend == "jj":
+        _require_exact_keys(observations, {"root", "remote"}, f"{label}.observations")
+        observed_root = _validate_command_observation(
+            observations,
+            "root",
+            ["jj", "--repository", root, "root"],
+            f"{label}.observations",
+        )
+        observed_remote = _validate_command_observation(
+            observations,
+            "remote",
+            ["jj", "--repository", root, "git", "remote", "list"],
+            f"{label}.observations",
+        )
+        if observed_root != root:
+            raise InputError("receipt path/root contradiction")
+        commands = [
+            ["jj", "--repository", root, "status"],
+            ["jj", "--repository", root, "resolve", "--list"],
+            [
+                "jj",
+                "--repository",
+                root,
+                "log",
+                "-r",
+                "@",
+                "--no-graph",
+                "-T",
+                'change_id ++ "\\n"',
+            ],
+        ]
+    else:
+        raise InputError(f"{label}.backend must be git or jj")
+
+    if binding["commands"] != commands:
+        raise InputError(f"{label}.commands must be exact bound argv")
+    canonical_remote = _normalize_remote(observed_remote)
+    if binding["canonical_remote"] != canonical_remote:
+        raise InputError(f"{label}.canonical_remote contradicts command observation")
+    registration = _require_object(binding["registration"], f"{label}.registration")
+    _require_exact_keys(
+        registration,
+        {"name", "url", "canonical_remote"},
+        f"{label}.registration",
+    )
+    _nonempty_string(registration["name"], f"{label}.registration.name")
+    if (
+        _normalize_remote(registration["url"]) != canonical_remote
+        or registration["canonical_remote"] != canonical_remote
+    ):
+        raise InputError(f"{label} registered repository remote contradiction")
+    return binding
 
 
 def bind_repository(payload):
@@ -859,34 +1399,58 @@ def bind_repository(payload):
     payload = _require_object(payload, "binding")
     _require_exact_keys(
         payload,
-        {"selector", "receipt_repository", "observed", "registrations"},
+        {"selector", "receipt_identity", "observations", "registrations"},
         "binding",
     )
     selector = _require_object(payload["selector"], "selector")
     _require_exact_keys(selector, {"kind", "value"}, "selector")
     if selector["kind"] not in {"bead", "episode"}:
         raise InputError("selector.kind must be bead or episode")
+    identity = _require_object(payload["receipt_identity"], "receipt_identity")
+    _require_exact_keys(
+        identity, {"episode_id", "anchor_bead", "repository"}, "receipt_identity"
+    )
+    _identifier(identity["episode_id"], "ep-", "receipt_identity.episode_id")
+    _nonempty_string(identity["anchor_bead"], "receipt_identity.anchor_bead")
+    repository = _validate_repository(identity["repository"])
     if selector["kind"] == "episode":
         _identifier(selector["value"], "ep-", "selector.value")
+        if selector["value"] != identity["episode_id"]:
+            raise InputError("episode selector must match receipt episode")
     else:
         _nonempty_string(selector["value"], "selector.value")
-
-    repository = _validate_repository(payload["receipt_repository"])
-    observed = _require_object(payload["observed"], "observed")
-    _require_exact_keys(
-        observed, {"root", "remote", "common_dir", "common_remote"}, "observed"
+        if selector["value"] != identity["anchor_bead"]:
+            raise InputError("bead selector must match receipt anchor")
+    root = repository["path"]
+    observations = _require_object(payload["observations"], "observations")
+    expected_observation_keys = (
+        {"root", "git_dir", "common_dir", "remote"}
+        if repository["vcs"] == "git"
+        else {"root", "remote"}
     )
-    root = _nonempty_string(observed["root"], "observed.root")
-    common_dir = _nonempty_string(observed["common_dir"], "observed.common_dir")
-    if not os.path.isabs(root) or not os.path.isabs(common_dir):
-        raise InputError("observed root and common_dir must be absolute")
-    if os.path.normpath(root) != repository["path"]:
-        raise InputError("receipt path/root contradiction")
-
-    remote = _normalize_remote(observed["remote"])
-    common_remote = _normalize_remote(observed["common_remote"])
-    if common_remote != remote:
-        raise InputError("common-dir remote contradiction")
+    if set(observations) != expected_observation_keys:
+        raise InputError("receipt backend observations do not match repository.vcs")
+    if repository["vcs"] == "git":
+        _require_exact_keys(
+            observations, {"root", "git_dir", "common_dir", "remote"}, "observations"
+        )
+        remote_value = _validate_command_observation(
+            observations,
+            "remote",
+            ["git", "-C", root, "remote", "get-url", "origin"],
+            "observations",
+        )
+    elif repository["vcs"] == "jj":
+        _require_exact_keys(observations, {"root", "remote"}, "observations")
+        remote_value = _validate_command_observation(
+            observations,
+            "remote",
+            ["jj", "--repository", root, "git", "remote", "list"],
+            "observations",
+        )
+    else:
+        raise InputError("receipt backend observations are unsupported")
+    remote = _normalize_remote(remote_value)
     registrations = payload["registrations"]
     if not isinstance(registrations, list):
         raise InputError("registrations must be an array")
@@ -899,18 +1463,58 @@ def bind_repository(payload):
         )
         _nonempty_string(registration["name"], f"registrations[{index}].name")
         if _normalize_remote(registration["url"]) == remote:
-            matches.append(registration)
+            matches.append(
+                {
+                    "name": registration["name"],
+                    "url": registration["url"],
+                    "canonical_remote": remote,
+                }
+            )
     if len(matches) != 1:
         raise InputError("exactly one registered repository must match origin")
 
     if repository["vcs"] == "git":
+        git_dir = _validate_command_observation(
+            observations,
+            "git_dir",
+            [
+                "git",
+                "-C",
+                root,
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-dir",
+            ],
+            "observations",
+        )
+        common_dir = _validate_command_observation(
+            observations,
+            "common_dir",
+            [
+                "git",
+                "-C",
+                root,
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+            ],
+            "observations",
+        )
         commands = [
             ["git", "-C", root, "status", "--porcelain=v2", "--branch"],
             ["git", "-C", root, "diff", "--name-only", "--diff-filter=U"],
-            ["git", "-C", root, "rev-parse", "--git-dir"],
-            ["git", "-C", root, "rev-parse", "--git-common-dir"],
+            ["git", "-C", root, "rev-parse", "--path-format=absolute", "--git-dir"],
+            [
+                "git",
+                "-C",
+                root,
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+            ],
             ["git", "-C", root, "rev-parse", "HEAD"],
         ]
+        extra = {"git_dir": git_dir, "common_dir": common_dir}
     else:
         commands = [
             ["jj", "--repository", root, "status"],
@@ -927,13 +1531,20 @@ def bind_repository(payload):
                 'change_id ++ "\\n"',
             ],
         ]
-    return {
+        extra = {}
+    result = {
+        "schema_version": 1,
         "selector": selector,
+        "receipt_identity": identity,
         "registration": matches[0],
+        "backend": repository["vcs"],
         "bound_root": root,
-        "common_dir": common_dir,
+        "canonical_remote": remote,
+        "observations": observations,
         "commands": commands,
+        **extra,
     }
+    return _validate_repository_binding(result)
 
 
 def resume_gate(document):

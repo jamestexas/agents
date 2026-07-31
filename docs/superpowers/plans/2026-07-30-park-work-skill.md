@@ -1,7 +1,7 @@
 # Park-Work Skill Implementation Plan
 
-> **Revision:** 2026-07-30 final fail-closed correction after whole-branch
-> review.
+> **Revision:** 2026-07-30 second final fail-closed correction after scoped
+> re-review.
 
 **Goal:** Deliver a portable per-session `park-work` skill that returns
 `safe_to_close=true` only after strict durable evidence folds to completed or
@@ -27,10 +27,15 @@ commands, Rosary MCP, and existing Bash repository gates.
 - Never validate a preflight as receipt-safe.
 - Require current-client child evidence independent from Rosary dispatches.
 - Derive PR backing only from structured bead PR URL metadata.
-- Require exact latest Rosary verify evidence for the declared acceptance
-  command and exact read-only provider merge evidence.
+- Derive the latest matching Rosary verify verdict from complete,
+  authoritatively ordered history and require exact read-only provider merge
+  evidence.
 - Bind both resume selectors to one registered repository/origin and bind
   every VCS command to its root.
+- Correlate successful receipt anchor, repository binding, backend, root,
+  workspace, and immutable head.
+- Inspect all same-intent successes, reject semantic conflicts independent of
+  order, and preserve exact duplicate source bytes/comment IDs.
 - Fail active resume closed until `rosary-04faf5` supplies an atomic episode
   claim/lease.
 - Never close a bead, terminate a provider, delete a worktree, or rewrite user
@@ -100,7 +105,8 @@ Encode check-specific authoritative evidence:
 - Codex/Claude current-client child arrays;
 - bound Git/jj conflict and operation arrays;
 - preflight checkpointable vs. durable preservation references;
-- latest Rosary verify observation matching the acceptance command;
+- complete authoritative ordered Rosary verify history, folded by the helper
+  for the acceptance command;
 - structured Rosary terminal status;
 - exact `gh pr view <url> --json state,mergedAt,url` response; and
 - exact resume resolver target.
@@ -120,8 +126,10 @@ Require canonical prefixed UUIDs, anchor, provider sessions, absolute
 normalized path, VCS enum, branch string, immutable head, references,
 successful outcome/safety correlation, and for parked exactly one string resume
 target and resolved immutable head matching passing resolver evidence and
-`repository.head`. Correlate both durable preservation references with that
-head. Accept only durable phase.
+`repository.head`. Correlate the confirmed anchor, complete validated
+repository binding, VCS source/backend, both preservation workspaces, and
+parked resolver with the receipt repository and head. Accept only durable
+phase.
 Parse exact fenced receipt comments in the helper and require matching
 validated bytes; a missing readback or conflicting same-intent receipt remains
 unsafe.
@@ -129,10 +137,14 @@ unsafe.
 ### Retry and binding
 
 - Missing stable IDs produce a retry command and no attempt ID.
-- Matching prior durable success returns unchanged.
+- Inspect every matching prior durable success; reject semantic conflicts
+  independent of input order and return only semantically identical duplicates
+  with their exact source bytes/comment IDs.
 - Otherwise mint a fresh attempt.
-- Normalize registered origins, require one match, correlate receipt path/root
-  and common-dir remote, and return bound argv-style commands.
+- Normalize registered origins without collapsing nondefault ports, require
+  one match, correlate full receipt/selector/path/backend identity, validate
+  exact root/Git-dir/common-dir/remote command observations, and return bound
+  argv-style commands.
 
 ### Resume
 
@@ -149,7 +161,7 @@ python3 -m py_compile \
   skills/park-work/tests/test_fold.py
 ```
 
-Expected GREEN: 57 tests, 0 failures; compilation exits 0.
+Expected GREEN: 81 tests, 0 failures; compilation exits 0.
 
 ## Task 3: Align the skill workflow
 
@@ -188,7 +200,7 @@ Replace prior behavior that:
 - used different resume selector binding; or
 - treated comments as single-holder resume safety.
 
-Update fixture totals to the executable 57-test suite. Prose/token tests remain
+Update fixture totals to the executable 81-test suite. Prose/token tests remain
 supplemental and do not substitute for executable behavior.
 
 ## Task 5: Required verification
@@ -209,7 +221,13 @@ Run targeted CLI probes:
 
 1. terminal checkpointable preflight returns `eligible=false` and
    `action=checkpoint`;
-2. an invented check/malformed receipt exits 2 and writes nothing.
+2. uncorrelated receipt anchor/repository/backend/workspace evidence exits 2;
+3. conflicting prior successes fail closed in both input orders while exact
+   duplicate sources are preserved;
+4. different remote ports, selector mismatch, and false Git common-dir
+   relationships exit 2; and
+5. stale/reversed/tied/mismatched Rosary verify histories and unknown statuses
+   cannot authorize a receipt.
 
 Verify status contains only the intended skill/helper/tests/design/plan,
 README only if generated content changed, the final report, and the
@@ -218,7 +236,7 @@ pre-existing unrelated `.beads/beads.jsonl`.
 ## Task 6: Report and commit
 
 Write
-`.superpowers/sdd/2026-07-30-park-work-skill/final-fix-report.md` with:
+`.superpowers/sdd/2026-07-30-park-work-skill/final-fix-2-report.md` with:
 
 - exact RED and GREEN commands/output;
 - every final-review finding disposition;
@@ -232,5 +250,5 @@ Stage no `.beads/` data. Commit all final corrections once:
 
 ```bash
 git -c commit.gpgsign=false commit \
-  -m "[agents-dba741] fix(park-work): enforce durable episode protocol"
+  -m "[agents-dba741] fix(park-work): bind receipts to authoritative evidence"
 ```
