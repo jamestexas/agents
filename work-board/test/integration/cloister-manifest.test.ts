@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("Cloister topology", () => {
-  it("declares isolated work-board and source bundles with an explicit source URL", async () => {
+  it("declares isolated bundles and ships the compose artifact for cluster up", async () => {
     const cloisterRepo = process.env.CLOISTER_REPO;
     if (!cloisterRepo) throw new Error("CLOISTER_REPO is required for Cloister contract tests");
     const moduleUrl = pathToFileURL(resolve(cloisterRepo, "scripts/toml-to-cluster.mjs")).href;
@@ -34,5 +34,10 @@ describe("Cloister topology", () => {
       name: "WORK_BOARD_REFRESH_MODE",
       value: "source-authorized",
     });
+
+    const compose = await readFile("cloister/cluster.compose.yaml", "utf8");
+    expect(compose).toContain("image: canonical-hours-fixture:work-board-smoke");
+    expect(compose).toContain("image: work-board:smoke");
+    expect(compose).toContain("CANONICAL_HOURS_URL=http://canonical-hours-fixture:8790");
   });
 });
