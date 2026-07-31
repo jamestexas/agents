@@ -1,19 +1,23 @@
-# Claude Code Agents & Skills
+# Agents, skills, and operational tools
 
-A curated collection of specialized [Claude Code](https://claude.ai/code) **subagents** and **skills**. Subagents are personas with focused expertise; skills are workflows you (or Claude) can invoke with `/skill-name`.
+This repository is James Gardner's installable agent workspace: specialized
+agent definitions, reusable skills, the scripts that validate and symlink
+them, and a small number of operational tools developed beside the workflows
+they support.
 
-## Quick start
+- `agents/` — focused subagent definitions with enforced tool posture.
+- `skills/` — user-invocable workflows such as review, handoff, and work-board
+  access.
+- `scripts/` — lint, generation, and idempotent local installation.
+- `work-board/` — a workerd-native UI staged here before transfer to
+  Canonical Hours.
+
+## Install
 
 ```bash
-# Clone
-git clone https://github.com/jamestexas/agents.git
-cd agents
-
-# Preview what install would do
 scripts/install.sh
-
-# Symlink agents + skills into ~/.claude/{agents,skills}
 scripts/install.sh --apply
+scripts/install.sh --doctor
 ```
 
 `install.sh` is idempotent. Re-run any time you pull. Use `--doctor` to find broken symlinks left over from path moves.
@@ -97,9 +101,11 @@ scripts/install.sh --apply
 
 For full semantics, see Anthropic's [subagents](https://code.claude.com/docs/en/sub-agents) and [skills](https://code.claude.com/docs/en/skills) docs.
 
-## Creating new agents/skills
+## Creating agents, skills, and operational packages
 
-The frontmatter is validated against **both** the Anthropic Claude Code spec and the stricter Gemini CLI spec — unknown fields fail lint because Gemini rejects them.
+Agent and skill frontmatter is validated against **both** the Anthropic Claude
+Code spec and the stricter Gemini CLI spec — unknown fields fail lint because
+Gemini rejects them.
 
 **Agent** (`agents/<name>.md`):
 
@@ -129,7 +135,16 @@ argument-hint: <required> [optional]
 Workflow body. `$ARGUMENTS` is substituted at invocation.
 ```
 
-Run `scripts/build.sh` before committing — it lints frontmatter and regenerates the tables above.
+**Operational package** (for example, `work-board/`):
+
+Keep an operational package isolated behind its own package manifest, runtime
+configuration, tests, and README. It may be developed beside the workflow that
+uses it while ownership is being established, but it is not installed as an
+agent or skill and must document its intended long-term owner.
+
+Run `scripts/build.sh` before committing agent or skill changes — it lints
+frontmatter and regenerates the tables above. Run the operational package's own
+documented check separately.
 
 ## Development
 

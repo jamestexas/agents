@@ -1,0 +1,34 @@
+{
+  "name": "@jamestexas/work-board-staging",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.30.3",
+  "scripts": {
+    "build": "vite build",
+    "dev": "pnpm build && wrangler dev --local",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "vitest run --config vitest.config.ts",
+    "test:worker": "vitest run --config vitest.worker.config.ts",
+    "test:e2e": "pnpm build && playwright test",
+    "test:cloister:contracts": "vitest run --config vitest.cloister.config.ts",
+    "test:cloister": "pnpm test:cloister:contracts && node scripts/cloister-smoke.mjs",
+    "test:live": "node scripts/live-source-smoke.mjs",
+    "check": "pnpm typecheck && pnpm test:unit && pnpm test:worker && pnpm build"
+  },
+  "dependencies": {
+    "d3": "^7.9.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.18.7",
+    "@cloudflare/workers-types": "^5.20260722.1",
+    "@playwright/test": "^1.60.0",
+    "@types/d3": "^7.4.3",
+    "@types/node": "^26.1.2",
+    "typescript": "7.0.2",
+    "vite": "^7.3.5",
+    "vitest": "4.1.10",
+    "wrangler": "^4.113.0"
+  }
+}

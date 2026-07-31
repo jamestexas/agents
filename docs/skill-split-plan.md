@@ -51,7 +51,7 @@ wrapper around one tool, ships from that tool's own repo instead.
 | `pr-board` | **lectio** + beads | PRIVATE-LEAK | **lectio repo** | Move out. `allowed-tools: mcp__lectio__*` — built on a private tool. |
 | `review-queue` | **lectio** + zen | PRIVATE-LEAK | **lectio repo** / split | Move out, or strip lectio "catch-up" path and keep the gh/zen fan-out here. |
 | `explain-work` | mache + **lectio** | PRIVATE-LEAK | strip lectio | Newest skill. Make the lectio enrichment optional so it can stay public; mache part is SOFT. |
-| `doc-triage` | beads + crumb | SOFT | stays (reword) | beads/crumb are output sinks; works without them. |
+| `doc-triage` | beads | SOFT | stays (reworded) | beads is an output sink; works without it. crumb reference dropped — retired. |
 | `linear-escalation-triage` | beads + linear | SOFT | stays (reword) | One `rsry_bead_create` call; gate behind "if beads available". |
 | `problem-decomposer` | beads (`rosary:note`) | SOFT | stays | Emits bead *specs*; `rosary:note` is one consumer. Keep, note it. |
 | `prior-art-cartographer` | beads | SOFT | stays | Same — bead refs are optional cross-links. |
@@ -70,7 +70,7 @@ wrapper around one tool, ships from that tool's own repo instead.
 | Agent | Dep | Class | Destination | Action |
 |-------|-----|-------|-------------|--------|
 | `mache-explorer` | mache | HARD | **mache** | Move with the mache skills. |
-| `platform-archaeologist` | crumb / nexus | HARD | **decision** | Couples to crumb + Nexus brokers; move to crumb repo or reword. |
+| `platform-archaeologist` | memory store (any) | SOFT | **DONE — reworded** | crumb/Nexus coupling dropped; record/validate/extract are now illustrative pseudocode. |
 | `adversarial-synthesis-lead` | rosary GOLDEN_RULES + cloister | path-fix | stays | cloister/rosary are public — keep the agent, just fix the `~/remotes/...` path (§5). |
 | `bundle-isolation-tester` | rosary + cloister | path-fix | stays | Same. |
 | `dos-resilience-auditor` | rosary + cloister | path-fix | stays | Same. |
@@ -125,7 +125,7 @@ one home to avoid confusion).
 2. `pr-review` bundle strategy — option 1/2/3 above? (Lean: 3.)
 3. `review-queue` — move whole to lectio repo, or split (keep gh/zen fan-out here, drop lectio catch-up)?
 4. `docs/problems/substrate-idl.md` — relocate to cloister, delete, or keep with relative paths?
-5. `platform-archaeologist` agent — move to crumb repo, or reword its crumb/Nexus coupling?
+5. ~~`platform-archaeologist` agent — move to crumb repo, or reword its crumb/Nexus coupling?~~ **RESOLVED: reworded.**
 
 ---
 
