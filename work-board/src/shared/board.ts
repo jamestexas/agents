@@ -104,7 +104,21 @@ export function normalizeBoard(input: unknown): WorkBoardView {
       const ageMs = Date.parse(board.generated_at) - Date.parse(activity);
       return {
         kind: item.kind,
-        artifactUri: item.artifact_uri ?? `${item.kind}:${item.repo ?? "local"}#${item.number ?? item.title}`,
+        // The synthesized identity has to be UNIQUE, not merely descriptive:
+        // render.ts joins on it as D3's key, and duplicate keys are dropped
+        // from the join rather than drawn on top of each other. A recurring
+        // calendar event carries no repo and no number, so `kind:local#title`
+        // was identical for every occurrence and all but the first vanished.
+        //
+        // A number is a stable, unique discriminator and is left alone —
+        // appending time there would break object constancy, re-entering a PR
+        // on every activity change instead of transitioning it. The occurrence
+        // time is added only where the title was all we had.
+        artifactUri:
+          item.artifact_uri ??
+          (item.number !== undefined
+            ? `${item.kind}:${item.repo ?? "local"}#${item.number}`
+            : `${item.kind}:${item.repo ?? "local"}#${item.title}@${activity}`),
         repo: item.repo,
         number: item.number,
         title: item.title,
