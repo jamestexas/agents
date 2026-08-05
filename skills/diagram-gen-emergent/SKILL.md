@@ -1,10 +1,9 @@
 ---
 name: diagram-gen-emergent
 description: >
-  Generate a bottom-up community diagram from real code cross-references.
-  Shows emergent coupling structure — what the code actually does, not what was intended.
-  For structural PRs, output may be included in the GitHub review body.
-  Pair with diagram-gen-spec to see intended vs actual drift.
+  Generate a bottom-up diagram of actual code coupling from cross-references —
+  what the code does, not what was intended. Use for structural PR review; pair
+  with diagram-gen-spec for intended-vs-actual drift.
 allowed-tools: "Bash,Read,Grep,mcp__mache__*"
 argument-hint: "<source-path-or-db> [--compact] [--exclude-tests] [--layout LR|TD]"
 ---

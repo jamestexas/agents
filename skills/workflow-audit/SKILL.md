@@ -2,11 +2,9 @@
 name: workflow-audit
 description: >
   Mine the user's Claude Code chat corpus for self-optimization patterns —
-  repeated corrections, tool thrash, dropped threads, restated constraints —
-  and produce a ranked, PII-scrubbed, anti-recency-biased markdown report.
-  Different from `self-audit` (which reviews PR code). This audits how the
-  user works with agents. Designed to be dispatched as a sub-agent so the
-  caller's context stays clean.
+  repeated corrections, tool thrash, dropped threads — into a ranked,
+  PII-scrubbed report. Different from self-audit (PR code review). Dispatch
+  as a sub-agent to keep context clean.
 allowed-tools: "Bash,Read,Grep,Glob,Write"
 argument-hint: "[output-path] [weeks=12]"
 ---

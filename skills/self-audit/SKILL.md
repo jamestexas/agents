@@ -1,12 +1,10 @@
 ---
 name: self-audit
 description: >
-  Pre-review self-audit of a PR branch. Use after addressing review feedback,
-  before tagging a human reviewer, or after a significant self-directed
-  refactor. Runs a structured pass looking for the stuff a careful human
-  reviewer will catch but a compiler won't — dead struct fields, rotting
-  comments, duplicate types, test-only exports, scope drift — then dispatches
-  an adversarial agent on the diff for deeper design flaws.
+  Pre-review self-audit of a PR branch: dead struct fields, rotting comments,
+  duplicate types, scope drift — what a human catches but a compiler won't —
+  then dispatches an adversarial agent for deeper design flaws. Use before
+  tagging a reviewer, or after a self-directed refactor.
 allowed-tools: "Bash,Read,Grep,Glob,Agent"
 argument-hint: "[base-branch, defaults to main]"
 ---

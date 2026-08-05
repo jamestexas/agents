@@ -1,6 +1,6 @@
 ---
 name: feature-impl
-description: Research-first feature implementation workflow. Use when building new features, services, or any net-new code that should follow existing codebase patterns. Enforces pattern discovery before coding to prevent duplication, convention violations, and infrastructure conflicts. Language-agnostic; dispatches to repo-specific standards skills for convention checks.
+description: Research-first feature implementation workflow. Use when building new features or net-new code that should follow existing codebase patterns. Enforces pattern discovery before coding; dispatches to repo-specific standards skills for convention checks.
 ---
 
 # Feature Implementation Workflow

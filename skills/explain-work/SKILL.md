@@ -1,19 +1,11 @@
 ---
 name: explain-work
 description: >
-  Review a unit of work (a PR, a Linear ticket, or a path) and explain it so it
-  sticks — composing structural context (mache/seams), team ownership
-  (CODEOWNERS), and intent (the ticket) into a taught synthesis rather than a
-  bare findings list. Emphasis shifts by authorship: work you own gets
-  domain-onboarding (so you can defend it in a meeting); a peer's gets
-  findings-teaching (so you learn to spot it yourself). Reads your situated
-  context from native user rules + auto-memory when present and degrades
-  gracefully without it. Local/explain only — posts nothing, edits nothing.
-when_to_use: >
-  When you want a review coupled with "explain this to me" — prepping to discuss
-  a ticket you own, or learning from a peer's PR. Not for posting reviews (use
-  pr-review) or for the reviewer-only structural pre-flight alone (use
-  review-prep).
+  Review a PR, ticket, or path and explain it so it sticks — mache/CODEOWNERS/
+  ticket context synthesized into a taught explanation, not a bare findings
+  list. Own work gets onboarding framing; a peer's gets findings-teaching. Not
+  for posting reviews (pr-review) or the reviewer-only pre-flight alone
+  (review-prep). Local only.
 allowed-tools: "Bash,Read,Glob,Grep,Agent,mcp__mache__*"
 argument-hint: "<PR number, owner/repo#N, LINEAR-ID, or path> [--deep]"
 ---

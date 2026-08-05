@@ -1,6 +1,6 @@
 ---
 name: review-queue
-description: "Fan out isolated, one-per-PR code reviews across your review queue, then synthesize. Use when you have several peer PRs to review and want each in its own context + git worktree (no cross-PR pollution), with a single consolidated report at the end. Dispatches the pr-reviewer sub-agent (isolation worktree, read-only) per PR; pulls the queue from a review inbox (zen) or gh; optionally catches up via an observational memory layer if one is connected; posts nothing without explicit per-PR authorization."
+description: Fan out isolated, one-per-PR reviews across your queue (own context + worktree per PR, no cross-pollution), then synthesize one report. Pulls the queue from a review inbox (zen) or gh; posts nothing without per-PR authorization.
 ---
 
 # Review Queue — isolated per-PR reviews, fanned out and synthesized

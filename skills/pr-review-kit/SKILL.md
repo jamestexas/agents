@@ -1,13 +1,10 @@
 ---
 name: pr-review-kit
 description: >
-  Self-contained playbook for rigorous PR review. Use when starting a PR review
-  and you want the full discipline: state inspection, design-intent hunting, four
-  verification rules (cite primary sources, walk commits forward, investigate-not-
-  ask, verify actual artifacts), agent dispatch, falsifiable-matrix output format,
-  and GitHub posting only with explicit authorization. Generic — not tied to any
-  specific repo, org, or PR author. Sequential phases; can be applied end-to-end
-  or used as a reference for specific phases.
+  Self-contained playbook for rigorous PR review: state inspection,
+  design-intent hunting, verification rules (cite sources, walk commits,
+  verify artifacts), agent dispatch, falsifiable-matrix output, GitHub
+  posting only with explicit authorization. Generic, sequential phases.
 allowed-tools: "Bash,Read,Glob,Grep,Edit,Write,Agent"
 argument-hint: "[PR number, owner/repo#N, or nothing to ask]"
 ---

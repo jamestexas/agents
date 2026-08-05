@@ -1,11 +1,9 @@
 ---
 name: review-prep
 description: >
-  Given a PR number or diff, synthesize spec-driven diagram, emergent diagram,
-  and impact analysis into a structured insight: block for the reviewer.
-  Shows what the PR proposes, what the code actually does, the gap between them,
-  and blast radius of changed symbols. Output is local reviewer context — never
-  posted to GitHub.
+  Synthesize a PR's spec-driven diagram, emergent diagram, and impact analysis
+  into reviewer context: what's proposed vs. what the code does vs. blast
+  radius of changed symbols. Local only, never posted to GitHub.
 allowed-tools: "Bash,Read,Glob,Grep,mcp__mache__*"
 argument-hint: "<pr-number-or-repo#N> [repo-path]"
 ---

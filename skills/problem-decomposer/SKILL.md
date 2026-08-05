@@ -1,6 +1,6 @@
 ---
 name: problem-decomposer
-description: Decompose an aspiration into a lattice of dispatchable bead specs using 5-whys descent + a 7-property dispatchability rubric. Outputs a problem-statement doc (matching TEMPLATE.md), a list of bead specs ready to file via rosary:note, and an honest queue of non-leaves that need further design. Use when starting a new platform / capability / migration / refactor where work needs to be broken down before agents can ship it. Use also to audit an existing backlog for orphan-dispatchable beads that don't trace to a real aspiration.
+description: Decompose an aspiration into dispatchable bead specs via 5-whys descent + a 7-property rubric. Use when starting new platform/capability/migration work that needs breaking down before agents can ship it, or to audit a backlog for orphan-dispatchable beads.
 allowed-tools: Read Write Edit Glob Grep Bash(ls *) Bash(date *) Bash(rg *)
 argument-hint: <aspiration-slug> [--input=PATH] [--output-dir=PATH] [--audit=PATH]
 ---

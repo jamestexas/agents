@@ -1,11 +1,9 @@
 ---
 name: work-scope
 description: >
-  Decompose feature work into reviewable, shippable units before coding starts.
-  Use when the user provides a ticket (Linear ID, GitHub issue), describes a feature
-  to build, or is about to start a multi-file change. Breaks work into a sequence
-  of PRs that each have a single clear purpose a reviewer can hold in their head.
-  Feeds into writing-plans — each work unit becomes a plan.
+  Decompose feature work into reviewable, shippable PR-sized units before
+  coding starts. Use for a ticket, a feature description, or before a
+  multi-file change. Feeds writing-plans — each unit becomes a plan.
 allowed-tools: "Bash,Read,Glob,Grep,Agent,mcp__mache__*,mcp__plugin_linear_linear__*"
 argument-hint: "<ticket-id, problem statement, or nothing for interactive>"
 ---

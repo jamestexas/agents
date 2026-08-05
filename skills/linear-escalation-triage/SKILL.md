@@ -1,11 +1,9 @@
 ---
 name: linear-escalation-triage
 description: >
-  Use when handling Linear tickets assigned to you — during weekly oncall
-  queue sweeps, when picking up a specific aged escalation (P1/P2 in Triage
-  > 7 days), when cleaning up stale Todos where work may have landed
-  elsewhere, or when an external escalation (Slack ping, support comment)
-  surfaces a ticket needing a triaged customer-facing reply.
+  Use for Linear tickets assigned to you — oncall queue sweeps, aged P1/P2
+  escalations in Triage > 7 days, stale Todos needing cleanup, or an external
+  escalation (Slack/support) surfacing a ticket needing a triaged reply.
 user-invocable: true
 argument-hint: "[--sweep|--ticket <ID>] [--mode oncall|project] [--stale-only]"
 allowed-tools: "mcp__linear-server__*, mcp__rsry__*, Bash(gh:*), Bash(rsry:*), WebFetch"

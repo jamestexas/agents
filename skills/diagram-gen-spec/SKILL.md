@@ -1,10 +1,9 @@
 ---
 name: diagram-gen-spec
 description: >
-  Generate a top-down structural diagram from a mache schema file.
-  Shows intended architecture — what the PR proposes, not what the code does.
-  Reviewer local context only, never posted to GitHub.
-  Pair with diagram-gen-emergent to see spec vs reality drift.
+  Generate a top-down diagram of intended architecture from a mache schema file
+  — what the PR proposes, not what the code does. Local reviewer context only;
+  pair with diagram-gen-emergent for spec-vs-reality drift.
 allowed-tools: "Bash,Read,Glob,Grep,mcp__mache__*"
 argument-hint: "<schema-path-or-pr-number> [source-path]"
 ---
