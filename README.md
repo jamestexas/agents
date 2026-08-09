@@ -84,6 +84,7 @@ scripts/install.sh --doctor
 | [`review-prep`](skills/review-prep/SKILL.md) | scoped | Synthesize a PR's spec-driven diagram, emergent diagram, and impact analysis into reviewer context: what's proposed vs. |
 | [`review-queue`](skills/review-queue/SKILL.md) | inherits all | Fan out isolated, one-per-PR reviews across your queue (own context + worktree per PR, no cross-pollution), then synthesize one report. |
 | [`self-audit`](skills/self-audit/SKILL.md) | scoped | Pre-review self-audit of a PR branch: dead struct fields, rotting comments, duplicate types, scope drift — what a human catches but a compiler won't — then dispatches an adversarial agent for deeper design flaws. |
+| [`structural-pr-review`](skills/structural-pr-review/SKILL.md) | scoped | Deterministic PR-review chain with pluggable structural intelligence. |
 | [`survey`](skills/survey/SKILL.md) | inherits all | Multi-perspective codebase survey that produces beads and mermaid diagrams from code structure. |
 | [`taskfile-ci-parity`](skills/taskfile-ci-parity/SKILL.md) | scoped | Wire validation so local == CI by construction: every check is a Taskfile target; CI and hooks invoke it rather than reimplementing it. |
 | [`work-scope`](skills/work-scope/SKILL.md) | scoped | Decompose feature work into reviewable, shippable PR-sized units before coding starts. |
