@@ -87,6 +87,7 @@ scripts/install.sh --doctor
 | [`structural-pr-review`](skills/structural-pr-review/SKILL.md) | scoped | Deterministic PR-review chain with pluggable structural intelligence. |
 | [`survey`](skills/survey/SKILL.md) | inherits all | Multi-perspective codebase survey that produces beads and mermaid diagrams from code structure. |
 | [`taskfile-ci-parity`](skills/taskfile-ci-parity/SKILL.md) | scoped | Wire validation so local == CI by construction: every check is a Taskfile target; CI and hooks invoke it rather than reimplementing it. |
+| [`test-fidelity`](skills/test-fidelity/SKILL.md) | scoped | Hunt vacuous / low-fidelity tests — the ones that pass whether or not the code is wrong in the way they claim to catch. |
 | [`work-scope`](skills/work-scope/SKILL.md) | scoped | Decompose feature work into reviewable, shippable PR-sized units before coding starts. |
 | [`workflow-audit`](skills/workflow-audit/SKILL.md) | scoped | Mine the user's Claude Code chat corpus for self-optimization patterns — repeated corrections, tool thrash, dropped threads — into a ranked, PII-scrubbed report. |
 <!-- END: SKILLS -->
