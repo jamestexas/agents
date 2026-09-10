@@ -63,14 +63,19 @@ scripts/install.sh --doctor
 | Skill | Tool scope | Purpose |
 |-------|------------|---------|
 | [`break-glass`](skills/break-glass/SKILL.md) | inherits all | Emergency IAM elevation for oncall/debugging. |
+| [`claim-ledger`](skills/claim-ledger/SKILL.md) | scoped | Before opening a PR, enumerate every behavior it claims — stated, callers- unaffected, invariants-preserved — and tag each with the strongest evidence actually held: RAN, READ, or ASSUMED with a closed-set reason. |
+| [`contract-parity-audit`](skills/contract-parity-audit/SKILL.md) | inherits all | Use when one interface/trait has multiple implementations that are assumed equivalent (storage backends, providers, transports), when several public surfaces (CLI/API/webhook/worker) expose the same verb, when bugs cluster as "works on X but not Y", or to scope a guardrail-parity fix before estimating it. |
+| [`counterfactual-audit`](skills/counterfactual-audit/SKILL.md) | inherits all | Use when asked whether a repo's architecture is still right — a counterfactual "how would this be designed today?" question, a suspicion of over/under-engineering or monolith-vs-split, recurring bug families that smell structural, or before committing to a major refactor. |
 | [`diagram-gen-emergent`](skills/diagram-gen-emergent/SKILL.md) | scoped | Generate a bottom-up diagram of actual code coupling from cross-references — what the code does, not what was intended. |
 | [`diagram-gen-spec`](skills/diagram-gen-spec/SKILL.md) | scoped | Generate a top-down diagram of intended architecture from a mache schema file — what the PR proposes, not what the code does. |
 | [`doc-triage`](skills/doc-triage/SKILL.md) | inherits all | Find internal docs (not for external consumers), review against code reality, bead real items, archive stale files. |
 | [`explain-work`](skills/explain-work/SKILL.md) | scoped | Review a PR, ticket, or path and explain it so it sticks — mache/CODEOWNERS/ ticket context synthesized into a taught explanation, not a bare findings list. |
 | [`feature-impl`](skills/feature-impl/SKILL.md) | inherits all | Research-first feature implementation workflow. |
+| [`first-party-audit`](skills/first-party-audit/SKILL.md) | scoped | Before writing glue, a wrapper, or a "small helper", audit whether the capability already exists first-party — in the binary, the codebase, or the platform — and whether existing glue bypasses a better first-party implementation. |
 | [`handoff`](skills/handoff/SKILL.md) | scoped | Compact a session into a handoff at the work SEAM — where this session ends and the next resumes. |
 | [`linear-escalation-triage`](skills/linear-escalation-triage/SKILL.md) | scoped | Use for Linear tickets assigned to you — oncall queue sweeps, aged P1/P2 escalations in Triage > 7 days, stale Todos needing cleanup, or an external escalation (Slack/support) surfacing a ticket needing a triaged reply. |
 | [`mache-usage`](skills/mache-usage/SKILL.md) | scoped | Start or locate a running mache MCP server for a source path or .db file. |
+| [`park-work`](skills/park-work/SKILL.md) | scoped | Check whether the current human-agent work episode is mechanically safe to close, park incomplete work behind a verified durable checkpoint and receipt, or inspect a previously parked episode before a fail-closed resume gate. |
 | [`pr-board`](skills/pr-board/SKILL.md) | scoped | Answers "how are my PRs?", "did I address the review?", "anything waiting on me?". |
 | [`pr-review-kit`](skills/pr-review-kit/SKILL.md) | scoped | Self-contained playbook for rigorous PR review: state inspection, design-intent hunting, verification rules (cite sources, walk commits, verify artifacts), agent dispatch, falsifiable-matrix output, GitHub posting only with explicit authorization. |
 | [`pr-review`](skills/pr-review/SKILL.md) | scoped | Give or respond to PR reviews with structural awareness via mache. |
