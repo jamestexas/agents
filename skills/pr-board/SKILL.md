@@ -1,13 +1,10 @@
 ---
 name: pr-board
 description: >
-  Use when you ask "how are my PRs?", "did I address Mark's review?", "what's
-  new on the PRs I opened?", or "anything waiting on me?" — the recurring
-  authored-PR status question. Answers it lectio-first via
-  memory_authored_activity (reviews/comments by OTHERS on PRs you authored,
-  your own replies excluded), refreshes the gh source if it's stale, joins
-  each PR to your local worktrees + notes, and prints a board of what needs
-  you. Falls back to gh only for coverage gaps. Read-only; posts nothing.
+  Answers "how are my PRs?", "did I address the review?", "anything waiting
+  on me?". Lectio-first via authored-PR activity (reviews/comments by others,
+  excluding your own replies), falls back to gh for coverage gaps, joins to
+  local worktrees, prints a board of what needs you. Read-only.
 user-invocable: true
 argument-hint: "[--since <dur>] [--pr <ref>] [--no-refresh]"
 allowed-tools: "mcp__lectio__*, Bash(lectio:*), Bash(gh:*)"

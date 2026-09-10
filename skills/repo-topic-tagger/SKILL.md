@@ -1,6 +1,6 @@
 ---
 name: repo-topic-tagger
-description: Audit and apply GitHub topic tags (repository topics) on a target repo for discoverability — proposes tags from code signals, deduplicates against current tags, and applies via gh api after explicit user approval. Modular sub-skill of repo-seo-curator.
+description: Audit and apply GitHub topic tags for discoverability — proposes tags from code signals, deduplicates against current tags, applies via gh api after explicit approval. Sub-skill of repo-seo-curator.
 allowed-tools: Read Glob Grep Bash(gh *) Bash(jq *) Bash(git *) Bash(cat *) Bash(find *) Bash(ls *)
 argument-hint: <owner/repo> [<owner/repo> ...] [--dry-run] [--apply] [--max=N]
 ---

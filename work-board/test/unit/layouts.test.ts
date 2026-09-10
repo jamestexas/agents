@@ -57,4 +57,23 @@ describe("board layouts", () => {
     expect(past.future).toBe(false);
     expect(past.y).toBeGreaterThan(result.nowY);
   });
+  it("does not stack items that share an identity", () => {
+    // Defense in depth for the identity collision fixed in shared/board.ts.
+    // dialLayout used to recover an item's position with findIndex on
+    // artifactUri, which returns the FIRST match — so duplicates landed on one
+    // angle. Even given a degenerate identity, distinct items must be placed
+    // distinctly, because an overlap is invisible rather than loud.
+    const points = dialLayout([
+      { ...base, artifactUri: "same", lastActivity: "2026-07-30T10:00:00Z" },
+      { ...base, artifactUri: "same", lastActivity: "2026-07-30T10:00:00Z" }
+    ], Date.parse("2026-07-30T12:00:00Z"));
+    expect(points[0]!.angle).not.toBe(points[1]!.angle);
+  });
+
+  it("still places a lone item at its state's angle — the control", () => {
+    // Without this, the assertion above would pass on a layout that scattered
+    // everything: separation alone is not correctness.
+    const [only] = dialLayout([base], Date.parse("2026-07-30T12:00:00Z"));
+    expect(only!.angle).toBe(90); // "active"
+  });
 });

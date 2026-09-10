@@ -1,6 +1,6 @@
 ---
 name: repo-homepage-set
-description: Audit and set the GitHub repository homepage URL — the link on the repo card's "About" panel and on every search result. Detects candidate URLs from docs sites, package registries, demos, and org homepages, then applies via gh repo edit after user approval. Modular sub-skill of repo-seo-curator.
+description: Audit and set the GitHub repo homepage URL — the link on the repo card's "About" panel and every search result. Detects candidates from docs sites, registries, and demos; applies via gh repo edit after approval. Sub-skill of repo-seo-curator.
 allowed-tools: Read Glob Grep Bash(gh *) Bash(jq *) Bash(curl *)
 argument-hint: <owner/repo> [<owner/repo> ...] [--dry-run] [--apply]
 ---

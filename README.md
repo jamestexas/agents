@@ -31,6 +31,7 @@ scripts/install.sh --doctor
 |-------|-------|-------|---------|
 | [`adversarial-synthesis-lead`](agents/adversarial-synthesis-lead.md) | opus | red | Use this agent to integrate findings from the six adversarial reviewers (dos-resilience-auditor, enumeration-oracle-hunter, bundle-isolation-tester, protocol-replay-adversary, trust-root-adversary, observability-gap-auditor), reconcile overlaps, prioritize, and promote findings into the threat-model + ADR record. |
 | [`bundle-isolation-tester`](agents/bundle-isolation-tester.md) | opus | red | Use this agent for adversarial analysis of cross-tenant isolation in workerd-style hypervisors — slice-grant escapes, manifest misconfig exploitation, service-binding leakage, identity-confusion at the syscall boundary. |
+| [`dataflow-driven-troubleshooting`](agents/dataflow-driven-troubleshooting.md) | opus | green | Use this agent to trace a reported symptom BACKWARD through the dataflow to the site that originates it, verify the load-bearing facts against primary sources, and terminate in an attributed disposition — root cause, fix-owner, and ticket action — not just an investigation write-up. |
 | [`documentation-synthesis-architect`](agents/documentation-synthesis-architect.md) | inherit | blue | Use this agent when you have sprawling, overlapping, or fragmented documentation that needs consolidation, restructuring, and distillation into coherent, non-redundant artifacts. |
 | [`dos-resilience-auditor`](agents/dos-resilience-auditor.md) | opus | red | Use this agent for adversarial analysis of resource-exhaustion attack vectors in agent-hosting substrates — self-DoS via legal exits, single-threaded handler saturation, queue-depth attacks, fairness violations. |
 | [`empirical-validation-designer`](agents/empirical-validation-designer.md) | inherit | — | Translates theoretical claims into concrete, executable experiments that produce real results on real hardware |
@@ -62,32 +63,38 @@ scripts/install.sh --doctor
 | Skill | Tool scope | Purpose |
 |-------|------------|---------|
 | [`break-glass`](skills/break-glass/SKILL.md) | inherits all | Emergency IAM elevation for oncall/debugging. |
-| [`diagram-gen-emergent`](skills/diagram-gen-emergent/SKILL.md) | scoped | Generate a bottom-up community diagram from real code cross-references. |
-| [`diagram-gen-spec`](skills/diagram-gen-spec/SKILL.md) | scoped | Generate a top-down structural diagram from a mache schema file. |
+| [`claim-ledger`](skills/claim-ledger/SKILL.md) | scoped | Before opening a PR, enumerate every behavior it claims — stated, callers- unaffected, invariants-preserved — and tag each with the strongest evidence actually held: RAN, READ, or ASSUMED with a closed-set reason. |
+| [`contract-parity-audit`](skills/contract-parity-audit/SKILL.md) | inherits all | Use when one interface/trait has multiple implementations that are assumed equivalent (storage backends, providers, transports), when several public surfaces (CLI/API/webhook/worker) expose the same verb, when bugs cluster as "works on X but not Y", or to scope a guardrail-parity fix before estimating it. |
+| [`counterfactual-audit`](skills/counterfactual-audit/SKILL.md) | inherits all | Use when asked whether a repo's architecture is still right — a counterfactual "how would this be designed today?" question, a suspicion of over/under-engineering or monolith-vs-split, recurring bug families that smell structural, or before committing to a major refactor. |
+| [`diagram-gen-emergent`](skills/diagram-gen-emergent/SKILL.md) | scoped | Generate a bottom-up diagram of actual code coupling from cross-references — what the code does, not what was intended. |
+| [`diagram-gen-spec`](skills/diagram-gen-spec/SKILL.md) | scoped | Generate a top-down diagram of intended architecture from a mache schema file — what the PR proposes, not what the code does. |
 | [`doc-triage`](skills/doc-triage/SKILL.md) | inherits all | Find internal docs (not for external consumers), review against code reality, bead real items, archive stale files. |
-| [`explain-work`](skills/explain-work/SKILL.md) | scoped | Review a unit of work (a PR, a Linear ticket, or a path) and explain it so it sticks — composing structural context (mache/seams), team ownership (CODEOWNERS), and intent (the ticket) into a taught synthesis rather than a bare findings list. |
+| [`explain-work`](skills/explain-work/SKILL.md) | scoped | Review a PR, ticket, or path and explain it so it sticks — mache/CODEOWNERS/ ticket context synthesized into a taught explanation, not a bare findings list. |
 | [`feature-impl`](skills/feature-impl/SKILL.md) | inherits all | Research-first feature implementation workflow. |
-| [`handoff`](skills/handoff/SKILL.md) | scoped | Compact the current session into a handoff anchored at the work SEAM — the joint where this session ends and the next begins. |
-| [`linear-escalation-triage`](skills/linear-escalation-triage/SKILL.md) | scoped | Use when handling Linear tickets assigned to you — during weekly oncall queue sweeps, when picking up a specific aged escalation (P1/P2 in Triage > 7 days), when cleaning up stale Todos where work may have landed elsewhere, or when an external escalation (Slack ping, support comment) surfaces a ticket needing a triaged customer-facing reply. |
+| [`first-party-audit`](skills/first-party-audit/SKILL.md) | scoped | Before writing glue, a wrapper, or a "small helper", audit whether the capability already exists first-party — in the binary, the codebase, or the platform — and whether existing glue bypasses a better first-party implementation. |
+| [`handoff`](skills/handoff/SKILL.md) | scoped | Compact a session into a handoff at the work SEAM — where this session ends and the next resumes. |
+| [`linear-escalation-triage`](skills/linear-escalation-triage/SKILL.md) | scoped | Use for Linear tickets assigned to you — oncall queue sweeps, aged P1/P2 escalations in Triage > 7 days, stale Todos needing cleanup, or an external escalation (Slack/support) surfacing a ticket needing a triaged reply. |
 | [`mache-usage`](skills/mache-usage/SKILL.md) | scoped | Start or locate a running mache MCP server for a source path or .db file. |
 | [`park-work`](skills/park-work/SKILL.md) | scoped | Check whether the current human-agent work episode is mechanically safe to close, park incomplete work behind a verified durable checkpoint and receipt, or inspect a previously parked episode before a fail-closed resume gate. |
-| [`pr-board`](skills/pr-board/SKILL.md) | scoped | Use when you ask "how are my PRs?", "did I address Mark's review?", "what's new on the PRs I opened?", or "anything waiting on me?" — the recurring authored-PR status question. |
-| [`pr-review-kit`](skills/pr-review-kit/SKILL.md) | scoped | Self-contained playbook for rigorous PR review. |
+| [`pr-board`](skills/pr-board/SKILL.md) | scoped | Answers "how are my PRs?", "did I address the review?", "anything waiting on me?". |
+| [`pr-review-kit`](skills/pr-review-kit/SKILL.md) | scoped | Self-contained playbook for rigorous PR review: state inspection, design-intent hunting, verification rules (cite sources, walk commits, verify artifacts), agent dispatch, falsifiable-matrix output, GitHub posting only with explicit authorization. |
 | [`pr-review`](skills/pr-review/SKILL.md) | scoped | Give or respond to PR reviews with structural awareness via mache. |
-| [`prior-art-cartographer`](skills/prior-art-cartographer/SKILL.md) | scoped | Produce structured comparisons between a project being built (described by a baseline doc) and external systems that solve adjacent problems. |
-| [`problem-decomposer`](skills/problem-decomposer/SKILL.md) | scoped | Decompose an aspiration into a lattice of dispatchable bead specs using 5-whys descent + a 7-property dispatchability rubric. |
-| [`readme-restructure`](skills/readme-restructure/SKILL.md) | scoped | Restructure a README for both human skimmers and LLM ingestion. |
-| [`repo-description-polish`](skills/repo-description-polish/SKILL.md) | scoped | Audit and polish the GitHub repository description — the one-sentence pitch shown in search results, link previews, and embeds. |
-| [`repo-homepage-set`](skills/repo-homepage-set/SKILL.md) | scoped | Audit and set the GitHub repository homepage URL — the link on the repo card's "About" panel and on every search result. |
-| [`repo-social-preview`](skills/repo-social-preview/SKILL.md) | scoped | Audit the GitHub OpenGraph social preview image — the card shown when a repo URL is posted on HN, Twitter, Slack, or Discord. |
-| [`repo-topic-tagger`](skills/repo-topic-tagger/SKILL.md) | scoped | Audit and apply GitHub topic tags (repository topics) on a target repo for discoverability — proposes tags from code signals, deduplicates against current tags, and applies via gh api after explicit user approval. |
-| [`review-prep`](skills/review-prep/SKILL.md) | scoped | Given a PR number or diff, synthesize spec-driven diagram, emergent diagram, and impact analysis into a structured insight: block for the reviewer. |
-| [`review-queue`](skills/review-queue/SKILL.md) | inherits all | Fan out isolated, one-per-PR code reviews across your review queue, then synthesize. |
-| [`self-audit`](skills/self-audit/SKILL.md) | scoped | Pre-review self-audit of a PR branch. |
+| [`prior-art-cartographer`](skills/prior-art-cartographer/SKILL.md) | scoped | Produce cited, structured comparisons between a project and external systems solving adjacent problems; updates a prior-art matrix. |
+| [`problem-decomposer`](skills/problem-decomposer/SKILL.md) | scoped | Decompose an aspiration into dispatchable bead specs via 5-whys descent + a 7-property rubric. |
+| [`readme-restructure`](skills/readme-restructure/SKILL.md) | scoped | Restructure a README for human skimmers and LLM ingestion — fixes frontloaded internals, moves the value prop into the first 200 tokens, generates a diff for review. |
+| [`repo-description-polish`](skills/repo-description-polish/SKILL.md) | scoped | Audit and polish the GitHub repo description — the pitch shown in search results, previews, and embeds. |
+| [`repo-homepage-set`](skills/repo-homepage-set/SKILL.md) | scoped | Audit and set the GitHub repo homepage URL — the link on the repo card's "About" panel and every search result. |
+| [`repo-social-preview`](skills/repo-social-preview/SKILL.md) | scoped | Audit the GitHub OpenGraph social preview image shown when a repo URL is posted on HN/Twitter/Slack/Discord. |
+| [`repo-topic-tagger`](skills/repo-topic-tagger/SKILL.md) | scoped | Audit and apply GitHub topic tags for discoverability — proposes tags from code signals, deduplicates against current tags, applies via gh api after explicit approval. |
+| [`review-prep`](skills/review-prep/SKILL.md) | scoped | Synthesize a PR's spec-driven diagram, emergent diagram, and impact analysis into reviewer context: what's proposed vs. |
+| [`review-queue`](skills/review-queue/SKILL.md) | inherits all | Fan out isolated, one-per-PR reviews across your queue (own context + worktree per PR, no cross-pollution), then synthesize one report. |
+| [`self-audit`](skills/self-audit/SKILL.md) | scoped | Pre-review self-audit of a PR branch: dead struct fields, rotting comments, duplicate types, scope drift — what a human catches but a compiler won't — then dispatches an adversarial agent for deeper design flaws. |
+| [`structural-pr-review`](skills/structural-pr-review/SKILL.md) | scoped | Deterministic PR-review chain with pluggable structural intelligence. |
 | [`survey`](skills/survey/SKILL.md) | inherits all | Multi-perspective codebase survey that produces beads and mermaid diagrams from code structure. |
-| [`taskfile-ci-parity`](skills/taskfile-ci-parity/SKILL.md) | scoped | Wire repo validation so local == CI by construction - every check is a Taskfile target, and CI + git hooks INVOKE those targets rather than re-implementing the commands. |
-| [`work-scope`](skills/work-scope/SKILL.md) | scoped | Decompose feature work into reviewable, shippable units before coding starts. |
-| [`workflow-audit`](skills/workflow-audit/SKILL.md) | scoped | Mine the user's Claude Code chat corpus for self-optimization patterns — repeated corrections, tool thrash, dropped threads, restated constraints — and produce a ranked, PII-scrubbed, anti-recency-biased markdown report. |
+| [`taskfile-ci-parity`](skills/taskfile-ci-parity/SKILL.md) | scoped | Wire validation so local == CI by construction: every check is a Taskfile target; CI and hooks invoke it rather than reimplementing it. |
+| [`test-fidelity`](skills/test-fidelity/SKILL.md) | scoped | Hunt vacuous / low-fidelity tests — the ones that pass whether or not the code is wrong in the way they claim to catch. |
+| [`work-scope`](skills/work-scope/SKILL.md) | scoped | Decompose feature work into reviewable, shippable PR-sized units before coding starts. |
+| [`workflow-audit`](skills/workflow-audit/SKILL.md) | scoped | Mine the user's Claude Code chat corpus for self-optimization patterns — repeated corrections, tool thrash, dropped threads — into a ranked, PII-scrubbed report. |
 <!-- END: SKILLS -->
 
 ## How agents and skills differ

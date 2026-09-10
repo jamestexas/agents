@@ -129,4 +129,40 @@ describe("normalizeBoard", () => {
       items: [{ kind: "mystery" }]
     })).toThrow();
   });
+  it("gives recurring same-titled events distinct identities", () => {
+    // A calendar event carries no repo and no number, so the synthesized
+    // identity fell back to `kind:local#title` and every occurrence of a
+    // recurring meeting shared it. render.ts joins on this as D3's key, where
+    // duplicates are dropped from the join — the second standup was not drawn
+    // at all, and the board looked correct because nothing reported a loss.
+    const view = normalizeBoard({
+      generated_at: "2026-07-30T12:00:00Z",
+      tick_status: "ok",
+      items: [
+        { kind: "event", title: "standup", state: "active", last_activity: "2026-07-30T09:00:00Z" },
+        { kind: "event", title: "standup", state: "active", last_activity: "2026-07-30T11:00:00Z" }
+      ]
+    });
+    const uris = view.items.map((item) => item.artifactUri);
+    expect(new Set(uris).size).toBe(2);
+  });
+
+  it("leaves a numbered artifact's identity free of the activity time", () => {
+    // The control for the case above, and the reason the time is not simply
+    // appended everywhere: a number already discriminates, and folding activity
+    // into the key would re-enter a PR on every update instead of transitioning
+    // it — object constancy lost to fix a collision that does not exist here.
+    const identity = (lastActivity: string) => normalizeBoard({
+      generated_at: "2026-07-30T12:00:00Z",
+      tick_status: "ok",
+      items: [{
+        kind: "pr", repo: "acme/demo", number: 7, title: "renamed since",
+        state: "active", last_activity: lastActivity
+      }]
+    }).items[0]!.artifactUri;
+
+    expect(identity("2026-07-30T09:00:00Z")).toBe("pr:acme/demo#7");
+    // Same artifact, later activity, same key.
+    expect(identity("2026-07-30T11:00:00Z")).toBe(identity("2026-07-30T09:00:00Z"));
+  });
 });

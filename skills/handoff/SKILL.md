@@ -1,16 +1,11 @@
 ---
 name: handoff
 description: >
-  Compact the current session into a handoff anchored at the work SEAM — the joint
-  where this session ends and the next begins. Writes a rosary mailbox entry (machine
-  truth via rsry_agent_session_message_record), a bead comment (human-skimmable trail),
-  a jj workspace checkpoint (resumable tree), and a /tmp markdown view (a human can grab).
-  `--resume` drains the seam in the next session and re-validates live state before acting.
-  Degrades to a plain /tmp markdown handoff when rosary is unavailable.
-when_to_use: >
-  At the end of a work session that another session — human or agent — must continue, or
-  at the start of a session picking up prior work (`--resume`). Not for one-shot tasks that
-  finish in place, and not a general session summary: a handoff is scoped to ONE task.
+  Compact a session into a handoff at the work SEAM — where this session ends
+  and the next resumes. Writes a rosary mailbox entry, bead comment, jj
+  checkpoint, and /tmp view; `--resume` drains it next session. Use at the end
+  of a task another session must continue, or to resume one — not a general
+  summary.
 model: opus
 allowed-tools: "Bash,Read,Glob,Grep,mcp__rsry__*"
 argument-hint: "[<bead-id>] <what the next session is for>   |   --resume [<bead-id>]"

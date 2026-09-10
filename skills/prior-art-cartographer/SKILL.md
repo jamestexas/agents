@@ -1,6 +1,6 @@
 ---
 name: prior-art-cartographer
-description: Produce structured comparisons between a project being built (described by a baseline doc) and external systems that solve adjacent problems. Outputs follow this skill's TEMPLATE.md, cite primary sources for every claim, and update a cross-cutting matrix in the project's prior-art/README.md. Refuses to compare more than 5 systems per invocation. Refuses to assert without citation. Use when researching prior art, evaluating "are we reinventing X?", or building shoulders-of-giants context before committing to a substrate design.
+description: Produce cited, structured comparisons between a project and external systems solving adjacent problems; updates a prior-art matrix. Use for prior-art research or "are we reinventing X?" before committing to a design. Max 5 systems/invocation; no uncited claims.
 allowed-tools: WebFetch WebSearch Read Write Edit Glob Grep Bash(gh *) Bash(ls *) Bash(date *)
 argument-hint: <system-name> [<system-name> ...] [--baseline=PATH] [--output-dir=PATH] [--decision=adopt|borrow]
 ---

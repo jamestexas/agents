@@ -29,9 +29,20 @@ export function dialLayout(items: readonly WorkBoardItem[], now: number): Point[
     group.push(item);
     groups.set(item.state, group);
   }
+  // Position within the group is recorded while grouping, keyed by object
+  // identity. It used to be recovered afterwards with
+  // `group.findIndex(e => e.artifactUri === item.artifactUri)`, which silently
+  // returned the FIRST match — so two items sharing an identity were assigned
+  // the same angle and drawn on top of each other. Two same-titled calendar
+  // events did exactly that. The identity collision is fixed at its source in
+  // shared/board.ts; this no longer depends on that being true.
+  const positions = new Map<WorkBoardItem, number>();
+  for (const group of groups.values()) {
+    group.forEach((entry, index) => positions.set(entry, index));
+  }
   return items.map((item) => {
     const group = groups.get(item.state) ?? [item];
-    const index = group.findIndex((entry) => entry.artifactUri === item.artifactUri);
+    const index = positions.get(item) ?? 0;
     const step = group.length > 1 ? Math.min(18, 76 / (group.length - 1)) : 0;
     const angle = stateAngle[item.state] + (index - (group.length - 1) / 2) * step;
     const radius = INNER + Math.min(ageHours(item, now), MAX_AGE_HOURS) / MAX_AGE_HOURS * (OUTER - INNER);

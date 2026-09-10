@@ -1,6 +1,6 @@
 ---
 name: readme-restructure
-description: Restructure a README for both human skimmers and LLM ingestion. Diagnoses information architecture, identifies frontloaded internals, proposes a reordered structure that lands the value prop in the first 200 tokens, then generates a diff for review. Preserves content; changes order and disclosure. Modular sub-skill of repo-seo-curator.
+description: Restructure a README for human skimmers and LLM ingestion — fixes frontloaded internals, moves the value prop into the first 200 tokens, generates a diff for review. Preserves content, reorders disclosure. Sub-skill of repo-seo-curator.
 allowed-tools: Read Edit Write Glob Grep Bash(git *) Bash(wc *) Bash(head *)
 argument-hint: <path-to-README.md> [--dry-run] [--apply] [--target=human|llm|both]
 ---

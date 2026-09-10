@@ -26,6 +26,7 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+.pnpm-store/
 
 # Environment variables and local Worker secrets
 .env*
@@ -48,6 +49,9 @@ all_repo_review_comments.jsonl
 applicability.yaml
 scripts/which-applies.sh
 .worktrees/
+
+# Session-resume scratch notes (per-clone, ad hoc)
+*-resume.txt
 
 # Beads / Dolt files (added by bd init)
 .dolt/

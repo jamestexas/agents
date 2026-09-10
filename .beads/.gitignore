@@ -11,11 +11,14 @@ bd.db
 dolt/
 dolt.bak/
 dolt-access.lock
+embeddeddolt/
 
 # Runtime files
 bd.sock
 bd.sock.startlock
 sync-state.json
+push-state.json
+interactions.jsonl
 last-touched
 .local_version
 redirect

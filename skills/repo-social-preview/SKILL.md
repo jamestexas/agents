@@ -1,6 +1,6 @@
 ---
 name: repo-social-preview
-description: Audit the GitHub OpenGraph social preview image — the card shown when a repo URL is posted on HN, Twitter, Slack, or Discord. Detects whether one is set, evaluates the existing image's clarity at small sizes, suggests sources for missing ones (existing logo, generated card), and reports the manual upload steps. Modular sub-skill of repo-seo-curator.
+description: Audit the GitHub OpenGraph social preview image shown when a repo URL is posted on HN/Twitter/Slack/Discord. Flags if missing, checks clarity at small sizes, suggests sources, reports manual upload steps. Sub-skill of repo-seo-curator.
 allowed-tools: Read Glob Grep Bash(gh *) Bash(jq *) Bash(curl *) Bash(file *)
 argument-hint: <owner/repo> [<owner/repo> ...] [--audit-only]
 ---

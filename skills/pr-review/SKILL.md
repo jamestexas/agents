@@ -1,11 +1,9 @@
 ---
 name: pr-review
 description: >
-  Give or respond to PR reviews with structural awareness via mache. Review mode:
-  runs review-prep (spec-driven + emergent diagrams + impact analysis), shows reviewer
-  the structural picture locally, then runs parallel analysis agents with enriched prompts,
-  synthesizes into one GitHub review submission (body + inline comments). Mermaid diagrams
-  shown locally before posting. Respond mode: addresses reviewer comments.
+  Give or respond to PR reviews with structural awareness via mache. Review
+  mode: review-prep diagrams + impact analysis, parallel analysis agents, one
+  consolidated GitHub review. Respond mode: address reviewer comments.
 allowed-tools: "Bash,Read,Glob,Grep,Agent,mcp__mache__*"
 argument-hint: "[--review|--respond] [PR number, owner/repo#N, or LINEAR-ID]"
 ---
