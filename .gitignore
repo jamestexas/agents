@@ -57,3 +57,6 @@ scripts/which-applies.sh
 .dolt/
 *.db
 .beads-credential-key
+
+# claim-ledger runtime data — WORK CONTENT, never commit
+skills/claim-ledger/tally.jsonl
