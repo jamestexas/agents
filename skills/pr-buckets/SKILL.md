@@ -48,8 +48,10 @@ Sum the non-`_test.go` / non-`*_test.*` files for impl; the rest is test.
    testing it are two buckets (the feature, and the seam). "My test is separate"
    is a first-class boundary.
 3. **By file disjointness** — buckets whose file sets don't overlap split
-   cleanly in jj (`jj split <paths>` is non-interactive when slices are
-   file-disjoint). Prefer boundaries that fall on file lines when you can.
+   cleanly in jj (`jj split <paths> -m "<msg>"` is fully non-interactive when
+   slices are file-disjoint). A bucket boundary that cuts *within* a file forces
+   hunk-level splitting, which is a different and slower tool. Prefer boundaries
+   that fall on file lines when you can.
 4. **By blast radius** — a shared-signature change (a constructor that gains an
    arg) and its call-site updates must land together or the intermediate commit
    won't build; that forces a bucket boundary (they're one bucket) or a
@@ -62,6 +64,13 @@ the entrypoint that wires it. Emit them **bottom-up** (base first), because
 jj-stack builds the stack in that order and each PR bases on the previous. If a
 bucket doesn't depend on the rest (a test-harness seam, a pure util), mark it
 **off-stack** — it can base directly on the feature branch, reviewed in parallel.
+
+**Group the off-stack buckets adjacently.** jj-stack lifts them out of the chain
+with `jj parallelize`, which only accepts a **contiguous** range (`<first>::<last>`)
+— a sparse revset silently no-ops. So off-stack buckets that are neighbours in
+your emitted order become siblings in one command; off-stack buckets scattered
+through the stack each need a separate `jj rebase`. Ordering them together costs
+you nothing here and saves a step downstream.
 
 ## Output
 
