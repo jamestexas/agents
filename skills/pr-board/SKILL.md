@@ -29,7 +29,7 @@ move). gh is the fallback for what lectio doesn't cover, never the first reach.
 ## Arguments
 
 - `--since <dur>` — window for "new activity" (e.g. `24h`, `3d`). Default `24h`.
-- `--pr <ref>` — focus one PR (`42090` or `chainguard-dev/mono#42090`); skips the board, deep-dives that PR's review thread + your reply status.
+- `--pr <ref>` — focus one PR (`42090` or `owner/repo#42090`); skips the board, deep-dives that PR's review thread + your reply status.
 - `--no-refresh` — skip the freshness step (use lectio as-is; faster, possibly stale).
 
 ---
@@ -93,10 +93,10 @@ One scannable block, sorted by what needs you most (unanswered reviews first):
 ```
 PR board — new since <window>  (gh swept <freshness>)
 
-chainguard-dev/mono#42090 — "title" — OPEN — ⚠ NEEDS REPLY
+owner/repo#42090 — "title" — OPEN — ⚠ NEEDS REPLY
   • Mark: 3 review comments (src/foo.rs, src/bar.rs) — 2h ago — you haven't replied since
   • local: <worktree-path>/mono-pr-42090-review worktree, notes at <path>
-chainguard-dev/mono#39311 — "title" — OPEN — ✓ replied
+owner/repo#39311 — "title" — OPEN — ✓ replied
   • Carol: 1 approval — 1d ago
 …
 2 PRs with new activity · 1 needs your reply

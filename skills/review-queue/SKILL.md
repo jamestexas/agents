@@ -11,7 +11,7 @@ The problem this solves: reviewing N peer PRs in one long session pollutes conte
 
 ## Arguments
 
-A list of PR numbers/URLs to review (e.g. `42088 42090 39311`, or full `chainguard-dev/mono#42090` refs). If empty, the skill builds the queue from your review inbox (Phase 0).
+A list of PR numbers/URLs to review (e.g. `42088 42090 39311`, or full `owner/repo#42090` refs). If empty, the skill builds the queue from your review inbox (Phase 0).
 
 ---
 
