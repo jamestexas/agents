@@ -1,0 +1,106 @@
+{
+  "version": "v1",
+  "diagrams": {
+    "system": { "layout": "LR" }
+  },
+  "file_sets": {
+    "entry_fields": [
+      { "name": "title", "content_template": "{{.title}}" },
+      { "name": "path", "content_template": "{{.path}}" },
+      { "name": "type", "content_template": "{{if .type}}{{.type}}{{end}}" },
+      { "name": "status", "content_template": "{{if .status}}{{.status}}{{end}}" },
+      { "name": "date", "content_template": "{{if .date}}{{.date}}{{end}}" },
+      { "name": "tags", "content_template": "{{if .tags}}{{join \"\\n\" .tags}}{{end}}" },
+      { "name": "tickets", "content_template": "{{if .tickets}}{{join \"\\n\" .tickets}}{{end}}" },
+      { "name": "repos", "content_template": "{{if .repos}}{{join \"\\n\" .repos}}{{end}}" },
+      { "name": "gh", "content_template": "{{if .gh}}{{.gh}}{{end}}" }
+    ]
+  },
+  "nodes": [
+    {
+      "name": "sections",
+      "children": [
+        {
+          "name": "{{.section}}",
+          "selector": "$[*].entry",
+          "children": [
+            {
+              "name": "{{.group}}",
+              "selector": "$",
+              "children": [
+                {
+                  "name": "{{.subgroup}}",
+                  "selector": "$",
+                  "children": [
+                    {
+                      "name": "{{.slug}}",
+                      "selector": "$",
+                      "include": ["entry_fields"],
+                      "refs": [
+                        "{{if .type}}type:{{.type}}{{end}}",
+                        "{{if .status}}status:{{.status}}{{end}}",
+                        "{{if .gh}}gh:{{.gh}}{{end}}"
+                      ],
+                      "children": [
+                        {
+                          "name": "tags",
+                          "selector": "$.tags",
+                          "children": [
+                            {
+                              "name": "{{.value}}",
+                              "selector": "$[*]",
+                              "refs": ["tag:{{.value}}"],
+                              "files": [{ "name": "tag", "content_template": "{{.value}}" }]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "tickets",
+                          "selector": "$.tickets",
+                          "children": [
+                            {
+                              "name": "{{.value}}",
+                              "selector": "$[*]",
+                              "refs": ["ticket:{{.value}}"],
+                              "files": [{ "name": "ticket", "content_template": "{{.value}}" }]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "repos",
+                          "selector": "$.repos",
+                          "children": [
+                            {
+                              "name": "{{replace .value \"/\" \"__\"}}",
+                              "selector": "$[*]",
+                              "refs": ["repo:{{.value}}"],
+                              "files": [{ "name": "repo", "content_template": "{{.value}}" }]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "panels",
+      "children": [
+        {
+          "name": "{{.name}}",
+          "selector": "$[*].panel",
+          "refs": ["panel-kind:{{.kind}}"],
+          "files": [
+            { "name": "kind", "content_template": "{{.kind}}" },
+            { "name": "target", "content_template": "{{.target}}" }
+          ]
+        }
+      ]
+    }
+  ]
+}

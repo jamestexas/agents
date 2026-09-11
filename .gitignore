@@ -53,6 +53,13 @@ scripts/which-applies.sh
 # Session-resume scratch notes (per-clone, ad hoc)
 *-resume.txt
 
+# hud/ machine-written data. The HUD writes every snapshot, log, and index
+# under $HUD_ROOT/.generated in the private content tree, never beside its
+# code — these two lines are the backstop that keeps a regression there from
+# publishing work data, not the mechanism.
+hud/generated/
+hud/.generated/
+
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db

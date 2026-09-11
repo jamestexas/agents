@@ -1,0 +1,1799 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HUD</title>
+    <style>
+      /* No external fonts, no CDN, no framework: this page must render with
+         the network unplugged. */
+      :root {
+        /* SynthWave '84 */
+        --bg: #262335;
+        --panel: #241b2f;
+        --card: #2a2139;
+        --accent: #f97e72;
+        --hot: #fe4450;
+        --magenta: #ff7edb;
+        --cyan: #36f9f6;
+        --cyan2: #03edf9;
+        --green: #72f1b8;
+        --yellow: #f3e70f;
+        --muted: #848bbd;
+        --button: #614D85;
+        --fg: #f4f0ff;
+        --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+        --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+      body {
+        background: var(--bg);
+        color: var(--fg);
+        font: 14px/1.5 var(--sans);
+        display: flex;
+        flex-direction: column;
+      }
+      a {
+        color: var(--accent);
+      }
+
+      /* ---- header bar: dial is a placeholder until the dynamic bead ---- */
+      header {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--card);
+        background: var(--panel);
+        font-family: var(--mono);
+        font-size: 13px;
+        flex: none;
+      }
+      .dial {
+        color: var(--accent);
+        border: 1px solid var(--card);
+        border-radius: 999px;
+        padding: 3px 10px;
+        text-shadow: 0 0 6px currentColor;
+      }
+      .dial[data-state="live"] {
+        color: var(--green);
+      }
+      /* Snapshot data is legible but visibly not now. */
+      .dial[data-state="stale"] {
+        color: var(--muted);
+      }
+      header .spacer {
+        flex: 1;
+      }
+      header button {
+        background: var(--button);
+        color: var(--fg);
+        border: 1px solid var(--card);
+        border-radius: 6px;
+        padding: 3px 9px;
+        font-family: var(--mono);
+        cursor: pointer;
+      }
+      header button:hover {
+        border-color: var(--accent);
+      }
+      #generated {
+        color: var(--muted);
+      }
+
+      /* ---- two columns: content left, dynamic panels right ---- */
+      main {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 340px;
+      }
+      @media (max-width: 860px) {
+        main {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        aside {
+          display: none;
+        }
+      }
+      #left {
+        overflow: auto;
+        padding: 14px 18px 60px;
+      }
+      aside {
+        overflow: auto;
+        border-left: 1px solid var(--card);
+        background: var(--panel);
+        padding: 14px;
+      }
+
+      h2.section {
+        font: 600 11px/1 var(--mono);
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--magenta);
+        text-shadow: 0 0 6px currentColor;
+        margin: 22px 0 8px;
+      }
+      h2.section:first-child {
+        margin-top: 4px;
+      }
+      h2.section .count {
+        color: var(--muted);
+        font-weight: 400;
+      }
+      h3.group {
+        font: 600 12px/1 var(--mono);
+        color: var(--fg);
+        margin: 14px 0 6px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .empty {
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 12px;
+        padding: 2px 0 6px;
+      }
+
+      ul.entries {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      .entry {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        width: 100%;
+        text-align: left;
+        background: none;
+        border: 0;
+        border-radius: 6px;
+        color: var(--fg);
+        font: inherit;
+        padding: 5px 8px;
+        cursor: pointer;
+      }
+      .entry:hover {
+        background: var(--card);
+      }
+      .entry:hover .title {
+        color: var(--cyan2);
+      }
+      .entry .caret {
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .entry .title {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--cyan);
+      }
+      .entry .meta {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .badge {
+        font-family: var(--mono);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        border: 1px solid var(--card);
+        border-radius: 4px;
+        padding: 1px 5px;
+      }
+      .badge.warn {
+        color: var(--yellow);
+        border-color: var(--yellow);
+      }
+      .badge.hot {
+        color: var(--hot);
+        border-color: var(--hot);
+      }
+      .badge.parked,
+      .badge.done {
+        color: var(--muted);
+      }
+
+      /* ---- document view: replaces the list in place ---- */
+      #doc[hidden] {
+        display: none;
+      }
+      #docbar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 14px;
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--muted);
+      }
+      #docbar button {
+        background: var(--button);
+        color: var(--fg);
+        border: 1px solid var(--card);
+        border-radius: 6px;
+        padding: 3px 9px;
+        font: inherit;
+        cursor: pointer;
+      }
+      /* Copies location.href. The one affordance on this page that is not a
+         disclosure or a link out — and it still touches nothing. */
+      button.copylink {
+        background: none;
+        color: var(--muted);
+        border: 1px solid var(--card);
+        border-radius: 5px;
+        padding: 1px 6px;
+        font: inherit;
+        cursor: pointer;
+      }
+      button.copylink:hover {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      /* A deep link that no longer resolves: said plainly, tree still there. */
+      #notfound[hidden] {
+        display: none;
+      }
+      #notfound {
+        border: 1px dashed var(--yellow);
+        border-radius: 8px;
+        color: var(--yellow);
+        font-family: var(--mono);
+        font-size: 12px;
+        padding: 8px 11px;
+        margin-bottom: 12px;
+      }
+      /* The prose measure sits on each block rather than on the container, so
+         that one kind of block — a diagram — can take the whole column while
+         everything else keeps the width it had. The body is wrapped in a div,
+         so the measure lands on that div's children; capping the wrapper
+         would cap the diagram with it.
+         Stated in rem, not ch: `ch` resolves against each element's own font,
+         which on a per-block rule would let headings run wider than the body
+         text they head. 43rem is the same 688px the container used to carry
+         as 78ch. */
+      #docbody {
+        max-width: none;
+      }
+      #docbody > .meta-chips,
+      #docbody > pre,
+      #docbody > div > * {
+        max-width: 43rem;
+      }
+      #docbody h1,
+      #docbody h2,
+      #docbody h3 {
+        line-height: 1.3;
+      }
+      #docbody h1 {
+        font-size: 22px;
+        border-bottom: 1px solid var(--card);
+        padding-bottom: 6px;
+      }
+      #docbody h2 {
+        font-size: 17px;
+        color: var(--fg);
+      }
+      #docbody code,
+      #docbody pre {
+        font-family: var(--mono);
+        font-size: 12.5px;
+      }
+      #docbody :not(pre) > code {
+        background: var(--card);
+        border: 1px solid var(--card);
+        border-radius: 4px;
+        padding: 1px 4px;
+      }
+      #docbody pre {
+        background: var(--panel);
+        border: 1px solid var(--card);
+        border-radius: 8px;
+        padding: 12px;
+        overflow: auto;
+      }
+      #docbody blockquote {
+        margin: 0;
+        padding-left: 12px;
+        border-left: 3px solid var(--card);
+        color: var(--muted);
+      }
+      #docbody table {
+        border-collapse: collapse;
+      }
+      #docbody th,
+      #docbody td {
+        border: 1px solid var(--card);
+        padding: 4px 8px;
+        text-align: left;
+      }
+      #docbody img {
+        max-width: 100%;
+      }
+      /* The one block allowed out of the prose measure — but only once it is
+         actually a diagram. Until mermaid has parsed it, and forever if it
+         cannot, the block is an ordinary code block: it keeps the measure and
+         the `pre` styling above, and sits at the same width as every other
+         code block on the page. */
+      #docbody > div > .mermaid-block[data-mermaid="rendered"] {
+        max-width: none;
+      }
+      #docbody .mermaid-block {
+        margin: 0 0 12px;
+        overflow: auto;
+      }
+      #docbody .mermaid-block[data-mermaid="rendered"] {
+        background: var(--panel);
+        border: 1px solid var(--card);
+        border-radius: 8px;
+        padding: 12px;
+        text-align: center;
+      }
+      #docbody .mermaid-block svg {
+        max-width: 100%;
+        height: auto;
+      }
+      /* Mermaid marks a node carrying a click directive `clickable`; say so
+         with the cursor, since the link is drawn inside the SVG and gets none
+         of the page's own anchor styling. */
+      #docbody .mermaid-block .clickable {
+        cursor: pointer;
+      }
+      .meta-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 0 0 16px;
+      }
+
+      /* ---- right column: dynamic panels ---- */
+      .panel {
+        border: 1px solid var(--card);
+        border-radius: 8px;
+        background: var(--card);
+        margin-bottom: 12px;
+        overflow: hidden;
+      }
+      /* A source with neither live data nor a snapshot has no panel at all. */
+      .panel[hidden] {
+        display: none;
+      }
+      /* Serving a snapshot: readable, unmistakably not live. */
+      .panel.stale {
+        opacity: 0.6;
+        border-style: dashed;
+      }
+      .panel > h2 {
+        font: 600 11px/1 var(--mono);
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--magenta);
+        text-shadow: 0 0 6px currentColor;
+        margin: 0;
+        padding: 9px 11px;
+        border-bottom: 1px solid var(--card);
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+      }
+      .panel > h2 .stamp {
+        flex: 1;
+        text-align: right;
+        letter-spacing: 0;
+        text-transform: none;
+        font-weight: 400;
+        color: var(--muted);
+      }
+      .panel > .body {
+        padding: 11px;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+
+      /* One row per board item / peer / digest line. Everything is a link out:
+         the HUD watches, the human acts in the tool that owns the action. */
+      .rows {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      .rows > li {
+        padding: 6px 0;
+        border-top: 1px solid var(--card);
+      }
+      .rows > li:first-child {
+        border-top: 0;
+        padding-top: 0;
+      }
+      .rows > li:last-child {
+        padding-bottom: 0;
+      }
+      .row-top {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+      }
+      .row-top .num {
+        color: var(--muted);
+      }
+      .row-top .text {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--fg);
+      }
+      .row-sub {
+        color: var(--muted);
+        padding-top: 2px;
+      }
+      .row-sub .needs-you {
+        color: var(--hot);
+      }
+      .handle {
+        color: var(--fg);
+      }
+      .prlinks {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding-top: 3px;
+      }
+
+      /* ---- sessions panel: a viewport onto ~/.claude, never an archive ---- */
+      .sgroup {
+        font: 600 11px/1 var(--mono);
+        color: var(--fg);
+        margin: 10px 0 5px;
+      }
+      .sessions > .sgroup:first-child {
+        margin-top: 0;
+      }
+      /* A disclosure, not an action: it opens the detail, it touches nothing. */
+      button.sess {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        width: 100%;
+        text-align: left;
+        background: none;
+        border: 0;
+        border-radius: 5px;
+        padding: 2px 3px;
+        color: var(--fg);
+        font: inherit;
+        cursor: pointer;
+      }
+      button.sess:hover {
+        background: var(--panel);
+      }
+      button.sess .text {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      button.sess:hover .text {
+        color: var(--cyan2);
+      }
+      .sdetail[hidden] {
+        display: none;
+      }
+      .sdetail {
+        padding: 3px 3px 1px;
+      }
+      .sdetail .row-sub {
+        word-break: break-all;
+      }
+      .greyed {
+        color: var(--muted);
+        font-style: italic;
+      }
+      /* ---- loadout panel: provenance and drift, disclosed not acted on ---- */
+      .drift {
+        margin-bottom: 10px;
+      }
+      /* The one interaction this panel has is a disclosure triangle, and it is
+         native: no handler, nothing to click that changes anything on disk. */
+      details.fold > summary {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        padding: 2px 0;
+        cursor: pointer;
+        list-style: none;
+      }
+      details.fold > summary::-webkit-details-marker {
+        display: none;
+      }
+      details.fold > summary::before {
+        content: "\25B8";
+        color: var(--muted);
+      }
+      details.fold[open] > summary::before {
+        content: "\25BE";
+      }
+      details.fold > .fold-body {
+        padding: 1px 0 3px 14px;
+      }
+      .glyph {
+        flex: none;
+        width: 1em;
+        color: var(--cyan);
+      }
+      .glyph.plain {
+        color: var(--muted);
+      }
+      /* Absolute paths are long and must stay readable rather than ellipse. */
+      .chain {
+        word-break: break-all;
+      }
+
+      .footnote {
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.4;
+        margin-top: 10px;
+        padding-top: 7px;
+        border-top: 1px solid var(--card);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <!-- Dial: count of work-board items in state `needs_you`. -->
+      <span class="dial" id="dial" title="work-board not yet loaded">&#9678; needs-you: &mdash;</span>
+      <span class="spacer"></span>
+      <button id="refresh" title="reload the tree and every dynamic panel">&#8635;</button>
+      <span id="generated">generated &mdash;</span>
+    </header>
+
+    <main>
+      <div id="left">
+        <div id="notfound" hidden></div>
+        <div id="list"></div>
+        <div id="doc" hidden>
+          <div id="docbar">
+            <button id="back">&larr; back</button>
+            <span id="docpath"></span>
+            <button id="copylink" class="copylink" title="copy a link to this note">&#9096;</button>
+          </div>
+          <div id="docbody"></div>
+        </div>
+      </div>
+
+      <!-- One panel per dynamic source, each hidden until its route answers
+           with something to show. A new source needs a block here plus a
+           `renderPanel(id, env, build)` call in the script below. -->
+      <aside>
+        <div class="panel" id="wrap-board" data-source="board" hidden>
+          <h2>My PRs<span class="stamp" id="stamp-board"></span></h2>
+          <div class="body" id="panel-board"></div>
+        </div>
+        <div class="panel" id="wrap-peers" data-source="peers" hidden>
+          <h2>Peers in flight<span class="stamp" id="stamp-peers"></span></h2>
+          <div class="body" id="panel-peers"></div>
+        </div>
+        <div class="panel" id="wrap-digest" data-source="digest" hidden>
+          <h2>Recent activity<span class="stamp" id="stamp-digest"></span></h2>
+          <div class="body" id="panel-digest"></div>
+        </div>
+        <div class="panel" id="wrap-sessions" data-source="sessions" hidden>
+          <h2>Sessions<span class="stamp" id="stamp-sessions"></span></h2>
+          <div class="body" id="panel-sessions"></div>
+        </div>
+        <div class="panel" id="wrap-loadout" data-source="loadout" hidden>
+          <h2>Loadout<span class="stamp" id="stamp-loadout"></span></h2>
+          <div class="body" id="panel-loadout"></div>
+        </div>
+      </aside>
+    </main>
+
+    <script src="/ui/marked.min.js"></script>
+    <script src="/ui/mermaid.min.js"></script>
+    <script>
+      "use strict";
+
+      const el = (id) => document.getElementById(id);
+      const listView = el("list");
+      const docView = el("doc");
+
+      // --- route rules (mirrored in server.mjs resolveRoute) ---
+      //
+      // These four functions exist twice on purpose. The server needs them to
+      // decide what to serve; this page needs them to read and write
+      // `location` without a round-trip. Both copies encode the same rule —
+      // the repo-relative path is the slug, trailing `.md` optional — and both
+      // are small enough to keep in step. `test/routes.test.mjs` extracts this
+      // block by its sentinel comments and asserts the two agree, so a change
+      // to one and not the other fails the suite rather than drifting.
+      //
+      // The only asymmetry is where "does it exist?" is answered: the server
+      // asks the filesystem, this page asks the tree it already fetched.
+      function parseRoute(pathname) {
+        const parts = String(pathname).split("/").filter((s) => s !== "");
+        let rest;
+        try {
+          rest = parts.slice(1).map(decodeURIComponent);
+        } catch {
+          return { kind: null };
+        }
+        if (parts[0] === "n" && rest.length) return { kind: "entry", path: rest.join("/") };
+        if (parts[0] === "s" && rest.length === 2) {
+          return { kind: "session", group: rest[0], id: rest[1] };
+        }
+        return { kind: null };
+      }
+      function encodePath(p) {
+        return String(p).split("/").map(encodeURIComponent).join("/");
+      }
+      function entryUrl(p) {
+        return "/n/" + encodePath(String(p).replace(/\.md$/i, ""));
+      }
+      function sessionUrl(group, id) {
+        return "/s/" + encodePath(group) + "/" + encodePath(id);
+      }
+      // --- end route rules ---
+
+      function fmtSize(n) {
+        if (n < 1024) return n + " B";
+        if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+        return (n / (1024 * 1024)).toFixed(1) + " MB";
+      }
+
+      function entryNode(e) {
+        const li = document.createElement("li");
+        const b = document.createElement("button");
+        b.className = "entry";
+        b.type = "button";
+
+        const caret = document.createElement("span");
+        caret.className = "caret";
+        caret.textContent = "▸";
+        b.appendChild(caret);
+
+        const title = document.createElement("span");
+        title.className = "title";
+        title.textContent = e.title || e.name || e.path;
+        b.appendChild(title);
+
+        if (e.warn) {
+          const w = document.createElement("span");
+          w.className = "badge warn";
+          w.textContent = "⚠ frontmatter";
+          w.title = "malformed frontmatter — defaults applied; flag for the next lint pass";
+          b.appendChild(w);
+        }
+        if (e.listed) {
+          const r = document.createElement("span");
+          r.className = "badge";
+          r.textContent = e.raw ? "raw" : "file";
+          b.appendChild(r);
+        }
+        if (e.status && e.status !== "active") {
+          const s = document.createElement("span");
+          s.className = "badge " + e.status;
+          s.textContent = e.status;
+          b.appendChild(s);
+        }
+
+        const meta = document.createElement("span");
+        meta.className = "meta";
+        meta.textContent = e.listed ? fmtSize(e.size) : e.date || "";
+        b.appendChild(meta);
+
+        b.addEventListener("click", () => openDoc(e));
+        li.appendChild(b);
+        return li;
+      }
+
+      function entriesNode(entries) {
+        const ul = document.createElement("ul");
+        ul.className = "entries";
+        for (const e of entries) ul.appendChild(entryNode(e));
+        return ul;
+      }
+
+      function renderTree(tree) {
+        listView.textContent = "";
+        for (const section of tree.sections) {
+          const h = document.createElement("h2");
+          h.className = "section";
+          h.textContent = section.name;
+          const count = document.createElement("span");
+          count.className = "count";
+          count.textContent = " (" + section.entries.length + ")";
+          h.appendChild(count);
+          listView.appendChild(h);
+
+          if (!section.entries.length) {
+            const p = document.createElement("div");
+            p.className = "empty";
+            p.textContent = "empty";
+            listView.appendChild(p);
+            continue;
+          }
+
+          if (section.groups && section.groups.length) {
+            // Server ordered these active-first; render in that order.
+            for (const g of section.groups) {
+              const gh = document.createElement("h3");
+              gh.className = "group";
+              gh.textContent = g.name;
+              if (g.status && g.status !== "active") {
+                const s = document.createElement("span");
+                s.className = "badge " + g.status;
+                s.textContent = g.status;
+                gh.appendChild(s);
+              }
+              listView.appendChild(gh);
+              listView.appendChild(entriesNode(section.entries.filter((e) => e.group === g.name)));
+            }
+            const loose = section.entries.filter((e) => !e.group);
+            if (loose.length) listView.appendChild(entriesNode(loose));
+          } else {
+            listView.appendChild(entriesNode(section.entries));
+          }
+        }
+      }
+
+      // The last tree fetched. A deep link resolves against it: the server
+      // hands back the shell for any well-formed /n/ URL, and this is what
+      // turns that path back into the entry it names.
+      let currentTree = null;
+
+      /** The entry a /n/ path names, applying the same `.md`-optional rule. */
+      function findEntry(p) {
+        if (!currentTree) return null;
+        for (const section of currentTree.sections) {
+          for (const e of section.entries) {
+            if (e.path === p || e.path === p + ".md") return e;
+          }
+        }
+        return null;
+      }
+
+      async function loadTree() {
+        try {
+          const res = await fetch("/api/tree", { cache: "no-store" });
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const tree = await res.json();
+          currentTree = tree;
+          renderTree(tree);
+          el("generated").textContent = "generated " + new Date(tree.generated).toLocaleTimeString();
+        } catch (err) {
+          currentTree = null;
+          listView.textContent = "";
+          const p = document.createElement("div");
+          p.className = "empty";
+          p.textContent = "tree unavailable: " + err.message;
+          listView.appendChild(p);
+        }
+      }
+
+      // ------------------------------------------------------ entry metadata
+      //
+      // /api/md hands back exact file bytes, leading frontmatter included, so
+      // a note that opens with a YAML block used to feed that block straight
+      // into marked, which mangled it into a single run-together text line.
+      // parseEntryMeta splits it out before rendering; the chips it feeds are
+      // built by metaChipsNode below.
+
+      /**
+       * Detect a LEADING frontmatter block and split it from the body.
+       *
+       * A block only counts as frontmatter if all three hold: line 1 is
+       * exactly "---", a closing "---" line exists within a bounded scan
+       * window, and at least one line inside parses as `key: value`. Anything
+       * short of that — no block, an unterminated block, or a document that
+       * merely opens with a markdown horizontal rule and closes it without a
+       * single key inside — is left completely alone: `meta` is null and
+       * `body` is the original text, verbatim.
+       *
+       * Supports the reduced subset server.mjs's parseFrontmatter parses:
+       * `key: value`, quoted scalars, `[a, b]` flow arrays, and `key:`
+       * followed by `- item` block-array lines. Values are always strings;
+       * syntax outside that subset is ignored rather than rejected.
+       *
+       * `test/ui-meta.test.mjs` extracts this function by name (from
+       * "function parseEntryMeta" to the end marker below) and evaluates it
+       * in isolation, so it must stay fully self-contained.
+       *
+       * @param {string} md
+       * @returns {{meta: Record<string, string|string[]>|null, body: string}}
+       */
+      function parseEntryMeta(md) {
+        function scalar(v) {
+          const q = v[0];
+          if ((q === '"' || q === "'") && v.length > 1 && v.endsWith(q)) return v.slice(1, -1);
+          return v;
+        }
+        function flowOrScalar(v) {
+          if (v.startsWith("[") && v.endsWith("]")) {
+            const inner = v.slice(1, -1).trim();
+            if (inner === "") return [];
+            return inner
+              .split(",")
+              .map((s) => s.trim())
+              .filter((s) => s !== "")
+              .map(scalar);
+          }
+          return scalar(v);
+        }
+
+        const src = typeof md === "string" ? md : String(md == null ? "" : md);
+        const lines = src.split(/\r?\n/);
+        const unchanged = { meta: null, body: src };
+        if (lines[0] !== "---") return unchanged;
+
+        const SCAN_WINDOW = 400; // a closing fence this far down is not a fence
+        let end = -1;
+        for (let i = 1; i < lines.length && i <= SCAN_WINDOW; i++) {
+          if (/^-{3}$/.test(lines[i])) {
+            end = i;
+            break;
+          }
+        }
+        if (end === -1) return unchanged;
+
+        const data = {};
+        let sawKey = false;
+        let listKey = null;
+        for (const raw of lines.slice(1, end)) {
+          const line = raw.replace(/\s+$/, "");
+          if (line === "" || /^\s*#/.test(line)) continue;
+
+          const item = /^\s*-\s+(.*)$/.exec(line);
+          if (item) {
+            if (listKey) data[listKey].push(scalar(item[1].trim()));
+            continue;
+          }
+
+          const kv = /^([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*:(.*)$/.exec(line);
+          if (!kv) continue;
+          sawKey = true;
+          const key = kv[1];
+          const rest = kv[2].trim();
+          if (rest === "") {
+            listKey = key;
+            data[key] = [];
+            continue;
+          }
+          listKey = null;
+          data[key] = flowOrScalar(rest);
+        }
+        if (!sawKey) return unchanged;
+
+        return { meta: data, body: lines.slice(end + 1).join("\n") };
+      }
+      // parseEntryMeta:end
+
+      /** A frontmatter value read tolerantly as one scalar, mirroring the server's `single()`. */
+      function metaScalar(v) {
+        const s = Array.isArray(v) ? v[0] : v;
+        return typeof s === "string" && s !== "" ? s : undefined;
+      }
+
+      /** A frontmatter value read tolerantly as a list, even when it is one bare scalar. */
+      function metaList(v) {
+        if (v === undefined) return [];
+        return Array.isArray(v) ? v : [v];
+      }
+
+      /**
+       * A configured ticket template pointing at a reserved documentation
+       * domain (RFC 2606: example.com/.org/.net/.invalid) is a stand-in, not a
+       * real tracker — treated the same as unconfigured.
+       */
+      function isPlaceholderTicketTemplate(template) {
+        return /example\.(?:com|org|net|invalid)/i.test(template);
+      }
+
+      /** The URL for one ticket id, or null when no usable template is configured. */
+      function ticketUrl(template, id) {
+        if (typeof template !== "string" || template === "" || !template.includes("{id}")) {
+          return null;
+        }
+        if (isPlaceholderTicketTemplate(template)) return null;
+        return template.split("{id}").join(encodeURIComponent(String(id)));
+      }
+
+      // /api/config, not the config's raw bytes through /api/md: the file is
+      // TOML now, and the server holds the only parser for it. Fetched once
+      // and cached — the template does not change within a page session.
+      let ticketTemplateCache;
+      async function ticketTemplate() {
+        if (ticketTemplateCache !== undefined) return ticketTemplateCache;
+        try {
+          const res = await fetch("/api/config", { cache: "no-store" });
+          if (!res.ok) throw new Error("config unavailable");
+          const cfg = await res.json();
+          ticketTemplateCache =
+            cfg && typeof cfg.ticket_url_template === "string" ? cfg.ticket_url_template : null;
+        } catch {
+          ticketTemplateCache = null;
+        }
+        return ticketTemplateCache;
+      }
+
+      function chip(text, cls) {
+        return node("span", cls ? "badge " + cls : "badge", text);
+      }
+
+      /** Chips for one entry's frontmatter, or null when there is nothing to show. */
+      function metaChipsNode(meta, template) {
+        if (!meta) return null;
+        const type = metaScalar(meta.type);
+        const status = metaScalar(meta.status);
+        const date = metaScalar(meta.date);
+        const tags = metaList(meta.tags);
+        const tickets = metaList(meta.tickets);
+        if (!type && !status && !date && !tags.length && !tickets.length) return null;
+
+        const wrap = node("div", "meta-chips");
+        if (type) wrap.appendChild(chip(type));
+        // Mirrors entryNode: "active" is the unremarkable default, worth a
+        // chip only when it says something other than that.
+        if (status && status !== "active") wrap.appendChild(chip(status, status));
+        if (date) wrap.appendChild(chip(date));
+        for (const tag of tags) wrap.appendChild(chip("#" + tag));
+        for (const ticket of tickets) {
+          const url = ticketUrl(template, ticket);
+          wrap.appendChild(url ? linkOut(url, ticket, "badge") : chip(ticket));
+        }
+        return wrap;
+      }
+
+      /**
+       * marked's `code` renderer for ```mermaid fences.
+       *
+       * The container it returns already holds the plain code block, and that
+       * is the point: the code block IS the degraded state. A source mermaid
+       * cannot parse, or a page where mermaid failed to load at all, leaves
+       * the reader the diagram text rather than an empty frame.
+       * `renderMermaidBlocks` swaps in the SVG only on a successful parse.
+       *
+       * Any other fence returns false, which marked reads as "use your own
+       * renderer" — so highlighting, escaping, and the `language-` class on
+       * every non-mermaid block stay exactly as they were.
+       */
+      function mermaidCodeToken(token) {
+        // An info string may carry more than the language (```mermaid title=x).
+        const lang = String((token && token.lang) || "")
+          .trim()
+          .split(/\s+/)[0]
+          .toLowerCase();
+        if (lang !== "mermaid") return false;
+        const esc = (s) =>
+          String(s)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
+        return (
+          '<div class="mermaid-block" data-mermaid="pending">' +
+          '<pre><code class="language-mermaid">' +
+          esc((token && token.text) || "") +
+          "\n</code></pre></div>\n"
+        );
+      }
+      // mermaidCodeToken:end
+
+      /**
+       * Replace each pending mermaid block's source with its rendered SVG.
+       *
+       * Failure is per-block and silent: one diagram mermaid rejects costs
+       * that diagram and nothing else on the entry. `mermaid` is a parameter
+       * rather than a read off `window` so this is exercisable against a stub.
+       */
+      async function renderMermaidBlocks(root, mermaid) {
+        if (!root || !mermaid || typeof mermaid.render !== "function") return;
+        const blocks = Array.from(root.querySelectorAll('.mermaid-block[data-mermaid="pending"]'));
+        for (let i = 0; i < blocks.length; i++) {
+          const block = blocks[i];
+          const code = block.querySelector("code");
+          const src = code && code.textContent;
+          if (!src || !src.trim()) continue;
+          // Mermaid requires a DOM id unique per render, and an entry can be
+          // reopened, so the id carries the clock as well as the position.
+          const id = "mermaid-" + Date.now().toString(36) + "-" + i;
+          try {
+            const out = await mermaid.render(id, src);
+            block.innerHTML = out.svg;
+            block.setAttribute("data-mermaid", "rendered");
+            // Click directives are wired here, not by the SVG markup.
+            if (typeof out.bindFunctions === "function") out.bindFunctions(block);
+          } catch {
+            block.setAttribute("data-mermaid", "error");
+          }
+        }
+      }
+      // renderMermaidBlocks:end
+
+      /**
+       * Mermaid's theme, expressed in this page's own palette, so a diagram
+       * reads as part of the HUD rather than as a pasted-in image. The values
+       * come from the CSS custom properties rather than a second copy of the
+       * hex codes, so the diagram cannot drift from the page around it.
+       */
+      function mermaidTheme(cssVar) {
+        const v = (name, fallback) => cssVar(name) || fallback;
+        const panel = v("--panel", "#241b2f");
+        const card = v("--card", "#2a2139");
+        const fg = v("--fg", "#f4f0ff");
+        const accent = v("--accent", "#f97e72");
+        const cyan = v("--cyan", "#36f9f6");
+        const magenta = v("--magenta", "#ff7edb");
+        const muted = v("--muted", "#848bbd");
+        return {
+          darkMode: true,
+          background: panel,
+          primaryColor: card,
+          primaryTextColor: fg,
+          primaryBorderColor: magenta,
+          secondaryColor: panel,
+          secondaryTextColor: fg,
+          secondaryBorderColor: cyan,
+          tertiaryColor: card,
+          tertiaryTextColor: fg,
+          tertiaryBorderColor: muted,
+          lineColor: cyan,
+          textColor: fg,
+          mainBkg: card,
+          nodeBorder: magenta,
+          nodeTextColor: fg,
+          clusterBkg: panel,
+          clusterBorder: muted,
+          edgeLabelBackground: panel,
+          titleColor: accent,
+          fontFamily: v("--mono", "ui-monospace, Menlo, monospace"),
+          fontSize: "13px",
+        };
+      }
+      // mermaidTheme:end
+
+      async function openDoc(e, push = true) {
+        const rel = e.path;
+        clearNotFound();
+        // The URL always names what is on screen, so the address bar is a
+        // shareable reference and the back button means what it looks like.
+        if (push) history.pushState({ kind: "entry", path: rel }, "", entryUrl(rel));
+        el("docpath").textContent = rel;
+        el("docbody").textContent = "loading…";
+        listView.hidden = true;
+        docView.hidden = false;
+        window.scrollTo(0, 0);
+        el("left").scrollTop = 0;
+        try {
+          const res = await fetch("/api/md?path=" + encodeURIComponent(rel), { cache: "no-store" });
+          if (!res.ok) throw new Error("HTTP " + res.status + " " + (await res.text()).trim());
+          const text = await res.text();
+          if (/\.md$/i.test(rel) && !e.listed) {
+            // Local, self-authored files: rendered as-is, no sanitizer — but
+            // the frontmatter block, if any, is chips, not markdown.
+            const { meta, body } = parseEntryMeta(text);
+            el("docbody").textContent = "";
+            const chips = metaChipsNode(meta, await ticketTemplate());
+            if (chips) el("docbody").appendChild(chips);
+            const rendered = document.createElement("div");
+            rendered.innerHTML = window.marked.parse(body);
+            // The body already carries the title as its own heading: nothing
+            // to add. No heading at all: the frontmatter title is the one
+            // the reader sees, so it becomes the view's title.
+            const title = meta && metaScalar(meta.title);
+            if (title && !rendered.querySelector("h1")) {
+              const h1 = document.createElement("h1");
+              h1.textContent = title;
+              rendered.insertBefore(h1, rendered.firstChild);
+            }
+            el("docbody").appendChild(rendered);
+            // Diagrams are drawn after the text is on screen: mermaid measures
+            // laid-out labels, and no part of reading the entry should wait on
+            // it. Unawaited on purpose — a throw in here must not turn the
+            // entry into the "could not load" message below.
+            renderMermaidBlocks(rendered, window.mermaid).catch(() => {});
+          } else {
+            // Raw drops and non-markdown are shown verbatim, never interpreted.
+            const pre = document.createElement("pre");
+            pre.textContent = text;
+            el("docbody").textContent = "";
+            el("docbody").appendChild(pre);
+          }
+        } catch (err) {
+          el("docbody").textContent = "could not load " + rel + ": " + err.message;
+        }
+      }
+
+      function closeDoc() {
+        docView.hidden = true;
+        listView.hidden = false;
+      }
+
+      function showNotFound(text) {
+        const n = el("notfound");
+        n.textContent = text;
+        n.hidden = false;
+      }
+
+      function clearNotFound() {
+        el("notfound").hidden = true;
+        el("notfound").textContent = "";
+      }
+
+      /** Back to the tree, and say so in the URL. */
+      function goHome() {
+        if (location.pathname !== "/") history.pushState({ kind: null }, "", "/");
+        clearNotFound();
+        closeDoc();
+      }
+
+      /**
+       * Open whatever `location` names. Called on first paint and on every
+       * popstate, so forward and back are the same code path as a click.
+       *
+       * A link that no longer resolves is not an error page: the tree stays
+       * on screen and the miss is stated above it, because the usual reason a
+       * bookmark stops resolving is that the note was renamed or archived and
+       * the next thing the reader wants is to go find it.
+       */
+      function applyLocation() {
+        const route = parseRoute(location.pathname);
+        clearNotFound();
+        if (route.kind === "entry") {
+          const entry = findEntry(route.path);
+          if (entry) return openDoc(entry, false);
+          closeDoc();
+          return showNotFound("no note at " + route.path + " — renamed, archived, or never here.");
+        }
+        if (route.kind === "session") {
+          closeDoc();
+          if (!openSession(route.group, route.id, false)) {
+            showNotFound(
+              "no session " + route.id + " in " + route.group +
+                " — the ~/.claude window is a rolling one and may have passed it.",
+            );
+          }
+          return;
+        }
+        closeDoc();
+      }
+
+      /** ⧉ : copy the current URL. Reports success or failure on the button. */
+      function copyLink(button) {
+        const href = location.href;
+        const settle = (mark) => {
+          button.textContent = mark;
+          setTimeout(() => {
+            button.textContent = "⧉";
+          }, 1200);
+        };
+        if (!navigator.clipboard) return settle("⚠");
+        navigator.clipboard.writeText(href).then(() => settle("✓"), () => settle("⚠"));
+      }
+
+      function copyLinkButton(title) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "copylink";
+        b.textContent = "⧉";
+        b.title = title;
+        b.addEventListener("click", () => copyLink(b));
+        return b;
+      }
+
+      // ------------------------------------------------------ dynamic panels
+      //
+      // Three states per panel, decided by what /api/dyn/<source> answers:
+      //   200 stale:false  → live data
+      //   200 stale:true   → the same rendering, greyed, stamped "as of <t>"
+      //   503              → no panel (the source isn't running and has no
+      //                      snapshot, or isn't configured at all)
+      // Every row links out. There are no action buttons anywhere in here by
+      // design: the HUD watches work, it never touches it.
+
+      function node(tag, cls, text) {
+        const n = document.createElement(tag);
+        if (cls) n.className = cls;
+        if (text !== undefined) n.textContent = text;
+        return n;
+      }
+
+      /** Only http(s) becomes a link; anything else renders as inert text. */
+      function linkOut(url, text, cls) {
+        if (typeof url === "string" && /^https?:\/\//i.test(url)) {
+          const a = node("a", cls, text);
+          a.href = url;
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          return a;
+        }
+        return node("span", cls, text);
+      }
+
+      function fmtTime(iso) {
+        const d = new Date(iso);
+        if (isNaN(d)) return "unknown";
+        const sameDay = d.toDateString() === new Date().toDateString();
+        return sameDay ? d.toLocaleTimeString() : d.toLocaleString();
+      }
+
+      function ago(iso) {
+        const then = Date.parse(iso);
+        if (isNaN(then)) return "";
+        const mins = Math.round((Date.now() - then) / 60000);
+        if (mins < 1) return "just now";
+        if (mins < 60) return mins + "m ago";
+        if (mins < 60 * 24) return Math.round(mins / 60) + "h ago";
+        return Math.round(mins / 1440) + "d ago";
+      }
+
+      function rowsNode(items, build) {
+        const ul = node("ul", "rows");
+        for (const item of items) ul.appendChild(build(item));
+        return ul;
+      }
+
+      /**
+       * Fill one panel from its envelope, or hide it when there is nothing to
+       * show. `build` returns a node, or null for "connected but empty".
+       */
+      function renderPanel(id, env, build) {
+        const wrap = el("wrap-" + id);
+        const body = el("panel-" + id);
+        const stamp = el("stamp-" + id);
+        body.textContent = "";
+        if (!env) {
+          wrap.hidden = true;
+          stamp.textContent = "";
+          return;
+        }
+        wrap.hidden = false;
+        wrap.classList.toggle("stale", !!env.stale);
+        stamp.textContent = env.stale ? "as of " + fmtTime(env.cached_at) : "";
+        stamp.title = env.stale && env.error ? env.error : "";
+        const built = build(env);
+        body.appendChild(built || node("div", "empty", "nothing to show"));
+      }
+
+      /** work-board's payload, tolerantly: an array or an object holding one. */
+      function boardItems(data) {
+        if (Array.isArray(data)) return data;
+        if (data && Array.isArray(data.items)) return data.items;
+        if (data && Array.isArray(data.prs)) return data.prs;
+        return [];
+      }
+
+      function buildBoard(env) {
+        const items = boardItems(env.data);
+        if (!items.length) return node("div", "empty", "nothing needs you");
+        return rowsNode(items, (item) => {
+          const li = document.createElement("li");
+          const top = node("div", "row-top");
+          if (item.number !== undefined && item.number !== null) {
+            top.appendChild(node("span", "num", "#" + item.number));
+          }
+          top.appendChild(linkOut(item.url, item.title || item.url || "(untitled)", "text"));
+          li.appendChild(top);
+          const reason = item.reason || item.state;
+          if (reason) {
+            const sub = node("div", "row-sub");
+            sub.appendChild(
+              node("span", item.state === "needs_you" ? "needs-you" : null, String(reason)),
+            );
+            li.appendChild(sub);
+          }
+          return li;
+        });
+      }
+
+      function setDial(env) {
+        const dial = el("dial");
+        if (!env) {
+          dial.textContent = "◉ needs-you: —";
+          dial.removeAttribute("data-state");
+          dial.title = "work-board unavailable";
+          return;
+        }
+        const n = boardItems(env.data).filter((i) => i && i.state === "needs_you").length;
+        dial.textContent = "◉ needs-you: " + n;
+        dial.setAttribute("data-state", env.stale ? "stale" : "live");
+        dial.title = env.stale ? "from the snapshot of " + fmtTime(env.cached_at) : "live";
+      }
+
+      function buildPeers(env) {
+        const peers = (env.data && env.data.peers) || [];
+        if (!peers.length) return node("div", "empty", "no peers/*.md yet");
+        return rowsNode(peers, (peer) => {
+          const prs = Array.isArray(peer.prs) ? peer.prs : [];
+          const latest = prs
+            .map((pr) => pr && pr.updatedAt)
+            .filter(Boolean)
+            .sort()
+            .pop();
+          const li = document.createElement("li");
+          const top = node("div", "row-top");
+          top.appendChild(node("span", "handle", peer.handle));
+          top.appendChild(node("span", "text", "· " + prs.length + " open"));
+          if (latest) top.appendChild(node("span", "num", ago(latest)));
+          li.appendChild(top);
+          if (peer.error) {
+            const err = node("div", "row-sub", "lookup failed");
+            err.title = peer.error;
+            li.appendChild(err);
+          }
+          if (prs.length) {
+            const links = node("div", "prlinks");
+            for (const pr of prs.slice(0, 6)) {
+              const a = linkOut(pr.url, "#" + pr.number);
+              a.title = [pr.repository, pr.title].filter(Boolean).join(" · ");
+              links.appendChild(a);
+            }
+            li.appendChild(links);
+          }
+          return li;
+        });
+      }
+
+      /** `fs:///a/b/c.md` → `b/c.md`: enough to recognise, short enough to fit. */
+      function shortRef(ref) {
+        const bare = String(ref).replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
+        const parts = bare.split("/").filter(Boolean);
+        return parts.slice(-2).join("/") || bare;
+      }
+
+      // An observation's schema belongs to whichever tool produced it, so read
+      // it by preference order and fall back to showing the raw object rather
+      // than dropping a line the HUD didn't recognise.
+      function obsText(obs) {
+        if (typeof obs === "string") return obs;
+        if (!obs) return "";
+        const direct = obs.text || obs.title || obs.summary || obs.message;
+        if (direct) return String(direct);
+        if (obs.artifact_id) return shortRef(obs.artifact_id);
+        return JSON.stringify(obs);
+      }
+
+      function obsWhen(obs) {
+        if (!obs || typeof obs !== "object") return null;
+        const stamp = obs.at || obs.time || obs.updatedAt || obs.date;
+        if (stamp) return stamp;
+        // Epoch nanos are a number, not a date, until they are scaled.
+        const nanos = Number(obs.observed_at_nanos);
+        return isFinite(nanos) && nanos > 0 ? new Date(nanos / 1e6).toISOString() : null;
+      }
+
+      function buildDigest(env) {
+        const lines = Array.isArray(env.data) ? env.data : [];
+        if (!lines.length) return node("div", "empty", "no activity in the window");
+        return rowsNode(lines.slice(0, 40), (obs) => {
+          const li = document.createElement("li");
+          const when = obsWhen(obs);
+          const top = node("div", "row-top");
+          top.appendChild(linkOut(obs && obs.url, obsText(obs), "text"));
+          if (when) top.appendChild(node("span", "num", ago(when)));
+          li.appendChild(top);
+          const kind = obs && (obs.kind || obs.source_id || obs.delivery);
+          if (kind) li.appendChild(node("div", "row-sub", String(kind)));
+          return li;
+        });
+      }
+
+      // ----------------------------------------------------- sessions panel
+      //
+      // Tier 1 (title, times, subagent count) always renders; tier 2 (the
+      // commits/PRs/tickets lectio grafted) renders as links out when the
+      // daemon answered and as a grey note when it didn't. Clicking a row
+      // opens its detail in place — a disclosure, not an action: there is
+      // nothing here that resumes, deletes, or otherwise touches a session.
+
+      /** Grafted artifacts as links out, or an honest note about why not. */
+      function graftNode(s) {
+        if (!s.graft || s.graft === "unavailable") {
+          const note = node("div", "row-sub greyed", "graft unavailable");
+          note.title = "the lectio daemon did not answer — tier 1 only";
+          return note;
+        }
+        const links = node("div", "prlinks");
+        for (const column of ["commits", "prs", "tickets"]) {
+          for (const item of s.graft[column] || []) {
+            const a = linkOut(item.url, item.label || item.uri, "graft");
+            a.title = column + ": " + item.uri;
+            links.appendChild(a);
+          }
+        }
+        if (!links.childElementCount) return node("div", "row-sub greyed", "nothing grafted yet");
+        return links;
+      }
+
+      // `<projectSlug>/<id>` → opener, rebuilt on every sessions render. This
+      // is what lets `/s/<group>/<id>` reach a row: the panel owns the DOM, so
+      // the route asks it to disclose rather than reaching in itself.
+      const sessionRows = new Map();
+
+      /** @returns false when the group/id names no row currently on screen. */
+      function openSession(group, id, push = true) {
+        const row = sessionRows.get(group + "/" + id);
+        if (!row) return false;
+        row.open(push);
+        return true;
+      }
+
+      function sessionNode(s) {
+        const li = document.createElement("li");
+
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "sess";
+        btn.setAttribute("aria-expanded", "false");
+        btn.appendChild(node("span", "text", s.title || s.id));
+        if (s.subagentCount) {
+          const badge = node("span", "badge", "⑂ " + s.subagentCount);
+          badge.title = s.subagentCount + " subagent transcript(s)";
+          btn.appendChild(badge);
+        }
+        if (s.warn) {
+          const warn = node("span", "badge warn", "⚠");
+          warn.title = "transcript unparseable — filename and mtime only";
+          btn.appendChild(warn);
+        }
+        btn.appendChild(node("span", "num", ago(s.lastAt)));
+        li.appendChild(btn);
+
+        const detail = node("div", "sdetail");
+        detail.hidden = true;
+        detail.appendChild(node("div", "row-sub", s.id));
+        // A degraded row has no timestamps at all, and `new Date(null)` is
+        // 1970 rather than invalid, so the null case is checked here.
+        const when = (iso) => (iso ? fmtTime(iso) : "unknown");
+        detail.appendChild(
+          node("div", "row-sub", "started " + when(s.startedAt) + " · last " + when(s.lastAt)),
+        );
+        detail.appendChild(node("div", "row-sub greyed", s.projectSlug));
+        detail.appendChild(graftNode(s));
+        const share = node("div", "row-sub");
+        share.appendChild(copyLinkButton("copy a link to this session"));
+        detail.appendChild(share);
+        li.appendChild(detail);
+
+        const setOpen = (open, push) => {
+          detail.hidden = !open;
+          btn.setAttribute("aria-expanded", String(open));
+          // Only disclosure moves the URL; collapsing back leaves history
+          // alone, so the trail records views rather than every toggle.
+          if (open && push) {
+            history.pushState(
+              { kind: "session", group: s.projectSlug, id: s.id },
+              "",
+              sessionUrl(s.projectSlug, s.id),
+            );
+          }
+        };
+        btn.addEventListener("click", () => setOpen(detail.hidden, true));
+        sessionRows.set(s.projectSlug + "/" + s.id, {
+          open: (push) => {
+            setOpen(true, push);
+            btn.scrollIntoView({ block: "nearest" });
+          },
+        });
+        return li;
+      }
+
+      function buildSessions(env) {
+        const groups = Array.isArray(env.groups) ? env.groups : [];
+        if (!groups.length) return node("div", "empty", "no sessions in the window");
+        const wrap = node("div", "sessions");
+        for (const g of groups) {
+          const head = node("div", "sgroup", g.project);
+          head.title = g.projectSlug;
+          wrap.appendChild(head);
+          const ul = node("ul", "rows");
+          for (const s of g.sessions) ul.appendChild(sessionNode(s));
+          wrap.appendChild(ul);
+        }
+        if (env.truncated) {
+          wrap.appendChild(node("div", "row-sub greyed", "older sessions not shown"));
+        }
+        wrap.appendChild(
+          node(
+            "div",
+            "footnote",
+            "~/.claude is a ~" +
+              (env.window_days || 30) +
+              "-day rolling window; lectio is the durable archive.",
+          ),
+        );
+        return wrap;
+      }
+
+      // ------------------------------------------------------ loadout panel
+      //
+      // Which skills and agents this machine has, which tree each one really
+      // comes from, and where that inventory disagrees with the repositories
+      // behind it. Drift leads, because it is the part worth acting on.
+      //
+      // Display only. There is no button here that installs, relinks, repairs
+      // or removes anything — a HUD that could fix its own drift would be a
+      // package manager, and this one watches. The single interaction is a
+      // native `<details>` disclosure for the long tails.
+
+      /** A disclosure: `summary` parts, then a body revealed on click. */
+      function foldNode(summaryParts, body) {
+        const fold = node("details", "fold");
+        const summary = document.createElement("summary");
+        for (const part of summaryParts) summary.appendChild(part);
+        fold.appendChild(summary);
+        const wrap = node("div", "fold-body");
+        wrap.appendChild(body);
+        fold.appendChild(wrap);
+        return fold;
+      }
+
+      /** Stacked paths — a symlink chain, or the names a repo carries. */
+      function linesNode(lines) {
+        const wrap = document.createElement("div");
+        for (const line of lines) wrap.appendChild(node("div", "row-sub chain", line));
+        return wrap;
+      }
+
+      /**
+       * Flags grouped by kind, each folded shut: 40 unlinked skills must read
+       * as one line saying so, not as 40 lines burying the broken symlink
+       * above them. Severity comes from the server so the colour and the rule
+       * cannot drift apart.
+       */
+      function driftNode(drift) {
+        if (!drift.length) return node("div", "row-sub greyed", "no drift");
+        const groups = new Map();
+        for (const d of drift) {
+          if (!groups.has(d.flag)) groups.set(d.flag, []);
+          groups.get(d.flag).push(d);
+        }
+        const wrap = node("div", "drift");
+        for (const [flag, items] of groups) {
+          const rows = rowsNode(items, (d) => {
+            const li = document.createElement("li");
+            const top = node("div", "row-top");
+            top.appendChild(node("span", "text", d.name || d.slug || "(unnamed)"));
+            if (d.repo) top.appendChild(node("span", "num", d.repo));
+            li.appendChild(top);
+            const where = [d.target, d.path, d.installed, d.repoPath].filter(Boolean);
+            if (where.length) li.appendChild(linesNode(where));
+            return li;
+          });
+          wrap.appendChild(
+            foldNode(
+              [
+                chip(flag, items[0].severity === "hot" ? "hot" : "warn"),
+                node("span", "num", String(items.length)),
+              ],
+              rows,
+            ),
+          );
+        }
+        return wrap;
+      }
+
+      /** One row per installed skill or agent, glyphed by how it got there. */
+      function inventoryRows(rows) {
+        return rowsNode(rows, (r) => {
+          const chain = Array.isArray(r.chain) ? r.chain : [];
+          const linked = r.kind === "symlink";
+          const li = document.createElement("li");
+          const top = node("div", "row-top");
+          // ⤳ : the name is here, the bytes are somewhere else.
+          const glyph = node("span", linked ? "glyph" : "glyph plain", linked ? "⤳" : "▪");
+          glyph.title = r.kind;
+          top.appendChild(glyph);
+          top.appendChild(node("span", "text", r.name));
+          top.appendChild(chip(r.root, r.targetExists ? null : "hot"));
+          li.appendChild(top);
+          if (chain.length) {
+            li.appendChild(
+              foldNode(
+                [node("span", "num", chain.length + (chain.length === 1 ? " hop" : " hops"))],
+                linesNode(chain),
+              ),
+            );
+          }
+          return li;
+        });
+      }
+
+      /** One row per known repository, and the names its `.claude` carries. */
+      function repoRows(repos) {
+        return rowsNode(repos, (r) => {
+          const li = document.createElement("li");
+          const top = node("div", "row-top");
+          top.appendChild(node("span", "text", r.repo));
+          if (r.hasDotClaude) top.appendChild(chip(".claude"));
+          li.appendChild(top);
+          const carried = [];
+          for (const kind of ["skills", "agents", "settings"]) {
+            const names = (r.carries && r.carries[kind]) || [];
+            if (names.length) carried.push(kind + ": " + names.join(", "));
+          }
+          if (carried.length) {
+            li.appendChild(foldNode([node("span", "num", "carries")], linesNode(carried)));
+          }
+          return li;
+        });
+      }
+
+      function buildLoadout(env) {
+        const wrap = node("div", "loadout");
+        wrap.appendChild(driftNode(Array.isArray(env.drift) ? env.drift : []));
+        const inventory = env.inventory || {};
+        for (const kind of ["skills", "agents"]) {
+          const rows = Array.isArray(inventory[kind]) ? inventory[kind] : [];
+          wrap.appendChild(node("div", "sgroup", kind + " · " + rows.length));
+          wrap.appendChild(rows.length ? inventoryRows(rows) : node("div", "row-sub greyed", "none"));
+        }
+        const repos = Array.isArray(env.repos) ? env.repos : [];
+        wrap.appendChild(node("div", "sgroup", "repos · " + repos.length));
+        wrap.appendChild(repos.length ? repoRows(repos) : node("div", "row-sub greyed", "none"));
+        wrap.appendChild(
+          node("div", "footnote", "names and paths only — this panel opens no file and changes nothing."),
+        );
+        return wrap;
+      }
+
+      /** @returns the envelope, or null when the source has nothing to show. */
+      async function loadDyn(name) {
+        try {
+          const res = await fetch("/api/dyn/" + name, { cache: "no-store" });
+          const body = await res.json().catch(() => null);
+          if (!res.ok || !body || body.data === undefined) return null;
+          return body;
+        } catch {
+          return null; // the HUD server itself is gone; hide rather than shout
+        }
+      }
+
+      async function loadBoard() {
+        const env = await loadDyn("board");
+        setDial(env);
+        renderPanel("board", env, buildBoard);
+      }
+
+      async function loadDigest() {
+        renderPanel("digest", await loadDyn("digest"), buildDigest);
+      }
+
+      async function loadPeers() {
+        renderPanel("peers", await loadDyn("peers"), buildPeers);
+      }
+
+      /**
+       * Sessions has its own route rather than a `/api/dyn/` one: it reads the
+       * local filesystem, so it has no upstream to go stale and no snapshot
+       * tier. A 404 is the panel-off contract — `sources.sessions` absent means
+       * the panel does not exist, so nothing is rendered at all.
+       */
+      async function loadSessions() {
+        let env = null;
+        try {
+          const res = await fetch("/api/sessions", { cache: "no-store" });
+          const body = await res.json().catch(() => null);
+          if (res.ok && body && Array.isArray(body.groups)) env = body;
+        } catch {
+          /* the HUD server itself is gone; hide rather than shout */
+        }
+        // Openers are keyed to DOM nodes this render is about to replace.
+        sessionRows.clear();
+        renderPanel("sessions", env, buildSessions);
+      }
+
+      /**
+       * Like sessions: a local-filesystem route with no upstream and no
+       * snapshot tier, so a 404 is the panel-off contract and anything else
+       * unexpected simply hides the panel rather than shouting.
+       */
+      async function loadLoadout() {
+        let env = null;
+        try {
+          const res = await fetch("/api/loadout", { cache: "no-store" });
+          const body = await res.json().catch(() => null);
+          if (res.ok && body && body.inventory) env = body;
+        } catch {
+          /* the HUD server itself is gone; hide rather than shout */
+        }
+        renderPanel("loadout", env, buildLoadout);
+      }
+
+      /** ⟳ : the tree, the two proxied sources, and a real peers re-poll. */
+      async function refreshAll() {
+        const button = el("refresh");
+        button.disabled = true;
+        try {
+          await Promise.all([
+            loadTree(),
+            loadBoard(),
+            loadDigest(),
+            loadSessions(),
+            loadLoadout(),
+            // POST first: peers are generated here, so a GET alone would only
+            // re-serve the snapshot the server already has.
+            fetch("/api/refresh/peers", { method: "POST", cache: "no-store" })
+              .catch(() => {})
+              .then(loadPeers),
+          ]);
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      el("back").addEventListener("click", goHome);
+      el("copylink").addEventListener("click", (ev) => copyLink(ev.currentTarget));
+      el("refresh").addEventListener("click", () => {
+        goHome();
+        refreshAll();
+      });
+      document.addEventListener("keydown", (ev) => {
+        if (ev.key === "Escape") goHome();
+      });
+      window.addEventListener("popstate", applyLocation);
+
+      if (window.marked && window.marked.setOptions) {
+        window.marked.setOptions({ gfm: true, breaks: false });
+      }
+      if (window.marked && window.marked.use) {
+        window.marked.use({ renderer: { code: mermaidCodeToken } });
+      }
+      if (window.mermaid && window.mermaid.initialize) {
+        const rootStyle = getComputedStyle(document.documentElement);
+        window.mermaid.initialize({
+          // Rendering is driven from openDoc, not from page load: the entry
+          // that holds the diagram may not be the one on screen yet.
+          startOnLoad: false,
+          // `click` directives are how a node in the system map reaches the
+          // entry it stands for, so they cannot be switched off — and
+          // "antiscript" is the weakest setting that keeps them. It strips
+          // script from labels and puts every href through mermaid's URL
+          // sanitizer, which is what refuses a javascript: target. The links
+          // this buys are plain same-origin /n/... hrefs; "loose" would also
+          // permit a diagram to name a JS callback, which nothing needs.
+          securityLevel: "antiscript",
+          // A parse failure must leave the code block alone rather than draw
+          // mermaid's error diagram over it.
+          suppressErrorRendering: true,
+          theme: "base",
+          themeVariables: mermaidTheme((name) => rootStyle.getPropertyValue(name).trim()),
+          flowchart: { htmlLabels: true, curve: "basis", useMaxWidth: true },
+        });
+      }
+
+      // First paint: the server already refreshed peers at startup, so read
+      // that snapshot rather than making page load wait on `gh`.
+      //
+      // The deep link in `location` is applied once both sources it can name
+      // have answered — the tree for /n/, the sessions panel for /s/. The
+      // remaining panels are not addressable, so nothing waits on them.
+      Promise.all([loadTree(), loadSessions()]).then(applyLocation);
+      loadBoard();
+      loadDigest();
+      loadPeers();
+      loadLoadout();
+    </script>
+  </body>
+</html>

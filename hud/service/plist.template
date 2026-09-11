@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template, not a live plist. install.sh substitutes every double-at
+  placeholder below and writes the result to
+  ~/Library/LaunchAgents/<label>.plist. Nothing here is machine-specific, so
+  this file is safe to commit; the rendered plist is not committed anywhere.
+
+  launchd runs with no shell profile: no PATH, no HUD_* env, no cwd. Every path
+  is therefore absolute and resolved at install time, and PATH is built from
+  where the tools actually live on this machine.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>@@LABEL@@</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>@@NODE@@</string>
+    <string>@@SERVER@@</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HUD_ROOT</key>
+    <string>@@HUD_ROOT@@</string>
+    <key>HUD_PORT</key>
+    <string>@@PORT@@</string>
+    <key>PATH</key>
+    <string>@@PATH@@</string>
+  </dict>
+
+  <key>WorkingDirectory</key>
+  <string>@@HUD_ROOT@@</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+
+  <key>StandardOutPath</key>
+  <string>@@LOG@@</string>
+  <key>StandardErrorPath</key>
+  <string>@@LOG@@</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

@@ -9,6 +9,8 @@ they support.
 - `skills/` — user-invocable workflows such as review, handoff, and work-board
   access.
 - `scripts/` — lint, generation, and idempotent local installation.
+- `hud/` — the work-HUD server and its authoring skill; the content it renders
+  lives in a private tree outside this repository.
 - `work-board/` — a workerd-native UI staged here before transfer to
   Canonical Hours.
 
@@ -113,6 +115,50 @@ scripts/install.sh --doctor
 | **Frontmatter required** | `name`, `description` | `description` (name defaults to directory) |
 
 For full semantics, see Anthropic's [subagents](https://code.claude.com/docs/en/sub-agents) and [skills](https://code.claude.com/docs/en/skills) docs.
+
+## The work HUD (`hud/`)
+
+`hud/` is a local-only work HUD: one page that renders a markdown knowledge
+tree on the left and, on the right, panels for whatever local services you
+point it at — your pull requests, an activity digest, colleagues' PRs, your
+agent sessions, and which skills and agents are actually linked into
+`~/.claude`. It is watch-only by construction: content routes are GET-only and
+tested to stay that way, and every "do" is a link out into the tool where a
+human acts.
+
+**The code is here; the content is not.** This directory holds only the
+machinery — server, UI, tests, the launchd service scripts, the mache index
+projection, and the canonical `hud` skill that `skills/hud` symlinks to.
+Everything the HUD renders lives in a separate private tree selected by
+`HUD_ROOT` (default `~/hud`), along with its `hud.toml` and everything the HUD
+writes back (snapshots, logs, indexes, all under a gitignored
+`$HUD_ROOT/.generated/`). That split is the point: notes about real work,
+real colleagues, and real tickets never enter this repository, and nothing
+here needs them to run.
+
+Node stdlib only — no npm packages, no build step, no `node_modules`.
+
+```bash
+HUD_ROOT=~/hud node hud/server.mjs     # then open http://127.0.0.1:4870
+```
+
+You need a content tree first: a directory with a `hud.toml` and at least one
+content directory. `hud/skills/hud/SKILL.md` documents the tree's shape and is
+also the skill agents load to write into it correctly; a tree that already
+exists carries its own `HUD.md`, which wins over the skill on any conflict.
+
+```bash
+node --test hud/test/                  # hermetic suite; touches no real tree
+bash hud/smoke.sh                      # 13 asserts against a real HUD_ROOT
+bash hud/service/install.sh            # optional macOS launchd agent
+bash hud/service/uninstall.sh          # leaves zero resident state
+```
+
+The service is sugar and nothing depends on it — `node hud/server.mjs` stays
+the canonical way to run the HUD, and the server has no idea launchd exists.
+`hud/service/plist.template` is a template with placeholders, not a live
+plist; the rendered one lands in `~/Library/LaunchAgents/` and is committed
+nowhere.
 
 ## Creating agents, skills, and operational packages
 
