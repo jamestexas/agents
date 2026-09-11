@@ -86,7 +86,7 @@ This is the original "home paths" ask. Can be done **now**, regardless of the sp
 
 | Location | Problem | Fix |
 |----------|---------|-----|
-| `docs/problems/substrate-idl.md` | ~40 absolute `/Users/jamesgardner/remotes/art/...` and `/Users/jamesgardner/github/jamestexas/...` paths | This is a **real-run artifact** of private decomposition work, not a reusable template (the template is `skills/problem-decomposer/examples/substrate-idl.md`). **Recommend: move this doc to the cloister repo** (where the work lives) or delete it from here. If kept, rewrite paths repo-relative (`cloister/tools/...`). |
+| `docs/problems/substrate-idl.md` | ~40 absolute `~/remotes/art/...` and `~/github/jamestexas/...` paths | This is a **real-run artifact** of private decomposition work, not a reusable template (the template is `skills/problem-decomposer/examples/substrate-idl.md`). **Recommend: move this doc to the cloister repo** (where the work lives) or delete it from here. If kept, rewrite paths repo-relative (`cloister/tools/...`). |
 | `docs/problems/README.md` | `~/remotes/art/cloister/docs/adr/` example | Reword to `<repo>/docs/adr/` or a repo URL. |
 | `agents/{adversarial-synthesis-lead,bundle-isolation-tester,dos-resilience-auditor,enumeration-oracle-hunter}.md` | `~/remotes/art/rosary/agents/rules/GOLDEN_RULES.md` | rosary is public — replace with the GitHub raw URL (`github.com/agentic-research/rosary/.../GOLDEN_RULES.md`) or a `$ROSARY_HOME`-style note. |
 | `skills/workflow-audit/SKILL.md:89` | already documents `$HOME/...` normalization | No change — it's the *correct* pattern; cite it as the house style. |
