@@ -56,7 +56,16 @@ Discover the patterns the code must follow before writing it.
 For each bead, in dependency order:
 
 1. **Test first.** Invoke `superpowers/test-driven-development`: write the failing test, watch it fail. Then the **mutation check** — with the implementation in place, revert the load-bearing line and confirm the test goes red (proves the test isn't vacuous). Restore.
-2. **Loop to green.** Run `task ci` if the module exposes it (see `taskfile-ci-parity`); else the raw quadruplet `go build ./... && go vet ./... && go test ./... && golangci-lint run` on the touched packages. Iterate until green. Run `go build ./... && go vet ./...` after every edit (catches unused imports / signature drift early).
+2. **Loop to green.** Run `task ci` if the module exposes it (see `taskfile-ci-parity`) — it is both language-agnostic and the thing CI actually runs, so prefer it wherever it exists. Otherwise fall back to the repo's own build/lint/test quadruplet on the touched packages. Typical shapes, but use what the repo actually defines:
+
+   | Language | Fallback quadruplet |
+   |---|---|
+   | Go | `go build ./... && go vet ./... && go test ./... && golangci-lint run` |
+   | Rust | `cargo check && cargo clippy && cargo test` |
+   | Python | `uv run ruff check && uv run ruff format --check && uv run pytest` |
+   | TypeScript | `pnpm build && pnpm lint && pnpm test` |
+
+   Iterate until green, and re-run the cheap half (build / typecheck) after every edit — it catches unused imports and signature drift early, while they are still one edit from their cause.
 3. **Conventions.** Before committing, check each new file against the conventions P1 named — type visibility, error wrapping, test/fake patterns, logging, config, safety. Step 2's linter catches the mechanical half; this step is the half it cannot.
 4. **Commit.** Foreground gitsign commit, EXPLICIT staged paths (never `git add -A`), eyeball `git diff --cached --name-only` first. Small commits, one logical change each.
 5. Comment progress on the bead (`rsry_bead_comment`).

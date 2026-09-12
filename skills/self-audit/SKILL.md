@@ -13,8 +13,8 @@ argument-hint: "[base-branch, defaults to main]"
 
 Check your own PR like a grumpy reviewer would, before one sees it.
 
-The compiler and `golangci-lint` catch the easy stuff. This skill catches the
-grown-up stuff that slips past both of them.
+Your compiler or type-checker and your linter catch the easy stuff. This skill
+catches the grown-up stuff that slips past both of them.
 
 ## When to use
 
@@ -41,9 +41,10 @@ scope is wrong.
 
 ## Step 2 — Dead struct fields
 
-A struct field that is written but never read is dead code. `golangci-lint
-unused` does **not** catch this — as long as the field appears on either side
-of an `=`, it counts as used.
+A field that is written but never read is dead code, and unused-symbol linters
+do **not** catch it — `golangci-lint unused` counts a field as used as long as
+it appears on either side of an `=`, and most other languages' equivalents
+behave the same way.
 
 For every struct field you added, confirm there is a read site outside the
 place it is written. If the only references are:
@@ -67,7 +68,7 @@ Comments die when they reference context that fades. Scan for patterns that
 will be meaningless in six months:
 
 ```bash
-rg -n '@\w+|comment #|round \d+|per the review|commit [0-9a-f]{7,}|\.go:\d+|renamed from|formerly|was previously|intentionally|rather than' <changed-files>
+rg -n '@\w+|comment #|round \d+|per the review|commit [0-9a-f]{7,}|\.\w+:\d+|renamed from|formerly|was previously|intentionally|rather than' <changed-files>
 ```
 
 For each hit ask: *will this comment make sense to someone who never saw the
@@ -89,7 +90,8 @@ Worst offenders, in order of how badly they age:
 ## Step 4 — Duplicate or parallel types
 
 ```bash
-# Types with identical field sets:
+# Types with identical field sets (Go shown — swap in your language's
+# declaration syntax: class/interface/dataclass/type):
 rg -U 'type \w+ struct \{[^}]+\}' <pkg> | sort | uniq -c | awk '$1 > 1'
 ```
 
@@ -105,8 +107,9 @@ Exported API that only has test callers is either dead or wishful.
 For each exported function/method/type added:
 
 ```bash
-# Callers outside test files AND outside the defining file:
-rg -l '\bFunctionName\b' | rg -v '_test\.go$' | rg -v '<defining-file>'
+# Callers outside test files AND outside the defining file
+# (adjust the test-file pattern to your language's convention):
+rg -l '\bFunctionName\b' | rg -v '(_test\.go|_test\.py|test_.*\.py|\.(test|spec)\.[jt]sx?)$' | rg -v '<defining-file>'
 ```
 
 Zero results → it's exported for future use that may never come. Make it
