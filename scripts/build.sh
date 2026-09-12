@@ -28,7 +28,7 @@ AGENT_VALID_MODELS_PREFIX="sonnet opus haiku inherit claude-"
 # Anthropic Claude Code skill frontmatter spec:
 #   https://code.claude.com/docs/en/skills#frontmatter-reference
 # Gemini CLI: rejects fields outside the spec — we lint to the strict union.
-SKILL_ALLOWED_FIELDS="name description when_to_use argument-hint arguments disable-model-invocation user-invocable allowed-tools model effort context agent hooks paths shell"
+SKILL_ALLOWED_FIELDS="name description when_to_use argument-hint arguments disable-model-invocation user-invocable allowed-tools disallowed-tools model effort context agent hooks paths shell"
 SKILL_REQUIRED_FIELDS="description"   # name optional (directory name used if missing)
 
 # ---------------------------------------------------------------------------
@@ -231,7 +231,7 @@ gen_agents_table() {
 }
 
 gen_skills_table() {
-    echo "| Skill | Tool scope | Purpose |"
+    echo "| Skill | Tool grant | Purpose |"
     echo "|-------|------------|---------|"
     for f in "$SKILLS_DIR"/*/SKILL.md; do
         [ -f "$f" ] || continue
@@ -244,10 +244,13 @@ gen_skills_table() {
         local purpose tool_scope
         purpose="$(first_sentence "$desc")"
         purpose="${purpose//|/\\|}"
+        # allowed-tools GRANTS unprompted use of the listed tools for the
+        # invoking turn — it does not restrict anything (every tool stays
+        # callable). "scoped"/"inherits all" read as the opposite of that.
         if [ -z "$tools" ]; then
-            tool_scope="inherits all"
+            tool_scope="prompts"
         else
-            tool_scope="scoped"
+            tool_scope="pre-approved"
         fi
         printf "| [\`%s\`](skills/%s/SKILL.md) | %s | %s |\n" \
             "$name" "$dir" "$tool_scope" "$purpose"

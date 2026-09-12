@@ -7,6 +7,7 @@ description: >
   smell structural, or before committing to a major refactor. Read-only,
   evidence-first, multi-pass; "the current design is largely right" is a valid
   verdict. Works on any language/repo.
+disallowed-tools: Edit
 ---
 
 # Counterfactual Architecture Audit

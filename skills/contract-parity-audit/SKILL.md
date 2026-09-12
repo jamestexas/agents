@@ -8,6 +8,7 @@ description: >
   estimating it. Read-only behavioral-contract audit producing two matrices;
   narrower and cheaper than a full counterfactual-audit — often its
   follow-up.
+disallowed-tools: Edit
 ---
 
 # Contract-Parity Audit

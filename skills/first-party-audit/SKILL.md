@@ -2,6 +2,7 @@
 name: first-party-audit
 description: Before writing glue, a wrapper, or a "small helper", audit whether the capability already exists first-party — in the binary, the codebase, or the platform — and whether existing glue bypasses a better first-party implementation. Use when adding shell/Taskfile/CI glue, when a helper feels trivially writable, or when the same logic seems to exist twice. Produces an inventory with receipts, not vibes.
 allowed-tools: Read Glob Grep Bash
+disallowed-tools: Write Edit
 argument-hint: <capability-description> [--scope=PATH] [--glue=Taskfile.yml|.github/workflows|scripts/]
 ---
 
