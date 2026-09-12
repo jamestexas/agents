@@ -1,7 +1,7 @@
 ---
 name: repo-social-preview
 description: Audit the GitHub OpenGraph social preview image shown when a repo URL is posted on HN/Twitter/Slack/Discord. Flags if missing, checks clarity at small sizes, suggests sources, reports manual upload steps. Sub-skill of repo-seo-curator.
-allowed-tools: Read Glob Grep Bash(gh *) Bash(jq *) Bash(curl *) Bash(file *)
+allowed-tools: Read Glob Grep Bash(gh api graphql *) Bash(jq *) Bash(curl *) Bash(file *)
 argument-hint: <owner/repo> [<owner/repo> ...] [--audit-only]
 ---
 

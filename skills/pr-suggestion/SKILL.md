@@ -9,7 +9,7 @@ description: >
   changed. It is deliberately the WRONG tool for structural, additive, or
   unchanged-context findings; the decision rule below tells them apart so you
   never post an unappliable "Commit suggestion" button.
-allowed-tools: "Read, Grep, Write, Bash(gh:*), Bash(jq:*), Bash(awk:*)"
+allowed-tools: "Read, Grep, Write, Bash(gh pr diff:*), Bash(jq:*), Bash(awk:*)"
 argument-hint: "[owner/repo#N + the finding and the file:line it edits]"
 user-invocable: true
 ---

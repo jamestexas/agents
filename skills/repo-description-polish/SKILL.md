@@ -1,7 +1,7 @@
 ---
 name: repo-description-polish
 description: Audit and polish the GitHub repo description — the pitch shown in search results, previews, and embeds. Proposes a stronger one from README + signals; applies via gh repo edit after approval. Sub-skill of repo-seo-curator.
-allowed-tools: Read Glob Grep Bash(gh *) Bash(jq *) Bash(git *)
+allowed-tools: Read Glob Grep Bash(gh repo view *) Bash(jq *) Bash(git *)
 argument-hint: <owner/repo> [<owner/repo> ...] [--dry-run] [--apply]
 ---
 
