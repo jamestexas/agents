@@ -184,7 +184,9 @@ Then STOP. Present the matrix + verdict + a draft review body locally.
 **Post only when the user explicitly authorizes it.** Then:
 `gh pr review N --approve|--request-changes|--comment -F /tmp/body.md`, and
 verify it landed (`gh api …/reviews | select(.user.login==ME) | last`). For
-inline replies / thread resolution / re-request, follow `pr-review-kit` §9.
+inline replies / thread resolution / re-request, follow `pr-review-kit` §9. For
+a finding small enough to land as a one-click applyable suggestion, use
+`scripts/pr-suggest.sh` (dry-run by default; refuses unchanged-context anchors).
 Posting is the only action that touches shared state — never infer authorization.
 
 ---

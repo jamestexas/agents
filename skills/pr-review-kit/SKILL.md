@@ -299,6 +299,8 @@ gh api repos/$OWNER/$REPO/pulls/$N/reviews -X POST --input /tmp/review.json
 #    comments: [{path, line, body}]}
 ```
 
+Do not hand-build that payload for an **applyable suggestion** — an inline comment whose body carries a ```suggestion fence the author commits with one click. `scripts/pr-suggest.sh` assembles it, and refuses (nonzero exit) when the anchor is unchanged context, which is the one mistake that ships a dead "Commit suggestion" button. It is dry-run by default. Whether a finding *should* be a suggestion at all is judgment, and stays in `skills/pr-suggestion`; the script only enforces the mechanics.
+
 After posting, verify it landed:
 
 ```bash
