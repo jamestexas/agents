@@ -1,0 +1,454 @@
+#!/usr/bin/env bash
+# hud — one entry point for the work HUD, invokable from anywhere.
+#
+# A dispatcher, not a second implementation. Everything here already existed as
+# a script, a node entry point, or two lines of launchctl; what did not exist
+# was a way to reach any of it without first remembering where the machinery is
+# checked out. `hud` resolves its own symlink, so one link into a directory on
+# PATH makes every subcommand below work from any directory.
+#
+# Ports, hosts, labels, and upstreams come from $HUD_ROOT/hud.toml, read
+# through the server's own loadConfig() — the same posture service/install.sh
+# takes, and for the same reason: the shell has no reader for that format and a
+# second parser is a second thing to keep correct. Nothing is hardcoded here
+# except the fallbacks that apply when the config is absent entirely.
+#
+# Usage:
+#   hud <command> [args]
+#
+#   start        start the HUD — the launchd service if one is installed,
+#                otherwise `node server.mjs` backgrounded. Idempotent. If a
+#                process this script did not start holds the port, it refuses
+#                and prints the pid rather than killing it.
+#   stop         stop the HUD. The service is booted out rather than killed,
+#                because KeepAlive would restart it; the plist stays, so
+#                `hud start` brings the same service back.
+#   restart      stop, then start
+#   status       what is actually true right now: resolved HUD_ROOT and config,
+#                service state and pid, port and health, and whether each
+#                configured upstream answers. Always exits 0 — it reports
+#                state, it does not assert it.
+#   open         open the HUD in your browser
+#   logs [-f] [-n N]
+#                tail the server log ($HUD_ROOT/.generated/service.log)
+#   root         print the resolved HUD_ROOT
+#
+#   install      install the launchd user agent (service/install.sh)
+#   uninstall    remove it (service/uninstall.sh); args are passed through
+#   link         symlink this script into ~/.local/bin (HUD_LINK_DIR overrides)
+#
+#   index        rebuild the mache index (hud-index.mjs)
+#   smoke        integration gate against the real tree (smoke.sh)
+#   test         hermetic unit suite (node --test test/)
+#
+#   --help, -h   this text
+#
+# An unreachable upstream is a normal state, not a failure: the HUD greys the
+# panel out and keeps serving, and `hud status` prints the fact and exits 0.
+#
+# Environment: HUD_ROOT selects the content tree (default ~/hud). HUD_PORT,
+# HUD_HOST, and HUD_LABEL override the [serve] table, as they do everywhere
+# else in the HUD.
+
+set -euo pipefail
+
+# Print the contiguous comment header after the shebang. Deriving the range
+# from the file itself keeps --help correct when the header grows or shrinks; a
+# fixed `sed -n '2,Np'` silently starts printing code the moment it moves.
+usage() {
+    awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$SELF"
+    exit "${1:-0}"
+}
+
+die() { printf 'hud: %s\n' "$*" >&2; exit 1; }
+
+# Resolve the symlink chain before taking a dirname: `link` puts this file on
+# PATH as a symlink, and dirname of the *link* points at ~/.local/bin, where no
+# machinery lives. `pwd -P` at the end because server.mjs only self-starts when
+# argv[1] matches the URL node loaded it from, and node resolves symlinks while
+# argv does not — the same trap service/install.sh documents.
+SELF="${BASH_SOURCE[0]}"
+while [[ -L "$SELF" ]]; do
+    self_dir="$(cd -P -- "$(dirname -- "$SELF")" && pwd)"
+    SELF="$(readlink -- "$SELF")"
+    [[ "$SELF" == /* ]] || SELF="$self_dir/$SELF"
+done
+MACHINERY_DIR="$(cd -P -- "$(dirname -- "$SELF")" && pwd)"
+SERVER_JS="$MACHINERY_DIR/server.mjs"
+
+# ------------------------------------------------------------------ config
+
+# One node call reads the whole config, because loadConfig() is the only parser
+# for hud.toml and calling it per key would pay for the import five times. The
+# server's path travels in the environment, not argv: server.mjs self-starts
+# when argv[1] names it, so passing its path would leave this probe trying to
+# bind the port it was called to inspect.
+CONFIG_PROBE='
+import { pathToFileURL } from "node:url";
+const m = await import(pathToFileURL(process.env.HUD_CFG_SERVER).href);
+const root = m.defaultRoot();
+const detail = m.loadConfigDetail(root);
+const cfg = detail.data || {};
+const table = (o, n) => (o && typeof o[n] === "object" && o[n] ? o[n] : {});
+const serve = table(cfg, "serve");
+const sources = table(cfg, "sources");
+const emit = (k, v) => {
+  if (v === undefined || v === null || v === "") return;
+  process.stdout.write(k + "\t" + String(v).replace(/[\t\r\n]/g, " ") + "\n");
+};
+emit("root", root);
+emit("config.file", detail.file);
+for (const w of detail.warns || []) emit("config.warn", w);
+emit("default.port", m.DEFAULT_PORT);
+emit("serve.host", serve.host);
+emit("serve.port", serve.port);
+emit("serve.label", serve.label);
+emit("board.url", table(sources, "board").url);
+emit("digest.cmd", table(sources, "digest").cmd);
+const sroot = table(sources, "sessions").root;
+emit("sessions.root", sroot ? m.expandHome(String(sroot)) : "");
+emit("sessions.lectio", table(sources, "sessions").lectio);
+'
+
+CFG_LOADED=""
+CFG_FILE="" CFG_DEFAULT_PORT="" CFG_HOST="" CFG_PORT="" CFG_LABEL=""
+BOARD_URL="" DIGEST_CMD="" SESSIONS_ROOT="" LECTIO_URL=""
+CONFIG_WARNS=()
+
+load_config() {
+    [[ -z "$CFG_LOADED" ]] || return 0
+    command -v node >/dev/null 2>&1 || die "no 'node' on PATH — the HUD server needs it."
+    [[ -f "$SERVER_JS" ]] || die "missing $SERVER_JS"
+
+    local key value
+    while IFS=$'\t' read -r key value; do
+        case "$key" in
+            root) HUD_ROOT_R="$value" ;;
+            config.file) CFG_FILE="$value" ;;
+            config.warn) CONFIG_WARNS+=("$value") ;;
+            default.port) CFG_DEFAULT_PORT="$value" ;;
+            serve.host) CFG_HOST="$value" ;;
+            serve.port) CFG_PORT="$value" ;;
+            serve.label) CFG_LABEL="$value" ;;
+            board.url) BOARD_URL="$value" ;;
+            digest.cmd) DIGEST_CMD="$value" ;;
+            sessions.root) SESSIONS_ROOT="$value" ;;
+            sessions.lectio) LECTIO_URL="$value" ;;
+        esac
+    done < <(HUD_CFG_SERVER="$SERVER_JS" node --input-type=module -e "$CONFIG_PROBE" || true)
+
+    [[ -n "${HUD_ROOT_R:-}" ]] || die "could not read the HUD config through $SERVER_JS"
+    # Match install.sh: the plist was written with a resolved root, so a
+    # symlinked HUD_ROOT must resolve the same way or the log path printed here
+    # names a file nothing writes to.
+    HUD_ROOT_R="$(cd -- "$HUD_ROOT_R" 2>/dev/null && pwd -P || printf '%s' "$HUD_ROOT_R")"
+
+    # The environment wins over the file, everywhere in the HUD.
+    HOST="${HUD_HOST:-${CFG_HOST:-127.0.0.1}}"
+    PORT="${HUD_PORT:-${CFG_PORT:-${CFG_DEFAULT_PORT:-4870}}}"
+    LABEL="${HUD_LABEL:-${CFG_LABEL:-local.hud}}"
+    if [[ ! "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
+        die "port $PORT is not a valid port number."
+    fi
+
+    URL="http://${HOST}:${PORT}/"
+    DOMAIN="gui/$(id -u)"
+    TARGET="${DOMAIN}/${LABEL}"
+    PLIST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
+    LOG_DIR="${HUD_ROOT_R}/.generated"
+    LOG_FILE="${LOG_DIR}/service.log"
+    CFG_LOADED=yes
+}
+
+# ------------------------------------------------------------------ probes
+
+have_launchd() { [[ "$(uname -s)" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; }
+service_loaded() { have_launchd && launchctl print "$TARGET" >/dev/null 2>&1; }
+
+# Empty when there is no such service. `launchctl print` exits 113 for an
+# unknown label, and with pipefail that status is the pipeline's, so without the
+# `|| true` every caller inherits a failure for the ordinary "not installed"
+# case — which is precisely the state `hud status` exists to report.
+service_pid() {
+    have_launchd || return 0
+    launchctl print "$TARGET" 2>/dev/null |
+        awk '$1 == "pid" && $2 == "=" { print $3; exit }' || true
+}
+
+port_holder() { lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null | head -1 || true; }
+
+# Whether a pid is a HUD server rather than an unrelated squatter. The launchd
+# agent and a backgrounded `node server.mjs` both carry the resolved server
+# path in their argv, which is exactly what makes them ours to stop.
+is_hud_server() {
+    [[ -n "$1" ]] && ps -o command= -p "$1" 2>/dev/null | grep -qF "$SERVER_JS"
+}
+
+# `000` is curl's code for "never got a response", which is how an upstream
+# that is simply not running reports itself. Not an error here.
+http_code() { curl -s -o /dev/null -w '%{http_code}' --max-time "${2:-3}" "$1" 2>/dev/null || true; }
+
+wait_healthy() {
+    local _
+    for _ in $(seq 1 40); do
+        if curl -fs -o /dev/null --max-time 2 "$URL"; then return 0; fi
+        sleep 0.5
+    done
+    return 1
+}
+
+# ---------------------------------------------------------------- commands
+
+cmd_start() {
+    load_config
+    local holder
+    holder="$(port_holder)"
+    if [[ -n "$holder" ]]; then
+        if is_hud_server "$holder"; then
+            printf 'already serving %s (pid %s)\n' "$URL" "$holder"
+            return 0
+        fi
+        printf 'hud: port %s is held by pid %s, which this script did not start:\n\n' \
+            "$PORT" "$holder" >&2
+        ps -o pid=,command= -p "$holder" >&2 || true
+        printf '\nStop it yourself, or pick another port (HUD_PORT=... or [serve] port).\n' >&2
+        exit 1
+    fi
+
+    if service_loaded; then
+        launchctl kickstart "$TARGET" >/dev/null
+        printf 'kickstarted %s\n' "$LABEL"
+    elif have_launchd && [[ -f "$PLIST" ]]; then
+        # The plist exists but launchd has forgotten it — the state `hud stop`
+        # leaves behind. Loading a file install.sh already rendered is not a
+        # second installer; `hud install` remains the only thing that writes one.
+        launchctl bootstrap "$DOMAIN" "$PLIST"
+        printf 'loaded %s from %s\n' "$LABEL" "$PLIST"
+    else
+        [[ -f "$SERVER_JS" ]] || die "missing $SERVER_JS"
+        mkdir -p -- "$LOG_DIR"
+        printf "no launchd agent installed — starting 'node server.mjs' in the background\n"
+        HUD_ROOT="$HUD_ROOT_R" HUD_PORT="$PORT" \
+            nohup node "$SERVER_JS" >>"$LOG_FILE" 2>&1 &
+    fi
+
+    if wait_healthy; then
+        printf 'serving %s\n' "$URL"
+    else
+        printf 'hud: started, but %s did not answer within 20s. Last log lines:\n' "$URL" >&2
+        tail -20 -- "$LOG_FILE" >&2 || true
+        exit 1
+    fi
+}
+
+cmd_stop() {
+    load_config
+    if service_loaded; then
+        # bootout, not kill: KeepAlive means launchd restarts anything killed,
+        # so a kill is a restart with extra steps.
+        launchctl bootout "$TARGET" 2>/dev/null || true
+        local _
+        for _ in $(seq 1 20); do
+            service_loaded || break
+            sleep 0.25
+        done
+        if service_loaded; then
+            die "$TARGET is still registered with launchd"
+        fi
+        printf "service %s stopped (plist kept — 'hud start' reloads it)\n" "$LABEL"
+        return 0
+    fi
+
+    local holder
+    holder="$(port_holder)"
+    if [[ -z "$holder" ]]; then
+        printf 'not running (nothing listening on port %s)\n' "$PORT"
+        return 0
+    fi
+    if ! is_hud_server "$holder"; then
+        printf 'hud: pid %s holds port %s and is not a HUD server — not ours to kill:\n' \
+            "$holder" "$PORT" >&2
+        ps -o pid=,command= -p "$holder" >&2 || true
+        exit 1
+    fi
+    kill "$holder"
+    local _
+    for _ in $(seq 1 20); do
+        [[ -z "$(port_holder)" ]] && break
+        sleep 0.25
+    done
+    printf 'stopped node server.mjs (pid %s)\n' "$holder"
+}
+
+cmd_restart() {
+    cmd_stop
+    cmd_start
+}
+
+# One line per upstream: what it is, where it points, and whether it answers.
+report_upstream() {
+    printf '  %-9s %-38s %s\n' "$1" "$2" "$3"
+}
+
+report_http_upstream() {
+    local name="$1" url="$2" code
+    code="$(http_code "$url")"
+    if [[ "$code" == "000" ]]; then
+        report_upstream "$name" "$url" "unreachable (panel greys out)"
+    else
+        report_upstream "$name" "$url" "ok (HTTP $code)"
+    fi
+}
+
+cmd_status() {
+    load_config
+
+    local holder code health service_state pid
+    holder="$(port_holder)"
+    code="$(http_code "$URL")"
+    if [[ "$code" == "000" ]]; then health="not serving"; else health="HTTP $code"; fi
+
+    pid="$(service_pid)"
+    if service_loaded; then
+        service_state="loaded, pid ${pid:-unknown}"
+    elif have_launchd && [[ -f "$PLIST" ]]; then
+        service_state="installed but not loaded — 'hud start' reloads it"
+    elif have_launchd; then
+        service_state="not installed — 'hud install' adds one (optional)"
+    else
+        service_state="n/a (launchd is macOS-only)"
+    fi
+
+    printf 'hud\n'
+    printf '  root      %s\n' "$HUD_ROOT_R"
+    printf '  config    %s\n' "${CFG_FILE:-none (defaults)}"
+    printf '  serving   %-38s %s\n' "$URL" "$health"
+    # The pid line only earns its place when it says something the service line
+    # does not: a squatter, or a server running outside the service.
+    if [[ -n "$holder" ]] && ! is_hud_server "$holder"; then
+        printf '  port      held by pid %s, which is not a HUD server\n' "$holder"
+    elif [[ -n "$holder" && "$holder" != "$pid" ]]; then
+        printf '  pid       %s (server.mjs, not under launchd)\n' "$holder"
+    fi
+    printf '  service   %-38s %s\n' "$LABEL" "$service_state"
+    printf '  log       %s\n' "$LOG_FILE"
+    for warn in ${CONFIG_WARNS[@]+"${CONFIG_WARNS[@]}"}; do
+        printf '  config!   %s\n' "$warn"
+    done
+
+    printf '\nupstreams\n'
+    if [[ -n "$BOARD_URL" ]]; then
+        report_http_upstream board "$BOARD_URL"
+    else
+        report_upstream board "-" "not configured (no panel)"
+    fi
+
+    if [[ -n "$DIGEST_CMD" ]]; then
+        # The first token only. The server tokenizes the command properly and
+        # runs it without a shell; this is a "can it be found" check, not an
+        # invocation — `hud status` must not run your digest.
+        local digest_bin
+        read -r digest_bin _ <<<"$DIGEST_CMD"
+        if command -v "$digest_bin" >/dev/null 2>&1; then
+            report_upstream digest "$DIGEST_CMD" "ok ($digest_bin on PATH)"
+        else
+            report_upstream digest "$DIGEST_CMD" "unreachable ($digest_bin not on PATH)"
+        fi
+    else
+        report_upstream digest "-" "not configured (no panel)"
+    fi
+
+    if [[ -n "$SESSIONS_ROOT" ]]; then
+        if [[ -d "$SESSIONS_ROOT" ]]; then
+            report_upstream sessions "$SESSIONS_ROOT" "ok (directory)"
+        else
+            report_upstream sessions "$SESSIONS_ROOT" "unreachable (no such directory)"
+        fi
+    else
+        report_upstream sessions "-" "not configured (no panel)"
+    fi
+
+    if [[ -n "$LECTIO_URL" ]]; then
+        report_http_upstream lectio "$LECTIO_URL"
+    else
+        report_upstream lectio "-" "not configured (sessions stay tier-1)"
+    fi
+
+    printf '\nAn unreachable upstream is a normal state: the HUD greys that panel out\n'
+    printf 'and keeps serving everything else, so this command still exits 0.\n'
+    return 0
+}
+
+cmd_open() {
+    load_config
+    if command -v open >/dev/null 2>&1; then
+        open "$URL"
+    elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$URL"
+    else
+        die "no opener found — browse $URL yourself."
+    fi
+}
+
+cmd_logs() {
+    load_config
+    [[ -f "$LOG_FILE" ]] || die "no log yet at $LOG_FILE"
+    local follow="" lines=40
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -f | --follow) follow="-f"; shift ;;
+            -n) lines="$2"; shift 2 ;;
+            *) die "logs: unknown argument $1" ;;
+        esac
+    done
+    # Both start paths write here: the plist names this file, and the
+    # backgrounded fallback appends to it, so `hud logs` is correct either way.
+    tail ${follow:+"$follow"} -n "$lines" -- "$LOG_FILE"
+}
+
+cmd_link() {
+    local dir="${HUD_LINK_DIR:-$HOME/.local/bin}"
+    local dest="$dir/hud"
+    mkdir -p -- "$dir"
+    if [[ -e "$dest" && ! -L "$dest" ]]; then
+        die "$dest exists and is not a symlink — move it yourself."
+    fi
+    if [[ -L "$dest" ]]; then
+        local current
+        current="$(readlink -- "$dest")"
+        if [[ "$current" == "$SELF" ]]; then
+            printf 'already linked: %s -> %s\n' "$dest" "$SELF"
+            return 0
+        fi
+    fi
+    ln -sfn -- "$SELF" "$dest"
+    printf 'linked %s -> %s\n' "$dest" "$SELF"
+    case ":${PATH}:" in
+        *":$dir:"*) ;;
+        *) printf "%s is not on your PATH — add it to use 'hud' from anywhere.\n" "$dir" ;;
+    esac
+}
+
+# --------------------------------------------------------------- dispatch
+
+[[ $# -gt 0 ]] || usage 1
+command="$1"
+shift
+
+case "$command" in
+    start) cmd_start "$@" ;;
+    stop) cmd_stop "$@" ;;
+    restart) cmd_restart "$@" ;;
+    status) cmd_status "$@" ;;
+    open) cmd_open "$@" ;;
+    logs) cmd_logs "$@" ;;
+    root) load_config; printf '%s\n' "$HUD_ROOT_R" ;;
+    link) cmd_link "$@" ;;
+    install) exec bash "$MACHINERY_DIR/service/install.sh" "$@" ;;
+    uninstall) exec bash "$MACHINERY_DIR/service/uninstall.sh" "$@" ;;
+    index) exec node "$MACHINERY_DIR/hud-index.mjs" "$@" ;;
+    smoke) exec bash "$MACHINERY_DIR/smoke.sh" "$@" ;;
+    test) exec node --test "$MACHINERY_DIR/test/" "$@" ;;
+    help | --help | -h) usage 0 ;;
+    *) printf 'hud: unknown command %q\n\n' "$command" >&2; usage 1 ;;
+esac
