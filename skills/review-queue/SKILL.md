@@ -36,7 +36,7 @@ In each dispatch prompt, give the agent exactly what it needs (it can't ask you)
 - intent: **review-only — return a structured summary, post nothing**
 - any design-doc pointer you have (path/URL), so it doesn't have to hunt blind
 
-Label each agent by PR (e.g. `review:mono#42090`) so progress is legible. Sub-agents can't spawn sub-agents — that's fine; the worker is flat by design.
+Label each agent by PR (e.g. `review:repo#1234`) so progress is legible. Sub-agents can't spawn sub-agents — that's fine; the worker is flat by design.
 
 > Scale note: ~5 PRs fan out cleanly as parallel sub-agents. If you're ever past ~10–15, or you want the reviewers to adversarially cross-check each other before reporting, that's the **Workflow** tool's territory (codified orchestration, dozens of agents) — switch to it rather than hand-dispatching.
 
