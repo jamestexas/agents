@@ -18,17 +18,17 @@
   },
   "dependencies": {
     "d3": "^7.9.0",
-    "zod": "^4.4.3"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.18.7",
-    "@cloudflare/workers-types": "^5.20260722.1",
-    "@playwright/test": "^1.60.0",
+    "@cloudflare/workers-types": "^5.20260914.1",
+    "@playwright/test": "^1.63.0",
     "@types/d3": "^7.4.3",
-    "@types/node": "^26.1.2",
+    "@types/node": "^26.5.1",
     "typescript": "7.0.2",
     "vite": "^7.3.5",
     "vitest": "4.1.10",
-    "wrangler": "^4.113.0"
+    "wrangler": "^4.131.2"
   }
 }
