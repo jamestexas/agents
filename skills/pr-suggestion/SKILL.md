@@ -141,6 +141,32 @@ gh api repos/<owner>/<repo>/pulls/<N>/comments \
 ```
 Confirm the comment shows the ```suggestion fence and sits on the intended line.
 
+## Automation — `scripts/pr-suggest.sh`
+
+The mechanics above (anchor discovery → validate in-diff → build payload → post →
+verify) are deterministic and live in `scripts/pr-suggest.sh`. The script owns
+the **mechanical** half and *enforces* the in-diff gate — it refuses (nonzero
+exit) if `--line` is unchanged context, so an unappliable "Commit suggestion"
+button is impossible to post. What it does **not** decide stays with you: whether
+the finding is suggestable at all (the rule above), the replacement text, and
+whether to `APPROVE`.
+
+```bash
+# Preview (dry-run by default — posts nothing):
+scripts/pr-suggest.sh --pr owner/repo#N --file path/f.go --line 42 \
+    --replacement /tmp/fix.txt [--start 40] [--note /tmp/why.md]
+
+# Post it (COMMENT review) once you've eyeballed the payload:
+scripts/pr-suggest.sh --pr owner/repo#N --file path/f.go --line 42 \
+    --replacement /tmp/fix.txt --note /tmp/why.md --post
+```
+
+Split of labor: the script is ~90% of this skill (the reproducible I/O + the
+enforceable gate); the prose above is the ~10% it can't decide — *should* this be
+a suggestion, and what should it say. Run `--dry-run` (the default) and read the
+payload before `--post`; the dry-run output is also the canonical example of a
+well-formed suggestion payload.
+
 ## Gotchas
 
 - **Unchanged context is unanchorable.** The single most common mistake: the
