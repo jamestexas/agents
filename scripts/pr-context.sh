@@ -35,18 +35,17 @@
 #
 # Usage:
 #   scripts/pr-context.sh --pr <owner/repo#N|N> [--repo owner/repo]
-#       [--similar N] [--no-similar] [--help]
+#       [--similar N] [--help]
 #
 #   # Full context for a PR, saved for the review pass:
 #   scripts/pr-context.sh --pr owner/repo#123 > /tmp/ctx.json
 #
 #   # Faster: skip the similar-PR probes (the slowest section):
-#   scripts/pr-context.sh --pr 123 --repo owner/repo --no-similar
+#   scripts/pr-context.sh --pr 123 --repo owner/repo --similar 0
 #
 #   --pr          PR as `owner/repo#N`, or bare `N` with --repo / the cwd repo
 #   --repo        owner/repo, when --pr is a bare number
-#   --similar     how many similar PRs to return (default 5; 0 disables)
-#   --no-similar  skip similar-PR discovery entirely
+#   --similar     how many similar PRs to return (default 5; 0 skips the section)
 #   --help
 
 set -euo pipefail
@@ -65,7 +64,6 @@ while [ $# -gt 0 ]; do
         --pr) PR="$2"; shift 2 ;;
         --repo) REPO="$2"; shift 2 ;;
         --similar) SIMILAR="$2"; shift 2 ;;
-        --no-similar) SIMILAR=0; shift ;;
         --help|-h) usage 0 ;;
         *) echo "unknown arg: $1" >&2; usage 1 ;;
     esac
@@ -141,16 +139,19 @@ found() {
     fi
 }
 
-# gql <document> — send a GraphQL READ. The endpoint is POST-only even for
-# queries, so this guard is what keeps the POST honest: a document mentioning
-# `mutation` is a bug in this script and is refused rather than sent.
+# gql <document> [extra-variables-json] — send a GraphQL READ; $owner, $name and
+# $number are always bound. The endpoint is POST-only even for queries, so this
+# guard is what keeps the POST honest: a document mentioning `mutation` is a bug
+# in this script and is refused rather than sent.
 gql() {
-    local doc="$1"
+    local doc="$1" extra="${2-}"
+    [ -n "$extra" ] || extra='{}'
     case "$doc" in
         *mutation*) die "internal: refusing to send a GraphQL mutation — this script is read-only" ;;
     esac
     jq -n --arg q "$doc" --arg owner "$OWNER" --arg name "$NAME" --argjson number "$N" \
-        '{query: $q, variables: {owner: $owner, name: $name, number: $number}}' \
+          --argjson extra "$extra" \
+        '{query: $q, variables: ({owner: $owner, name: $name, number: $number} + $extra)}' \
         | gh api graphql --input -
 }
 
@@ -169,7 +170,6 @@ pr_json="$(jq --arg repo "$REPO" '{
     number, title, url, state,
     draft: .isDraft,
     author: (.author.login // "unknown"),
-    author_is_bot: (.author.is_bot // false),
     base: .baseRefName,
     head: .headRefName,
     created_at: .createdAt,
@@ -460,45 +460,53 @@ add_probe() {  # add_probe <name> <status> <reason> <count> [extra-json]
         <<<"$probes")"
 }
 
-# Collect a jsonl probe result into the shared candidate pool; echo how many.
-harvest() {  # harvest <jsonl-file>
+# probe_result <name> <err> <jsonl-file> <extra-json> [empty-reason] — fold a
+# probe's output into the candidate pool and record its status. One rule for all
+# three probes, so what `ok`/`empty`/`unavailable` mean cannot drift between
+# them: results are `ok` even if a sibling query errored; no results plus an
+# error is `unavailable`; no results and no error means the probe genuinely
+# found nothing, and [empty-reason] says why there was nothing to find.
+probe_result() {
     local n=0
-    if [ -s "$1" ]; then
-        cat "$1" >> "$WORK/cands.jsonl"
-        n="$(wc -l < "$1" | tr -d ' ')"
+    if [ -s "$3" ]; then
+        cat "$3" >> "$WORK/cands.jsonl"
+        n="$(wc -l < "$3" | tr -d ' ')"
     fi
-    printf '%s' "$n"
+    if   [ "$n" -gt 0 ];  then add_probe "$1" ok "" "$n" "$4"
+    elif [ -n "$2" ];     then add_probe "$1" unavailable "$2" 0 "$4"
+    else                       add_probe "$1" empty "${5-}" 0 "$4"
+    fi
 }
 
 if [ "$SIMILAR" -eq 0 ]; then
     similar="$(jq -n --argjson p '{}' '{status: "skipped",
-        reason: "similar-PR discovery disabled (--no-similar or --similar 0)",
+        reason: "similar-PR discovery disabled (--similar 0)",
         count: 0, probes: $p, items: []}')"
 else
     note "probing for similar PRs (author / files / title keywords)"
 
     # Probe A: same author.
-    if [ -n "$AUTHOR" ]; then
+    : > "$WORK/author_cands.jsonl"; err=""
+    if [ -z "$AUTHOR" ]; then
+        err="PR author could not be resolved"
+    else
         rc=0; out="$(gh pr list --repo "$REPO" --author "$AUTHOR" --state all \
             --limit "$((SIMILAR * 3))" --json number,title,url,state 2>&1)" || rc=$?
         if [ "$rc" -ne 0 ]; then
-            add_probe same_author unavailable "gh pr list failed: $(brief "$out")" 0
+            err="gh pr list failed: $(brief "$out")"
         else
             jq -c --arg who "$AUTHOR" '.[]? | {number, title, url,
                 state: (.state | ascii_downcase), probe: "same_author",
                 detail: ("same author (" + $who + ")")}' <<<"$out" \
                 > "$WORK/author_cands.jsonl" 2>/dev/null || true
-            n_a="$(harvest "$WORK/author_cands.jsonl")"
-            if [ "$n_a" -gt 0 ]; then add_probe same_author ok "" "$n_a"
-            else add_probe same_author empty "" 0; fi
         fi
-    else
-        add_probe same_author unavailable "PR author could not be resolved" 0
     fi
+    probe_result same_author "$err" "$WORK/author_cands.jsonl" '{}'
 
-    # Probe B: same files. Walk recent commits touching the PR's heaviest paths,
-    # then ask which PR each commit arrived in — repo-convention independent, so
-    # it works whether the repo squashes, merges, or rebases.
+    # Probe B: same files. One query asks, for the PR's three heaviest paths at
+    # once, which PRs the recent commits touching them arrived in — asking the
+    # commit which PR it came from is repo-convention independent, so it works
+    # whether the repo squashes, merges, or rebases.
     hot_paths=()
     while IFS= read -r hp; do
         [ -n "$hp" ] && hot_paths+=("$hp")
@@ -506,40 +514,35 @@ else
         [.files[]? | {path, weight: (.additions + .deletions)}]
         | sort_by(-.weight) | .[0:3] | .[].path
     ' <<<"$meta")
+    paths_json="$(printf '%s\n' "${hot_paths[@]+"${hot_paths[@]}"}" \
+        | jq -R -s 'split("\n") | map(select(. != ""))')"
+    paths_extra="$(jq -n --argjson p "$paths_json" '{paths: $p}')"
+    : > "$WORK/file_cands.jsonl"; err=""; empty_why=""
     if [ "${#hot_paths[@]}" -eq 0 ]; then
-        add_probe same_files empty "PR touches no files" 0 \
-            "$(jq -n '{paths: []}')"
+        empty_why="PR touches no files"
     else
-        : > "$WORK/shas"
-        file_err=""
-        for p in "${hot_paths[@]}"; do
-            enc="$(jq -rn --arg p "$p" '$p | @uri')"
-            rc=0; out="$(gh api "repos/$REPO/commits?path=$enc&per_page=3" --jq '.[].sha' 2>&1)" || rc=$?
-            if [ "$rc" -ne 0 ]; then file_err="$(brief "$out")"; continue; fi
-            printf '%s\n' "$out" | while IFS= read -r sha; do
-                [ -n "$sha" ] && printf '%s\t%s\n' "$sha" "$p"
-            done >> "$WORK/shas"
-        done
-        : > "$WORK/file_cands.jsonl"
-        sort -u -k1,1 "$WORK/shas" 2>/dev/null | while IFS=$'\t' read -r sha p; do
-            [ -n "$sha" ] || continue
-            rc=0; out="$(gh api "repos/$REPO/commits/$sha/pulls" 2>&1)" || rc=$?
-            [ "$rc" -eq 0 ] || continue
-            jq -c --arg p "$p" '.[]? | {number, title, url: .html_url,
-                state: (.state | ascii_downcase), probe: "same_files",
-                detail: ("touches " + $p)}' <<<"$out" >> "$WORK/file_cands.jsonl" 2>/dev/null || true
-        done
-        n_f="$(harvest "$WORK/file_cands.jsonl")"
-        paths_json="$(printf '%s\n' "${hot_paths[@]}" | jq -R -s 'split("\n") | map(select(. != ""))')"
-        if [ -n "$file_err" ] && [ "$n_f" -eq 0 ]; then
-            add_probe same_files unavailable "commit history unreadable: $file_err" 0 \
-                "$(jq -n --argjson p "$paths_json" '{paths: $p}')"
-        elif [ "$n_f" -gt 0 ]; then
-            add_probe same_files ok "" "$n_f" "$(jq -n --argjson p "$paths_json" '{paths: $p}')"
+        # shellcheck disable=SC2016  # GraphQL variables, not shell ones
+        FILE_Q='query($owner:String!,$name:String!,$p0:String!,$p1:String!,$p2:String!){repository(owner:$owner,name:$name){defaultBranchRef{target{... on Commit{f0:history(first:3,path:$p0){nodes{associatedPullRequests(first:2){nodes{number title url state}}}} f1:history(first:3,path:$p1){nodes{associatedPullRequests(first:2){nodes{number title url state}}}} f2:history(first:3,path:$p2){nodes{associatedPullRequests(first:2){nodes{number title url state}}}}}}}}}'
+        # The query declares three path slots; with fewer paths the spares repeat
+        # one, and the duplicate candidates collapse in the dedupe below.
+        vars="$(jq -n --argjson p "$paths_json" \
+            '{p0: $p[0], p1: ($p[1] // $p[0]), p2: ($p[2] // $p[0])}')"
+        rc=0; out="$(gql "$FILE_Q" "$vars" 2>&1)" || rc=$?
+        if [ "$rc" -ne 0 ]; then
+            err="commit-history query failed: $(brief "$out")"
         else
-            add_probe same_files empty "" 0 "$(jq -n --argjson p "$paths_json" '{paths: $p}')"
+            jq -c --argjson paths "$paths_json" '
+                .data.repository.defaultBranchRef.target | to_entries
+                | map(select(.key | startswith("f")))
+                | map(.key as $k | (($k | ltrimstr("f") | tonumber) as $i |
+                    (.value.nodes[]?.associatedPullRequests.nodes[]?
+                     | {number, title, url, state: (.state | ascii_downcase),
+                        probe: "same_files", detail: ("touches " + $paths[$i])})))
+                | flatten | unique_by([.number, .detail]) | .[]
+            ' <<<"$out" > "$WORK/file_cands.jsonl" 2>/dev/null || true
         fi
     fi
+    probe_result same_files "$err" "$WORK/file_cands.jsonl" "$paths_extra" "$empty_why"
 
     # Probe C: title keywords. One query per keyword — GitHub search ANDs terms
     # hard enough that a three-word query usually returns nothing, and querying
@@ -556,31 +559,19 @@ else
             BEGIN { n = split(stop, a, " "); for (i = 1; i <= n; i++) s[a[i]] = 1 }
             length($0) >= 4 && !($0 in s) && !seen[$0]++ && ++k <= 3')
     kws_json="$(printf '%s\n' "${kws[@]+"${kws[@]}"}" | jq -R -s 'split("\n") | map(select(. != ""))')"
-    if [ "${#kws[@]}" -eq 0 ]; then
-        add_probe title_keywords empty "title yielded no distinctive keywords" 0 \
-            "$(jq -n --argjson k "$kws_json" '{keywords: $k}')"
-    else
-        : > "$WORK/kw_cands.jsonl"
-        kw_err=""
-        for kw in "${kws[@]}"; do
-            rc=0; out="$(gh search prs --repo "$REPO" --match title "$kw" \
-                --limit "$((SIMILAR * 2))" --json number,title,url,state 2>&1)" || rc=$?
-            if [ "$rc" -ne 0 ]; then kw_err="$(brief "$out")"; continue; fi
-            jq -c --arg kw "$kw" '.[]? | {number, title, url,
-                state: (.state | ascii_downcase), probe: "title_keywords",
-                detail: ("title keyword \"" + $kw + "\"")}' <<<"$out" \
-                >> "$WORK/kw_cands.jsonl" 2>/dev/null || true
-        done
-        n_k="$(harvest "$WORK/kw_cands.jsonl")"
-        if [ -n "$kw_err" ] && [ "$n_k" -eq 0 ]; then
-            add_probe title_keywords unavailable "gh search prs failed: $kw_err" 0 \
-                "$(jq -n --argjson k "$kws_json" '{keywords: $k}')"
-        elif [ "$n_k" -gt 0 ]; then
-            add_probe title_keywords ok "" "$n_k" "$(jq -n --argjson k "$kws_json" '{keywords: $k}')"
-        else
-            add_probe title_keywords empty "" 0 "$(jq -n --argjson k "$kws_json" '{keywords: $k}')"
-        fi
-    fi
+    kws_extra="$(jq -n --argjson k "$kws_json" '{keywords: $k}')"
+    : > "$WORK/kw_cands.jsonl"; err=""; empty_why=""
+    [ "${#kws[@]}" -gt 0 ] || empty_why="title yielded no distinctive keywords"
+    for kw in "${kws[@]+"${kws[@]}"}"; do
+        rc=0; out="$(gh search prs --repo "$REPO" --match title "$kw" \
+            --limit "$((SIMILAR * 2))" --json number,title,url,state 2>&1)" || rc=$?
+        if [ "$rc" -ne 0 ]; then err="gh search prs failed: $(brief "$out")"; continue; fi
+        jq -c --arg kw "$kw" '.[]? | {number, title, url,
+            state: (.state | ascii_downcase), probe: "title_keywords",
+            detail: ("title keyword \"" + $kw + "\"")}' <<<"$out" \
+            >> "$WORK/kw_cands.jsonl" 2>/dev/null || true
+    done
+    probe_result title_keywords "$err" "$WORK/kw_cands.jsonl" "$kws_extra" "$empty_why"
 
     similar_items="$(jq -s --argjson self "$N" --argjson lim "$SIMILAR" '
         map(select(.number != $self))
@@ -623,7 +614,6 @@ jq -n \
     --argjson similar_prs "$similar" \
     '{schema: "pr-context/v1",
       generated_at: $generated_at,
-      read_only: true,
       pr: $pr,
       claims: $claims,
       reviews: $reviews,
