@@ -121,7 +121,63 @@ Extract ticket ID from PR description or branch name. If found, fetch context vi
 - Read the PR description to understand scope and intent
 - Note the stated scope — you'll check for both scope creep AND understated scope later
 
-### R.2 Launch parallel analysis agents
+### R.2 Generation — produce the candidate set
+
+*Everything that produces candidates lives in this phase. It is not finished
+when the agents come back; it is finished when every review dimension has a
+named result.*
+
+Ordering: **G1** and **G2** run now, because what they return is input to the
+lenses. **G3** is the lenses themselves (R.3 and R.4). **G4** is the exit gate —
+fill it once the lenses have returned, and before synthesis in R.5.
+
+**G1 — Gather the raw material.** Run the context script rather than re-deriving
+by hand what it already collects:
+
+```bash
+bash scripts/pr-context.sh --pr owner/repo#$PR_NUM > /tmp/pr-ctx-$PR_NUM.json
+```
+
+It emits one JSON document (`schema: pr-context/v1`) in which every section
+carries a status — `ok` / `empty` / `unavailable` / `skipped` — so "we looked and
+there is nothing here" is never confusable with "we did not look." It is
+read-only and forms no findings; the judgment stays here. Add `--similar 0` to
+skip the slowest section when you need it fast.
+
+**G2 — Mine what came back.** Each section is a different kind of input, and
+none of them is a finding yet:
+
+| Section | What to do with it |
+|---|---|
+| `.claims.items` | The PR's own claims. Each is a thing to CHECK, not a thing to believe — carry them into the correctness sweep. |
+| `.linked_tickets[].acceptance_criteria` | What the change was meant to satisfy. Review against this, not only against the diff: a PR that is internally clean and misses an acceptance criterion is a finding. |
+| `.similar_prs.items` | Past PRs that rhyme with this one. Read the ones with the most probe hits — how they were structured, what reviewers caught, what broke afterward. |
+| `.bot_findings` | Harvest, don't re-derive. What a bot already flagged is already raised; confirm or refute it with evidence rather than restating it in your own words and splitting the thread. |
+| `.threads` | Resolved vs unresolved state. A thread that got buried is not a thread that got addressed. |
+
+If a section comes back `unavailable`, say so in the review. Proceeding as
+though it were `empty` is how a gap in your coverage becomes a claim about the PR.
+
+**G3 — Run the lenses.** The parallel analysis agents (R.3) and the convention
+audit (R.4). Feed them what G2 surfaced — the ticket acceptance criteria and the
+claims inventory in particular. Return here when they finish.
+
+**G4 — Sweep the dimensions (the exit gate).** Work through
+`skills/pr-review/DIMENSIONS.md`, the eight-dimension completeness checklist next
+to this file, and **name a result for every dimension, including an explicit
+"nothing here."** Silence is not coverage: a dimension with no row is
+indistinguishable from one you never swept, and the reader cannot tell a
+deliberate "this is fine" from an accidental omission.
+
+Four results are permitted — `FINDING`, `CLEAR`, `N/A`, `NOT ASSESSED` — and each
+carries its own evidence requirement. `NOT ASSESSED` is an honest, publishable
+answer and is strongly preferred over a `CLEAR` you cannot defend. Fill the table
+*before* ranking anything; written afterward it invites back-filling `CLEAR` into
+rows you never swept. The per-dimension probes, the exact requirements, and the
+table shape live in that file — follow it rather than re-deriving it here, and
+emit the full table in the review output.
+
+### R.3 Launch parallel analysis agents
 
 Launch FOUR agents in parallel (single message, multiple Agent tool calls):
 
@@ -214,7 +270,40 @@ Explore agent (medium):
 
 **Wait for all agents to complete.**
 
-### R.3 Convention audit
+**Then earn every claim they made about something outside this repo.** An agent
+that reports what an ORM tag, a query planner, a driver flag, or a wire format
+"does" is reporting its memory, and a confident wrong claim about a third party
+is the fastest way to lose a review's credibility:
+
+<!-- @include-begin _shared/external-behavior-verification.md -->
+**Never assert third-party behavior from memory.** ORM tag semantics, which plan
+the query planner will pick, which driver parameter actually takes effect, how a
+proto field lands on the wire, what a language feature does at an edge — these
+are the claims that feel most certain and are wrong most often, because what you
+remember is the common case and the finding always lives in the uncommon one.
+
+Three things before such a claim leaves your hands:
+
+1. **Name the layer that actually controls the behavior.** The annotation, the
+   driver, the connection string, the server-side default, and the dialect each
+   get a vote, and only one of them decides. *"There is a `json:` tag on the
+   field"* is not a mechanism; *"the encoder at `marshal.go:212` reads that tag
+   and drops the zero value"* is. A type name, an annotation, or a nearby symbol
+   is a place to look, not a cause.
+2. **Read that layer's official documentation** — WebFetch or WebSearch the
+   vendor's own page, not a blog post recounting it — and cite the URL plus the
+   section. If you could not reach it, say the claim is inferred, and from what.
+3. **Run it when running it is cheap.** A five-line scratch program, one targeted
+   test, an `EXPLAIN ANALYZE`, a throwaway container: each turns a remembered
+   claim into a quoted output. Cite the output, not your memory of it.
+
+This applies symmetrically. The same discipline that stops you shipping a wrong
+finding is what lets you *confirm* the author's claim — *"the driver does coerce
+this, see the vendor doc §4.2"* is worth as much as a defect, and it is the half
+reviewers skip because being right feels like finding nothing.
+<!-- @include-end _shared/external-behavior-verification.md -->
+
+### R.4 Convention audit
 
 If a language-specific standards skill exists (e.g., `/go-standards`), invoke it on all changed files.
 
@@ -230,15 +319,15 @@ Then run targeted grep audits on changed files:
 | Untested code in main | Functions with non-trivial logic in `package main` with no `_test.go` |
 | Build hygiene | Dependency files tidy? Direct/indirect markers correct? |
 
-### R.4 Synthesize findings
+### R.5 Synthesize findings
 
 This is not just a merge — it's a structured synthesis that handles disagreement.
 
-**4.1 Group by location**
+**5.1 Group by location**
 
 Group all findings from all agents by file:line. When multiple agents flag the same location, note it.
 
-**4.2 Build the disagreement matrix**
+**5.2 Build the disagreement matrix**
 
 Where agents disagree on severity or whether something is an issue at all:
 
@@ -249,7 +338,7 @@ Where agents disagree on severity or whether something is an issue at all:
 | handler.go:95 | — | issue (event ordering gap) | divergence from original | — | Flag: needs human judgment |
 ```
 
-**4.3 Apply consequence-aware severity**
+**5.3 Apply consequence-aware severity**
 
 For each finding, the final severity considers:
 
@@ -257,7 +346,7 @@ For each finding, the final severity considers:
 - **Consequence escalation** — same code pattern in two services can warrant different severity if the blast radius differs (e.g., missed backfill vs active data deletion)
 - **Self-healing** — a bug that self-heals on the next cron run is less severe than one that persists until manual intervention, but for customer-facing systems, "up to 1 hour of broken notifications" may still be unacceptable
 
-**4.4 Determine review body content**
+**5.4 Determine review body content**
 
 If `STRUCTURAL_CONTEXT` includes a non-trivial drift observation OR any `high_blast_radius` symbol:
 - Include a `## Structural Impact` section in the review body:
@@ -270,24 +359,89 @@ If `STRUCTURAL_CONTEXT` includes a non-trivial drift observation OR any `high_bl
 
 Otherwise: body is verdict + blocking issues only. Do not add structural boilerplate to routine PRs.
 
-**4.5 Classify each finding**
+**5.5 Classify each finding**
 
 | Severity | Meaning |
 |---|---|
 | BLOCK | Must fix before merge. Data loss, security, or correctness bug. |
 | FIX | Should fix. Convention violation, missing test, inconsistency. |
-| NIT | Optional. Style, minor improvement, documentation. |
+| NIT | Optional. Minor improvement or a documentation gap. |
 | FLAG | Needs human judgment. Agents disagree, or severity depends on product context. |
 
-### R.5 Compile review
+### R.6 Significance — triage the candidate set
 
-For each finding:
+Synthesis produced *candidates*. This phase decides which of them have earned a
+human's attention, and nothing reaches R.7 without passing through it.
+
+Invoke the **`finding-triage`** skill (`skills/finding-triage/SKILL.md`) on the
+synthesized list. It applies two bars — TRUE (the code really behaves that way,
+and you can name the `file:line` where the mechanism lives) and MATTERS (acting
+on it changes *this* change, for a consumer that exists) — and returns exactly
+one disposition per candidate: `confirmed`, `dropped`, `already-raised`,
+`already-addressed`, or `revised`. Run it; do not re-derive its judgment here.
+
+**Record its dispositions in the review output, dropped rows included.** Every
+candidate that went in gets a row coming out, and a dropped one carries the
+reason it was dropped and which bar it failed. This is not bookkeeping: a triage
+that quietly returns a shorter list is indistinguishable from a lazy pass that
+read three items and stopped, so the dropped rows *are* the evidence the gate
+ran. State both counts — candidates in, dispositions out.
+
+Only `confirmed` and `revised` findings continue to R.7. The rest are reported as
+triaged, not as findings, and the `already-raised` rows in particular should
+credit whoever raised them rather than being restated in your own words.
+
+### R.7 Compile review
+
+For each finding that cleared R.6:
 
 - **File:line** — specific location
-- **What's wrong** — direct, imperative statement
+- **What's wrong** — the mechanism, stated plainly
 - **Why** — one line explaining the risk or convention
-- **Severity** — BLOCK / FIX / NIT / FLAG
+- **Severity** — the internal rank from 5.5 (BLOCK / FIX / NIT / FLAG)
 - **New vs inherited** — did this PR introduce it, or is it pre-existing?
+
+BLOCK / FIX / NIT / FLAG is how *you* rank; it is not what the author reads. The
+posted comment carries the reader-facing tag below — `BLOCK` → `[Blocking]`,
+`FIX` and `NIT` → `[Non-blocking]`, `FLAG` → `[Question]`, and anything purely
+contextual → `[Observation]` — so the merge impact travels with the comment
+instead of staying in your head.
+
+<!-- @include-begin _shared/comment-craft.md -->
+**Every finding carries a severity tag whose merge impact is explicit**, so the
+author never has to guess whether a comment is a gate or a thought:
+
+| Tag | Means | Merge impact |
+|---|---|---|
+| `[Blocking]` | Correctness, security, or data integrity. | Blocks merge. |
+| `[Non-blocking]` | A real improvement, the author's call. | Does not block. |
+| `[Question]` | A design clarification — you may be the one missing context. | Does not block. |
+| `[Observation]` | Informational, for the next reader. | No action implied. |
+
+**Lead with the TL;DR in plain language**, before any detail: what you found,
+whether it blocks, and what you would do. Burying the verdict under three
+paragraphs of trace makes the author read the whole comment to learn it was a
+nit.
+
+**Frame findings as questions rather than commands** — *"It looks like X —
+would it be worth considering Y?"* rather than *"You should do X."* The
+imperative is only honest when you are certain, and you are certain less often
+than you feel; the question costs the same characters and leaves the author room
+to answer *"no, because…"* without it reading as defiance.
+
+**Every finding cites evidence**: a file:line, another PR, a ticket, a doc URL,
+or the output of an experiment you actually ran. A finding with no citation is
+an opinion wearing a severity tag.
+
+**Never flag style, formatting, or naming.** The formatter and the linter own
+those. A review that spends its first three comments there teaches the author to
+skim the rest of it.
+
+**Match the tone to the author.** Someone senior in this code wants the
+mechanism and nothing around it; someone newer needs the *why* and a pointer to
+the pattern the codebase already uses. The finding is identical either way —
+only the scaffolding changes.
+<!-- @include-end _shared/comment-craft.md -->
 
 If `STRUCTURAL_CONTEXT` is non-empty, display the emergent diagram one final time alongside the compiled review for reference.
 
@@ -301,14 +455,14 @@ D1. [Location] — Convention agent says [X]. Behavioral agent says [Y].
     Resolution depends on: [what human context is needed].
 ```
 
-### R.6 Render verdict
+### R.8 Render verdict
 
 Conclude with exactly one of:
 - **APPROVE** — no blocking issues, nits only
 - **REQUEST CHANGES** — blocking or flagged issues exist but PR is salvageable
 - **CLOSE PR** — fundamental design problems require starting over
 
-### R.7 Present to user
+### R.9 Present to user
 
 Show the compiled review. Ask:
 - "Post this as a GitHub review? (approve/request-changes/comment)"
@@ -362,6 +516,8 @@ For each comment flagging a behavioral issue (not just style):
 ```
 
 This prevents blindly implementing changes based on incorrect assumptions. Reviewers (human and AI) sometimes misread code flow or miss existing guards.
+
+Apply the external-behavior discipline from R.3 here too, in the direction it is most often skipped: a reviewer's claim about what an ORM tag, a driver, or a wire format does needs the same mechanism-at-a-named-line standard before you rewrite code against it.
 
 ### S.3 Organize and plan
 
@@ -545,7 +701,7 @@ gh api repos/{owner}/{repo}/pulls/{pr_num}/comments \
 
 ### S.9 Resolve threads + re-request review
 
-After posting (S.8), resolve any thread whose reply just confirmed a fix, and re-request review if the PR needs another look. This is pure `gh api` (REST for re-request, GraphQL for thread resolution — GitHub's REST API has no resolve-thread endpoint) — no GitHub App/MCP connector needed. Full detail (ID-mapping query, the resolve-gate rule, the mutation, the re-request command) lives in `pr-review-kit` §9.6 — follow it as written rather than re-deriving; the short version: only resolve threads you've both replied to AND confirmed the code addresses, and only re-request review with explicit user authorization (same posting gate as S.8).
+After posting (S.8), resolve any thread whose reply just confirmed a fix, and re-request review if the PR needs another look. This is pure `gh api` (REST for re-request, GraphQL for thread resolution — GitHub's REST API has no resolve-thread endpoint) — no GitHub App/MCP connector needed. Full detail (ID-mapping query, the resolve-gate rule, the mutation, the re-request command) lives in `skills/pr-review-kit/ENGAGE.md` §9.6 — follow it as written rather than re-deriving; the short version: only resolve threads you've both replied to AND confirmed the code addresses, and only re-request review with explicit user authorization (same posting gate as S.8).
 
 ### S.10 Ticket update (optional)
 

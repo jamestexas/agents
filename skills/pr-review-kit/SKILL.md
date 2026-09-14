@@ -10,7 +10,7 @@ argument-hint: "[PR number, owner/repo#N, or nothing to ask]"
 ---
 
 
-A complete, self-contained playbook for reviewing a pull request. Hand this file to a fresh reader — human or Claude session — along with the target PR, and they have everything needed to do a rigorous review without prior context.
+A complete, self-contained playbook for reviewing a pull request. Hand this directory to a fresh reader — human or Claude session — along with the target PR, and they have everything needed to do a rigorous review without prior context. This file is the spine: the phases and the four verification disciplines, which is all a fresh review needs. Two sidecars carry what only some reviews reach for — [ENGAGE.md](ENGAGE.md) for replying to existing reviewer comments, and [APPENDICES.md](APPENDICES.md) for situational reference — so a routine review does not pay to load them.
 
 ---
 
@@ -139,6 +139,36 @@ When you make a claim about an RFC, spec, library behavior, or vendor API:
 - **Or** label the inference: *"Inferred from library documentation, not verified against the RFC text."*
 
 **Why this rule exists**: a prior session had an agent claim *"RFC 7644 doesn't specify operator precedence"* — based entirely on reading three library docstrings that called the precedence rule "convention." The RFC actually does specify it (with a MUST clause in prose below the ABNF). The agent had no access to read the RFC and presented an inference as fact. The next reviewer would have inherited that wrong claim.
+
+**The generative half of Rule 1.** Labeling tells you what to do with a claim you already hold. This tells you how to earn one in the first place:
+
+<!-- @include-begin _shared/external-behavior-verification.md -->
+**Never assert third-party behavior from memory.** ORM tag semantics, which plan
+the query planner will pick, which driver parameter actually takes effect, how a
+proto field lands on the wire, what a language feature does at an edge — these
+are the claims that feel most certain and are wrong most often, because what you
+remember is the common case and the finding always lives in the uncommon one.
+
+Three things before such a claim leaves your hands:
+
+1. **Name the layer that actually controls the behavior.** The annotation, the
+   driver, the connection string, the server-side default, and the dialect each
+   get a vote, and only one of them decides. *"There is a `json:` tag on the
+   field"* is not a mechanism; *"the encoder at `marshal.go:212` reads that tag
+   and drops the zero value"* is. A type name, an annotation, or a nearby symbol
+   is a place to look, not a cause.
+2. **Read that layer's official documentation** — WebFetch or WebSearch the
+   vendor's own page, not a blog post recounting it — and cite the URL plus the
+   section. If you could not reach it, say the claim is inferred, and from what.
+3. **Run it when running it is cheap.** A five-line scratch program, one targeted
+   test, an `EXPLAIN ANALYZE`, a throwaway container: each turns a remembered
+   claim into a quoted output. Cite the output, not your memory of it.
+
+This applies symmetrically. The same discipline that stops you shipping a wrong
+finding is what lets you *confirm* the author's claim — *"the driver does coerce
+this, see the vendor doc §4.2"* is worth as much as a defect, and it is the half
+reviewers skip because being right feels like finding nothing.
+<!-- @include-end _shared/external-behavior-verification.md -->
 
 ### Rule 2 — Walk commits forward; review-thread state ≠ code state
 
@@ -312,347 +342,23 @@ gh api repos/$OWNER/$REPO/pulls/$N/reviews \
 
 ## Phase 9 — Engage mode: responding to existing reviewer comments
 
-When the PR has existing inline reviewer comments — yours, or on a PR you're collaborating on — drafting replies is a distinct workflow from fresh review. This phase covers it end-to-end. Same default-do-not-post posture as Phase 8.
-
-### 9.0 — Generate the reply-tracking file
-
-Before categorizing or drafting anything, generate a per-PR reply-tracking file. This is the durable artifact that answers "have I both *fixed* and *replied* to every comment?" at a glance.
-
-The key insight: `Code-addressed` and `Reply-posted` are two independent states. A comment can be fully fixed in code yet have no reply posted — leaving the reviewer's thread visibly open on a merged or approved PR. The tracking file makes this gap impossible to miss.
-
-**Location**: same `<notes-dir>` as Phase 7 notes, named `PR-N-<short-title>-replies.md`. Keep it outside the repo being reviewed.
-
-**Generate raw comment data** (root comments only — not replies — sorted by file):
-
-```bash
-OWNER=<org>; REPO=<repo>; N=<PR number>
-SHA=$(git rev-parse HEAD)   # must be the pushed HEAD; used for permalinks
-AUTHOR=$(gh pr view $N --repo $OWNER/$REPO --json author --jq '.author.login')
-
-# All root-level comments with html_url + created_at, sorted by file then line.
-# Flags already_replied=true if the PR author has a reply under that thread.
-gh api "repos/$OWNER/$REPO/pulls/$N/comments?per_page=100" --paginate \
-  --jq --arg author "$AUTHOR" '
-    (map(select(.in_reply_to_id == null)) | sort_by(.path, .line)) as $roots |
-    ([.[] | select(.in_reply_to_id != null and .user.login == $author) | .in_reply_to_id] | unique) as $replied |
-    $roots[] | {
-      id,
-      html_url,
-      path,
-      line: (.line // .original_line),
-      reviewer: .user.login,
-      created_at,
-      already_replied: ([.id] | inside($replied)),
-      body
-    }
-  '
-```
-
-**Tracking file template** — one block per root comment, ordered by file:
-
-```markdown
-# PR #N — [title] — Reply Tracking
-
-Code permalink base: `<sha>` (pushed HEAD).
-Ordered by file. Code-addressed = fix verified in code. Reply-posted = reply visible in GitHub thread.
+When the PR already carries inline reviewer comments — yours, or on a PR you're
+collaborating on — drafting replies is a distinct workflow from fresh review, and
+it lives in full in **[ENGAGE.md](ENGAGE.md)**: §9.0 the reply-tracking file (the
+Code-addressed / Reply-posted two-state matrix), §9.1 comment triage, §9.2 the
+discovery-agent prompt, §9.3 response templates, §9.4 the permalink hard-gate,
+§9.5 present + authorize + post, §9.6 resolve threads + re-request review, §9.7
+error handling. Same default-do-not-post posture as Phase 8.
 
 ---
 
-## N. `<path>:<line>` — [first ~8 words of reviewer's comment]
-
-- **Comment link:** https://github.com/OWNER/REPO/pull/N#discussion_rID
-- **Code-addressed:** [ ]
-- **Reply-posted:** [ ]
-- **Timestamp:** [created_at ISO 8601]
-- **Priority:** [P1/P2/P3 — assigned by human]
-
----
-
-**notes:** [why/how handled — fill in during §9.2]
-
-**thread:** [reviewer's original comment, verbatim]
-
-**reply:** [copy-paste-ready markdown with code permalinks pinned to `<sha>`]
-```
-
-**Comment link is always a full `html_url`** — never a bare comment ID.
-
-**The two-state matrix:**
-
-| Code-addressed | Reply-posted | Meaning |
-|---|---|---|
-| `[ ]` | `[ ]` | Not handled — needs code fix and reply |
-| `[x]` | `[ ]` | Fix is in the code; reply still needed — the most common gap on approved PRs |
-| `[ ]` | `[x]` | Reply posted ("will fix") but code change not yet verified |
-| `[x]` | `[x]` | Done |
-
-**Agent rule**: set `Code-addressed: [x]` only after reading the current code at the cited file:line and confirming the concern is resolved (Rule 4 — commit timestamps are not evidence; the commit may have touched a different part of the file). Set `Reply-posted: [x]` only after the `gh api POST` in §9.5 returns HTTP 201.
-
-### 9.1 Categorize every comment
-
-Bucket each existing inline comment into one of three categories before drafting anything:
-
-- **Unaddressed** — No reply exists from the PR author. Check: comment has no child where `in_reply_to_id` equals this comment's `id`, or no child from the PR author.
-- **Already replied** — The PR author has posted a reply (a comment with `in_reply_to_id` matching this comment's `id`).
-- **Addressed by code** — The file referenced by the comment was modified after the comment was posted. Check with:
-  ```bash
-  git log --after="<comment-created-at>" --oneline -- <comment-path>
-  ```
-  If commits exist after the comment date touching that file, mark as "likely addressed by code" — but **verify by reading the current code at the cited line** (Rule 4 — don't trust the timestamp alone; the commit might have touched a different part of the file). This is the same Rule 2 (walk commits forward) applied to comment triage.
-
-Display a categorized summary to the user before drafting:
-
-```
-PR #789: "feat: add build completion webhook handler"
-5 files changed, +340 -12
-Inline comments: 8 total
-  - 3 from @alice (all replied)
-  - 5 from @bob (3 unaddressed, 2 addressed-by-code)
-Mode: Engage — drafting 3 replies for @bob's unaddressed comments.
-Proceed?
-```
-
-Wait for user confirmation before drafting. After confirmation, update the tracking file (§9.0): set `Code-addressed: [x]` for each comment verified as addressed by code; leave `Reply-posted: [ ]` until §9.5.
-
-### 9.2 Discovery agent: per-comment analysis
-
-For each unaddressed comment, the isolated discovery agent (Phase 5 — fresh-eyes / Explore) should be instructed to:
-
-- Read the cited file:line in full context (not just the diff hunk).
-- Trace the reviewer's concern. Is the claim accurate against the current code?
-- Note evidence with specific file paths and line numbers.
-- If the reviewer is wrong, explain why with code references.
-- If the reviewer is right, identify the fix location.
-
-The agent returns a structured per-comment block:
-
-```
-## Per-Comment Analysis
-
-### Thread #1 (comment 1234567, @bob, handlers/build_webhook.go:42)
-Reviewer: "This doesn't validate the webhook signature before parsing."
-Evidence: handlers/build_webhook.go:38-48 — signature check at L52, after parse at L40.
-Assessment: Reviewer is correct; order is parse-then-verify, should be verify-then-parse.
-Suggested response direction: acknowledge, fix, link to the corrected lines.
-```
-
-### 9.3 Response templates
-
-Every drafted response **must include a GitHub permalink to specific lines**. The Phase 8 posting commands take a body file (`/tmp/reply.md`); these templates produce that body.
-
-Collect ingredients first:
-
-```bash
-SHA=$(git rev-parse HEAD)
-BASE=$(gh pr view $N --repo $OWNER/$REPO --json baseRefName --jq '.baseRefName')
-
-# Show changed line ranges in the relevant file
-git diff "origin/$BASE"...HEAD --unified=0 -- $COMMENT_PATH | grep '^@@'
-# Output like: @@ -38,1 +38,15 @@ — means lines 38-52 in the new file
-```
-
-Permalink format: `https://github.com/$OWNER/$REPO/blob/$SHA/$PATH#L<start>-L<end>`
-
-**Templates** (pick one per comment):
-
-```
-# Simple fix
-Fixed — see [<path>#L<line>](<permalink>)
-
-# Fix with explanation
-Fixed — <permalink>
-
-<explanation>
-
-# Already handled elsewhere
-This is handled at <permalink> — <explanation>
-
-# Valid concern
-Good catch — <acknowledge>. Fixed at <permalink>.
-
-# Intentional non-change
-Keeping as-is — <reasoning>.
-
-Current code: <permalink>
-
-# Design discussion
-<explanation>
-
-See: <permalink>
-
-Trade-offs: <list>
-
-# Pre-existing issue
-This is pre-existing — see <permalink>.
-<why not in this PR>
-```
-
-### 9.4 Permalink hard-gate
-
-**HARD GATE**: Before presenting any drafted response to the user, scan every response body for `github.com/.../blob/`.
-
-If ANY response is missing a permalink: **STOP**. Go back to 9.3 and find the lines. Do not present responses without permalinks. Do not substitute bare commit hashes as a workaround. Every response must have at least one clickable permalink so the reviewer can see exactly which code is being referenced.
-
-### 9.5 Present + authorize + post
-
-Display drafted responses grouped by reviewer, then by file:
-
-```
-## Responses to @bob
-
-### handlers/build_webhook.go
-
-Thread #1 (comment 1234567)
-> "This doesn't validate the webhook signature before parsing..."
-
-Response:
-Good catch — moved signature verification before body parse. See [handlers/build_webhook.go#L38-L45](<permalink>).
-```
-
-Offer action options:
-
-1. **Post all** — post every drafted reply
-2. **Select** — choose by number which to post
-3. **Edit** — modify a specific response before posting (then re-validate the hard-gate)
-4. **Skip** — don't post anything
-
-Wait for user choice. **Do not post without explicit authorization.**
-
-Before posting, ensure local SHA is on the remote (permalinks must resolve):
-
-```bash
-LOCAL_SHA=$(git rev-parse HEAD)
-REMOTE_SHA=$(git rev-parse origin/$(git branch --show-current))
-[ "$LOCAL_SHA" != "$REMOTE_SHA" ] && git push
-```
-
-Then use the inline-reply command from Phase 8:
-
-```bash
-gh api repos/$OWNER/$REPO/pulls/$N/comments -X POST \
-  -f body="$(cat /tmp/reply.md)" -F in_reply_to=<comment-id>
-```
-
-Repeat per response. After each HTTP 201, mark `Reply-posted: [x]` in the tracking file for that comment. Report what was posted:
-
-```
-Posted 3 responses to PR #789:
-  - 2 replies to @bob (1 fix, 1 explanation)
-  - 1 reply to @alice (already-handled)
-Tracking file updated: 3 Reply-posted checkboxes set.
-```
-
-### 9.6 Resolve threads + re-request review
-
-Everything in this section is plain `gh api` — REST for re-requesting review, GraphQL for thread resolution (GitHub's REST API has no resolve-thread endpoint). No GitHub App / MCP connector required; `gh auth status` is the only prerequisite, same as every other command in this skill.
-
-**Map comment IDs to thread IDs.** The numeric comment IDs used for posting (9.5) and GitHub's thread IDs (needed to resolve) are different ID spaces. Fetch the mapping once per PR:
-
-```bash
-gh api graphql -f query='
-  query($owner:String!, $repo:String!, $pr:Int!) {
-    repository(owner:$owner, name:$repo) {
-      pullRequest(number:$pr) {
-        reviewThreads(first: 100) {
-          nodes { id isResolved comments(first: 1) { nodes { databaseId } } }
-        }
-      }
-    }
-  }' -f owner=$OWNER -f repo=$REPO -F pr=$N \
-  --jq '.data.repository.pullRequest.reviewThreads.nodes[] | {threadId: .id, firstCommentId: .comments.nodes[0].databaseId, isResolved}'
-```
-
-`firstCommentId` matches the numeric `id` used in 9.0's reply-tracking file and the `in_reply_to` value from 9.5 — join on that to find each thread's `threadId` (`PRRT_...`).
-
-**Resolve gate:** only resolve a thread whose tracking-file row has **both** `Code-addressed: [x]` and `Reply-posted: [x]` checked (9.0/Rule 4's existing discipline — don't resolve on the strength of a posted reply alone; the code must actually be confirmed fixed). Never resolve a thread you haven't replied to — a silently-resolved unreplied thread reads as the reviewer's concern being dismissed.
-
-```bash
-gh api graphql -f query='
-  mutation($threadId:ID!) {
-    resolveReviewThread(input:{threadId:$threadId}) { thread { isResolved } }
-  }' -f threadId=<PRRT_...>
-```
-
-Resolving an already-resolved thread is a no-op — safe to call without checking `isResolved` first if you've already confirmed the gate above.
-
-**Re-request review.** After posting responses (and resolving what qualifies), if the PR needs another look from a reviewer who already reviewed (their prior review is now stale against the fixes):
-
-```bash
-gh api repos/$OWNER/$REPO/pulls/$N/requested_reviewers -X POST -f 'reviewers[]=<username>'
-```
-
-This is the same effect as GitHub's "re-request review" button — it works even if that reviewer already submitted a review (their old review stays visible but the PR shows as awaiting them again). Only do this on explicit authorization, same gate as 9.5 posting — ask "Re-request review from @X?" rather than doing it automatically once responses are posted.
-
-Report what happened, in the same style as 9.5:
-
-```
-Resolved 2 threads (both had Code-addressed + Reply-posted). Left 1 unresolved — @alice's design question needs her reply first.
-Re-requested review from @bob.
-```
-
-### 9.7 Engage-mode error handling
-
-- **PR not found**: `gh pr list --limit 10`, ask user to specify.
-- **No inline comments**: not an engage-mode situation — switch back to fresh-review (Phases 1-7).
-- **`gh api` POST fails**: report the error and the response body that failed to post; offer retry or save for manual posting.
-- **Permalink line range unclear** (cited code no longer exists at HEAD): use `git log --follow` to trace the file, and note in the response that the code was moved or removed, linking to the nearest relevant location.
-- **Discovery agent returns thin per-comment analysis** (no evidence, no file:line citations): re-launch with a more explicit prompt directing to specific files. Don't post responses backed by unsupported opinions.
-
----
-
-## Appendix A — Identifying the author's review pattern
-
-Spend two minutes reading a sample of the author's recent PRs to calibrate. Patterns worth detecting:
-
-- **AI self-review pattern**: author posts inline comments via their own bot (often prefixed `🤖:` or labeled "AI panel"). Treat these as pre-merge punch lists, not blocking review. Apply Rule 2 (walk commits forward) ruthlessly.
-- **Stacked-PR author**: every PR has a sibling. Read the stack root before reviewing any leaf. The leaf often makes sense only in the context of the root.
-- **Design-doc-cited author**: author cites "TRD §X" / "spec §Y" in PR bodies. Find the doc before reviewing. See Phase 3.
-- **Iterative-fix author**: author files a small PR, gets AI review, fixes within hours via follow-up commits. The PR's mid-iteration state is normal-state. Don't review the iteration — wait for stabilization, or do a delta review against the last review-stable commit.
-- **Description-light author**: PR body is one sentence. Read the linked ticket; if no ticket, read the diff cold and infer intent. Rule 1 applies — label inferences explicitly.
-
----
-
-## Appendix B — How to handle CLOSED-not-merged PRs
-
-If `state=CLOSED` and `mergedAt=null`:
-
-1. Read the last few issue comments — often the author posts *"Superseded by #M"* when closing.
-2. If no supersede comment, check the cross-references in the timeline:
-   ```bash
-   gh api repos/$OWNER/$REPO/issues/$N/timeline \
-     --jq '[.[] | select(.event == "cross-referenced")] | .[].source.issue.number'
-   ```
-3. The replacement PR may be by a different author (someone consolidated the work). Don't assume the original author files all follow-ups.
-4. Update your notes: mark the old PR's notes file as "stale, superseded by #M" and either write a new notes file for #M or note the link.
-
----
-
-## Appendix C — Memory and persistence (if your harness supports it)
-
-If your harness has persistent memory across sessions (e.g., Claude Code's `~/.claude/projects/<project>/memory/` directory), save the following kinds of findings as the session unfolds:
-
-- **Footguns / quirks** — non-obvious tool behavior (e.g., "this test framework freezes the clock," "this datastore uses MySQL InnoDB gap locks"). File pattern: `reference_<topic>.md`.
-- **Workflow corrections from the user** — when the user explicitly says "stop doing X" or "always do Y." File pattern: `feedback_<rule>.md`.
-- **Project context** — ongoing initiatives, ticket states, ownership. File pattern: `project_<name>.md`.
-
-Reference these in future sessions to avoid re-discovering the same lessons.
-
----
-
-## Appendix D — When to invoke the heavier review skills
-
-This kit is the foundation. Two heavier patterns build on it:
-
-- **Mache-driven structural review**: if your harness has a `mache` MCP server (or equivalent code-intelligence tool), use it to generate a spec-driven diagram + emergent diagram of the PR's structural changes. Compare them — the gap between intended and emergent architecture is often the load-bearing finding.
-- **Multi-agent panel synthesis**: dispatch 3-4 specialty agents in parallel (Phase 5), then synthesize. Each agent should be told its working dir + HEAD SHA + that it should require primary-source citations. Synthesize their findings against the actual code (Phase 6) before relaying to the user.
-
-These are optimizations on the base playbook, not replacements. Always do Phases 1-4 first; agent dispatch without baseline state-reading produces shallow findings.
-
----
-
-## Glossary
-
-- **Falsifiable claim**: a statement whose truth can be checked in 30 seconds by running a specific command or reading a specific file:line. *"Field X is at proto number 21"* is falsifiable. *"This design is elegant"* is not.
-- **Cross-PR invariant**: a property that must hold across multiple PRs in a stack (e.g., "no symbol from package A is exported to package B"). Verifiable by `grep` across the affected files.
-- **Supersedes**: a PR closed without merge whose work has been moved into a different PR — typically a different author, different architectural cut, or a consolidation of multiple smaller PRs into one.
-- **Walk commits forward**: starting from a comment's timestamp, scan all subsequent commits to see if any of them addressed the issue the comment raised. Counterpart to "review thread state."
+## Appendices
+
+Situational reference, moved out of the spine so a review that doesn't need it
+doesn't pay for it. All five sections live in **[APPENDICES.md](APPENDICES.md)**:
+
+- **Appendix A — identifying the author's review pattern.** AI-self-review, stacked-PR, design-doc-citing, iterative-fix and description-light authors, and what each changes about your read.
+- **Appendix B — how to handle CLOSED-not-merged PRs.** Finding the PR that superseded this one.
+- **Appendix C — memory and persistence.** What is worth saving across sessions when the harness has memory.
+- **Appendix D — when to invoke the heavier review skills.** Structural (mache/modmap) review and multi-agent panel synthesis.
+- **Glossary.** Falsifiable claim, cross-PR invariant, supersedes, walk commits forward.
