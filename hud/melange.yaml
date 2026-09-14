@@ -1,0 +1,100 @@
+# melange.yaml — build the work HUD as an APK
+#
+#   melange keygen hud/melange.rsa
+#   melange build hud/melange.yaml \
+#     --source-dir hud --runner docker \
+#     --arch aarch64 --signing-key hud/melange.rsa --out-dir hud/packages
+#
+# There is nothing to compile. The HUD is Node stdlib only — no npm packages,
+# no bundler, no `node_modules` — so this package is a staging step: it copies
+# the machinery to /usr/share/hud and declares the one runtime dependency the
+# image actually needs. That is also why there is no `git-checkout` step: like
+# mache and cloister, melange populates the workspace from the build context,
+# and `--source-dir hud` makes that context this directory. The public-repo +
+# release-tag clone form (rosary's) would build whatever is tagged, which is
+# the wrong thing to verify when the point is to ship the tree in hand.
+
+package:
+  name: hud
+  version: 0.1.0
+  epoch: 0
+  description: "hud — local work HUD: a markdown knowledge tree plus read-only panels"
+  copyright:
+    - license: MIT
+  dependencies:
+    runtime:
+      # The whole runtime. Pinned to a major rather than floating, so a Wolfi
+      # bump is a deliberate edit here and not a silent change under the image.
+      - nodejs-24
+      # Not used by the static layer, but the board panel fetches an https URL
+      # and the sessions panel can graft from an https lectio daemon. Without
+      # the bundle those fail as TLS errors rather than as "not configured",
+      # which is a far more confusing way to learn the panel is unwired.
+      - ca-certificates-bundle
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+
+pipeline:
+  - name: Stage the HUD machinery
+    runs: |
+      # server.mjs resolves ui/ relative to its own module path, so the layout
+      # under /usr/share/hud is load-bearing: ui/ must stay a sibling of
+      # server.mjs or every static asset 404s with no other symptom.
+      install -Dm644 server.mjs   "${{targets.destdir}}/usr/share/hud/server.mjs"
+      install -Dm644 sessions.mjs "${{targets.destdir}}/usr/share/hud/sessions.mjs"
+      # The container's main(); see the header of that file for why the image
+      # cannot simply exec server.mjs.
+      install -Dm644 container-entry.mjs \
+        "${{targets.destdir}}/usr/share/hud/container-entry.mjs"
+      # Not on the serving path — it projects a mounted tree as a mache index.
+      # Shipped because it is part of the same machinery and runs against the
+      # same mount: `node /usr/share/hud/hud-index.mjs`.
+      install -Dm644 hud-index.mjs "${{targets.destdir}}/usr/share/hud/hud-index.mjs"
+
+  - name: Stage the UI
+    runs: |
+      # Flat by construction — ui/ has no subdirectories, and a recursive copy
+      # here would silently start shipping any that appear.
+      for f in ui/*; do
+        [ -f "$f" ] || continue
+        install -Dm644 "$f" "${{targets.destdir}}/usr/share/hud/ui/$(basename "$f")"
+      done
+      test -f "${{targets.destdir}}/usr/share/hud/ui/index.html"
+
+test:
+  # `melange test` builds its guest from scratch rather than reusing the build
+  # environment above, so the repositories have to be named again here or the
+  # package's own runtime deps have nothing to resolve against.
+  environment:
+    contents:
+      repositories:
+        - https://packages.wolfi.dev/os
+      keyring:
+        - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+      packages:
+        # The pipeline steps are shell; the package itself needs no shell and
+        # the image it ships in has none.
+        - busybox
+  pipeline:
+    # Asserts the two properties the image depends on and that a file-copy
+    # pipeline would otherwise never exercise: the module graph resolves under
+    # the installed layout, and the entry point can bind and answer. A plain
+    # `test -f` would pass on a package whose imports are broken.
+    - runs: |
+        node --input-type=module -e '
+          import("file:///usr/share/hud/server.mjs").then(
+            (m) => { if (typeof m.createServer !== "function") process.exit(1); },
+            (e) => { console.error(e); process.exit(1); },
+          );
+        '
+        test -f /usr/share/hud/ui/index.html
+        test -f /usr/share/hud/ui/mermaid.min.js
+        test -f /usr/share/hud/container-entry.mjs

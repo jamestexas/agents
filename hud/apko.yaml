@@ -1,0 +1,81 @@
+# apko.yaml — assemble the work HUD OCI image
+#
+#   apko build hud/apko.yaml hud:0.1.0 hud.tar \
+#     --keyring-append hud/melange.rsa.pub --arch aarch64
+#
+# Distroless: node, the HUD machinery, and a CA bundle. No shell, no package
+# manager. SBOM auto-generated when using `apko publish`.
+#
+# The image carries the machinery, never the content. Everything the HUD
+# renders lives in a tree mounted at /hud, and the image has no idea what is
+# in it — same split as the repository. See hud/README.md for which panels
+# survive that isolation and which cannot.
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+    # Local APK index produced by `melange build ... --out-dir hud/packages`.
+    # Listed after upstream so wolfi-baselayout / node / ca-certs resolve there.
+    - "@local ./packages"
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    - ./melange.rsa.pub
+  packages:
+    - ca-certificates-bundle
+    - wolfi-baselayout
+    - hud@local
+
+accounts:
+  groups:
+    - groupname: hud
+      gid: 65533
+  users:
+    - username: hud
+      uid: 65533
+      gid: 65533
+      shell: /sbin/nologin
+  run-as: 65533
+
+environment:
+  # The content tree's mount point. server.mjs reads HUD_ROOT and falls back to
+  # $HOME/hud, which inside a distroless image is a path that does not exist —
+  # naming it here means a missing mount fails as an empty tree at a known
+  # location rather than as a homedir lookup nobody expects.
+  HUD_ROOT: /hud
+  HUD_PORT: "4870"
+
+paths:
+  # Present so the image has a mount point even when nothing is mounted, and
+  # owned by the run-as user so a writable mount can take .generated/ snapshots.
+  # A read-only mount is fine and supported; the HUD logs the failed write and
+  # serves the tree.
+  - path: /hud
+    type: directory
+    uid: 65533
+    gid: 65533
+    permissions: 0o755
+
+# node, not the server: server.mjs self-starts only when argv[1] resolves to
+# its own module URL, and it binds 127.0.0.1 — unreachable through a published
+# port. container-entry.mjs is the container's main() and handles both; its
+# header explains why neither is fixable from out here.
+entrypoint:
+  command: /usr/bin/node
+
+cmd: /usr/share/hud/container-entry.mjs
+
+archs:
+  - x86_64
+  - aarch64
+
+# Per-origin layering: packages from the same upstream share a layer. Worth
+# more here than usual — the vendored mermaid bundle dominates the HUD layer,
+# so keeping it off node's layer means a node bump re-pulls neither.
+layering:
+  strategy: origin
+
+annotations:
+  org.opencontainers.image.title: hud
+  org.opencontainers.image.description: "hud — local work HUD: a markdown knowledge tree plus read-only panels"
+  org.opencontainers.image.source: https://github.com/jamestexas/agents
+  org.opencontainers.image.licenses: MIT

@@ -161,6 +161,20 @@ the canonical way to run the HUD, and the server has no idea launchd exists.
 plist; the rendered one lands in `~/Library/LaunchAgents/` and is committed
 nowhere.
 
+`hud/melange.yaml` and `hud/apko.yaml` build a distroless OCI image — node,
+the machinery, a CA bundle, no shell — for distribution and for handing the
+HUD to a peer. **launchd remains the recommended way to run your own**, and
+the reason is that the container keeps the left-hand column and loses much of
+the right: the tree, deep links, theme, and mermaid all work from a mounted
+content tree, but peers needs the `gh` CLI and your auth, digest needs the
+`lectio` CLI, the board panel needs to reach a host service
+(`host.docker.internal` on macOS), and loadout reports drift that does not
+exist because `~/.claude` is a tree of symlinks whose targets are not in the
+image. Adding those CLIs would not help — they need your credentials, which is
+exactly what a shareable image must not carry.
+[`hud/README.md`](hud/README.md) has the verified per-panel matrix and the
+mount recipes.
+
 ## Creating agents, skills, and operational packages
 
 Agent and skill frontmatter is validated against **both** the Anthropic Claude

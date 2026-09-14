@@ -60,6 +60,16 @@ scripts/which-applies.sh
 hud/generated/
 hud/.generated/
 
+# hud/ apko + melange build artifacts. The signing key is generated per-clone
+# by `melange keygen` and is a local build credential, not a release key —
+# nothing verifies the image against it, so committing it would publish a
+# private key to buy nothing.
+hud/packages/
+hud/melange.rsa
+hud/melange.rsa.pub
+hud/*.tar
+hud/sbom-*.spdx.json
+
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db
