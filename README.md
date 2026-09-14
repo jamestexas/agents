@@ -75,6 +75,7 @@ scripts/install.sh --doctor
 | [`doc-triage`](skills/doc-triage/SKILL.md) | prompts | Find internal docs (not for external consumers), review against code reality, bead real items, archive stale files. |
 | [`explain-work`](skills/explain-work/SKILL.md) | pre-approved | Review a PR, ticket, or path and explain it so it sticks — mache/CODEOWNERS/ ticket context synthesized into a taught explanation, not a bare findings list. |
 | [`feature-impl`](skills/feature-impl/SKILL.md) | prompts | Research-first feature implementation workflow. |
+| [`finding-triage`](skills/finding-triage/SKILL.md) | pre-approved | Triage a list of candidate findings — from a PR review, a self-audit, an adversarial agent, a counterfactual or parity audit — and decide which ones deserve to be raised. |
 | [`first-party-audit`](skills/first-party-audit/SKILL.md) | pre-approved | Before writing glue, a wrapper, or a "small helper", audit whether the capability already exists first-party — in the binary, the codebase, or the platform — and whether existing glue bypasses a better first-party implementation. |
 | [`handoff`](skills/handoff/SKILL.md) | pre-approved | Compact a session into a handoff at the work SEAM — where this session ends and the next resumes. |
 | [`hud`](skills/hud/SKILL.md) | prompts | Capture a note, playbook, peer, or project-context update into the user's personal work HUD — a local markdown tree at $HUD_ROOT. |
