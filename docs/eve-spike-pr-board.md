@@ -1,5 +1,15 @@
 # Spike: pr-board as a persistent eve.dev service
 
+> **Resolved 2026-09-15 — yes, and it shipped.** Canonical Hours implements
+> exactly this: `agent/skills/pr-board/SKILL.md` (a scheduled renderer that
+> triages merged lifecycle events into `needs_you/active/opened/resolved` and
+> writes the board), `agent/schedules/pr-board.ts` (cron, default `*/5`), and
+> `agent/connections/lectio.ts` (MCP to the lectio daemon for enrichment) —
+> the three pieces this note sketched. The open questions below about hosting,
+> secrets, cost and duplication were answered by building it there rather than
+> standing up a second runtime. Kept as a historical record: the analysis is
+> what the decision was made against, so it is not rewritten.
+
 Bead: `agents-395c30`. Design note only — no build, no deploy. Go/no-go to be
 recorded as a comment on that bead before any implementation bead opens.
 

@@ -26,14 +26,26 @@ only lectio can do.
 whether that's fresh enough and refreshes if not (the "derive current state"
 move). gh is the fallback for what lectio doesn't cover, never the first reach.
 
-**Sibling view, different mode.** The work HUD's needs-you dial and MY PRS
-panel answer the same question *ambiently* — a page that is always up, fed by
-a local work-board service over Canonical Hours. This skill is the
-*interactive* mode: you ask, it refreshes, and it answers the follow-up that
-an always-on dial cannot ("did I address the review?") by joining PR threads
-to your local worktrees. Two substrates on purpose — lectio is historical and
-cross-source, Canonical Hours is a scheduled fold serving a current board.
-Reach for the dial to notice; reach for this to act.
+**Three views of one question, and where the numbers come from.** "Does
+anything need me?" is answered in three places, and it is worth knowing the
+lineage before you trust a number:
+
+1. **Canonical Hours' own `pr-board` skill** — scheduled (cron, default every
+   five minutes), it triages pre-fetched lifecycle events into
+   `needs_you/active/opened/resolved` and *writes the board*. It is a renderer
+   with judgment, not a crawler, and it has its own lectio connection for
+   enrichment. This is where the board is produced.
+2. **The work HUD's needs-you dial and MY PRS panel** — ambient *display*.
+   The HUD reads a local work-board service, which reads the board Canonical
+   Hours wrote. The dial does no triage of its own; it shows that work.
+3. **This skill** — the *interactive* mode. You ask, it refreshes, and it
+   answers the follow-up an always-on dial cannot ("did I address the
+   review?") by joining PR threads to your local worktrees.
+
+Two substrates on purpose: lectio is historical and cross-source; Canonical
+Hours is a scheduled fold serving a current board. Reach for the dial to
+notice, and for this skill to act — and remember a stale dial usually means
+the tick did not run, not that nothing needs you.
 
 ## Arguments
 
