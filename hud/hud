@@ -26,14 +26,23 @@
 #   restart      stop, then start
 #   status [--json]
 #                what is actually true right now: resolved HUD_ROOT and config,
-#                service state and pid, port and health, and whether each
-#                configured upstream answers. Always exits 0 — it reports
-#                state, it does not assert it. --json emits the same facts as
-#                one document (schema hud-status/v1); the exit code is the same.
+#                service state and pid, port and health, whether the tree is
+#                backed up to its git remote, and whether each configured
+#                upstream answers. Always exits 0 — it reports state, it does
+#                not assert it. --json emits the same facts as one document
+#                (schema hud-status/v1); the exit code is the same.
 #   open         open the HUD in your browser
 #   logs [-f] [-n N]
 #                tail the server log ($HUD_ROOT/.generated/service.log)
 #   root         print the resolved HUD_ROOT
+#   sync [-m MSG] [--dry-run]
+#                back the CONTENT tree up: stage it, commit, and push to its
+#                git remote, in one verb, so "did I commit my notes" stops
+#                being something you remember. A clean, in-sync tree is not an
+#                error — it says there is nothing to sync and exits 0. It never
+#                force-pushes: if the remote moved ahead it refuses and tells
+#                you to pull. --dry-run names exactly what would be staged,
+#                committed and pushed and changes nothing, here or there.
 #
 #   install      install the launchd SERVICE, so the HUD runs without you
 #                (service/install.sh). Does NOT put `hud` on your PATH.
@@ -50,6 +59,12 @@
 #
 # An unreachable upstream is a normal state, not a failure: the HUD greys the
 # panel out and keeps serving, and `hud status` prints the fact and exits 0.
+#
+# `link` and `install` are about the MACHINERY and you run them once: one puts
+# this command on your PATH, the other puts a service in launchd. `sync` is
+# about your CONTENT and you run it constantly; it installs nothing, starts
+# nothing, and is the only verb here that writes to the tree's git history or
+# talks to a remote.
 #
 # Environment: HUD_ROOT selects the content tree (default ~/hud). HUD_PORT,
 # HUD_HOST, and HUD_LABEL override the [serve] table, as they do everywhere
@@ -430,6 +445,152 @@ report_upstreams() {
     done
 }
 
+# ---------------------------------------------------------------- backup
+#
+# The upstream table above answers "is the HUD working". This answers the other
+# question you have while looking at it — "is my knowledge safe" — which is a
+# fact about the content tree's git remote, not about any panel. It sits in the
+# same command because the two are checked at the same moment and for the same
+# reason, and because a backup you have to remember to check is one you will
+# not check.
+#
+# On the watch-only invariant: the HUD never acts on a PR, a ticket, or a
+# session, and that does not change here. The invariant governs EXTERNAL
+# surfaces — someone else's repository, someone else's queue — which the HUD
+# only ever reads and links out to. Pushing your own tree to your own remote is
+# not acting on someone else's surface; it is authoring, the same category as
+# writing the note in the first place. `hud status` still only reads: `sync` is
+# a separate, explicit verb, and it is the only one in this script that writes
+# anything outside $HUD_ROOT/.generated/.
+#
+# BACKUP_STATUS is a closed five-state vocabulary, the same contract the
+# upstream table keeps — exactly one word from a fixed set, and a reason that is
+# never blank:
+#   synced    a remote is configured, and everything committed here is on it
+#   unpushed  work exists only on this machine (uncommitted, or committed and
+#             not pushed, or a branch with no upstream yet)
+#   diverged  the remote holds commits this tree does not — pull before syncing
+#   absent    no remote configured; this tree is not backed up anywhere
+#   unknown   could not tell — `reason` says what stopped us (no git, not a repo)
+#
+# ahead/behind come from the local remote-tracking ref, so they are as fresh as
+# your last fetch and this probe stays offline: `hud status` must not block on
+# the network to tell you the service is down. `hud sync` asks the remote
+# itself, because acting on a stale answer is how you force-push by accident.
+BACKUP_STATUS="" BACKUP_REASON="" BACKUP_REMOTE="" BACKUP_URL=""
+BACKUP_BRANCH="" BACKUP_UPSTREAM="" BACKUP_AHEAD="" BACKUP_BEHIND="" BACKUP_DIRTY=""
+
+# git in the content tree. Always -C: the caller's cwd is wherever they ran
+# `hud` from, which is the whole point of the command being on PATH.
+git_tree() { git -C "$HUD_ROOT_R" "$@"; }
+
+set_backup() { BACKUP_STATUS="$1"; BACKUP_REASON="$2"; }
+
+probe_backup() {
+    BACKUP_STATUS="" BACKUP_REASON="" BACKUP_REMOTE="" BACKUP_URL=""
+    BACKUP_BRANCH="" BACKUP_UPSTREAM="" BACKUP_AHEAD="" BACKUP_BEHIND="" BACKUP_DIRTY=""
+
+    if ! command -v git >/dev/null 2>&1; then
+        set_backup unknown "git not found — not probed"
+        return 0
+    fi
+    if ! git_tree rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        set_backup unknown "not a git repository — 'git init' makes backup possible"
+        return 0
+    fi
+
+    # Empty on a detached HEAD, which is a state to report rather than choke on.
+    BACKUP_BRANCH="$(git_tree symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+    # Scoped to the tree's own subtree with `-- .`, so a HUD_ROOT that happens to
+    # live inside a larger repository reports on itself rather than on its host.
+    BACKUP_DIRTY="$(git_tree status --porcelain --untracked-files=all -- . 2>/dev/null | wc -l | tr -d ' ')"
+
+    if [[ -n "$BACKUP_BRANCH" ]]; then
+        # for-each-ref rather than parsing `@{upstream}`: it reports the remote
+        # NAME as its own field, so a remote whose name contains a slash does not
+        # silently become a wrong answer.
+        BACKUP_UPSTREAM="$(git_tree for-each-ref --format='%(upstream:short)' \
+            "refs/heads/$BACKUP_BRANCH" 2>/dev/null || true)"
+        BACKUP_REMOTE="$(git_tree for-each-ref --format='%(upstream:remotename)' \
+            "refs/heads/$BACKUP_BRANCH" 2>/dev/null || true)"
+    fi
+    # No upstream yet is the state right after `git remote add`, and it still has
+    # a remote to name. Prefer origin, else the only remote there is; two
+    # remotes and no upstream is genuinely ambiguous, so say so rather than guess.
+    if [[ -z "$BACKUP_REMOTE" ]]; then
+        local remotes=() r
+        while IFS= read -r r; do [[ -n "$r" ]] && remotes+=("$r"); done \
+            < <(git_tree remote 2>/dev/null || true)
+        for r in ${remotes[@]+"${remotes[@]}"}; do
+            [[ "$r" == origin ]] && BACKUP_REMOTE=origin
+        done
+        if [[ -z "$BACKUP_REMOTE" && ${#remotes[@]} -eq 1 ]]; then
+            BACKUP_REMOTE="${remotes[0]}"
+        fi
+        if [[ -z "$BACKUP_REMOTE" && ${#remotes[@]} -gt 1 ]]; then
+            set_backup unpushed "several remotes and no upstream — 'git push -u <remote> $BACKUP_BRANCH' once"
+            return 0
+        fi
+    fi
+
+    if [[ -z "$BACKUP_REMOTE" ]]; then
+        set_backup absent "no git remote — 'git remote add origin <url>', then 'hud sync'"
+        return 0
+    fi
+    BACKUP_URL="$(git_tree remote get-url "$BACKUP_REMOTE" 2>/dev/null || true)"
+
+    if [[ -z "$BACKUP_BRANCH" ]]; then
+        set_backup unknown "HEAD is detached — check out a branch to back up"
+        return 0
+    fi
+    if [[ -z "$BACKUP_UPSTREAM" ]]; then
+        set_backup unpushed "$BACKUP_BRANCH has no upstream on $BACKUP_REMOTE yet — 'hud sync' sets it"
+        return 0
+    fi
+
+    # `upstream...HEAD` with --left-right --count: left is what only the upstream
+    # has (behind), right is what only we have (ahead).
+    local counts
+    if counts="$(git_tree rev-list --left-right --count \
+            "$BACKUP_UPSTREAM...HEAD" 2>/dev/null)"; then
+        read -r BACKUP_BEHIND BACKUP_AHEAD <<<"$counts"
+    fi
+    if [[ -z "$BACKUP_AHEAD" || -z "$BACKUP_BEHIND" ]]; then
+        set_backup unknown "no $BACKUP_UPSTREAM ref locally — fetch once to compare"
+        return 0
+    fi
+
+    # Only the nonzero halves get named. "0 commit(s) + 3 uncommitted" makes the
+    # reader do arithmetic to find the one number that was the answer.
+    local local_work=""
+    (( BACKUP_AHEAD > 0 )) && local_work="$BACKUP_AHEAD commit(s)"
+    (( BACKUP_DIRTY > 0 )) && local_work="${local_work:+$local_work + }$BACKUP_DIRTY uncommitted change(s)"
+
+    if (( BACKUP_BEHIND > 0 )); then
+        set_backup diverged "$BACKUP_UPSTREAM has $BACKUP_BEHIND commit(s) this tree does not${local_work:+, and $local_work here} — pull before syncing"
+    elif [[ -n "$local_work" ]]; then
+        set_backup unpushed "$local_work only on this machine — 'hud sync'"
+    else
+        set_backup synced "everything here is on $BACKUP_UPSTREAM (as of your last fetch)"
+    fi
+}
+
+# One line, in the same column grid as the lines above it: where the backup
+# goes, and whether your work is actually there.
+report_backup() {
+    local target="${BACKUP_URL:-}" detail
+    case "$BACKUP_STATUS" in
+        absent) target="none — not backed up" ;;
+        unknown) target="${BACKUP_URL:-n/a}" ;;
+    esac
+    if [[ -n "$BACKUP_REMOTE" ]]; then
+        detail="$BACKUP_REMOTE: $BACKUP_REASON"
+    else
+        detail="$BACKUP_REASON"
+    fi
+    printf '  backup    %-38s %s\n' "$target" "$detail"
+}
+
 # The JSON view. It exists for what the HTTP API does not expose: the HUD's
 # /api/* routes already serve tree and panel data machine-readably, but nothing
 # over HTTP can tell you about the service, how the config resolved, or where
@@ -480,6 +641,37 @@ emit_status_json() {  # port-holder pid, HTTP code, service pid
     fi
     case ":${PATH}:" in *":$dir:"*) on_path=true ;; esac
 
+    # Same rule as the numbers above: a count that could not be determined is
+    # null, never 0 and never a string. "behind is null" and "behind is 0" are
+    # different claims, and a consumer deciding whether your notes are safe
+    # needs to be able to tell them apart.
+    local ahead_json=null behind_json=null dirty_json=null
+    [[ "$BACKUP_AHEAD" =~ ^[0-9]+$ ]] && ahead_json="$BACKUP_AHEAD"
+    [[ "$BACKUP_BEHIND" =~ ^[0-9]+$ ]] && behind_json="$BACKUP_BEHIND"
+    [[ "$BACKUP_DIRTY" =~ ^[0-9]+$ ]] && dirty_json="$BACKUP_DIRTY"
+
+    local backup
+    backup="$(jq -n \
+        --arg status "$BACKUP_STATUS" \
+        --arg reason "$BACKUP_REASON" \
+        --arg remote "$BACKUP_REMOTE" \
+        --arg url "$BACKUP_URL" \
+        --arg branch "$BACKUP_BRANCH" \
+        --arg upstream "$BACKUP_UPSTREAM" \
+        --argjson ahead "$ahead_json" \
+        --argjson behind "$behind_json" \
+        --argjson dirty "$dirty_json" \
+        '{status: $status,
+          reason: $reason,
+          configured: ($remote != ""),
+          remote: (if $remote == "" then null else $remote end),
+          url: (if $url == "" then null else $url end),
+          branch: (if $branch == "" then null else $branch end),
+          upstream: (if $upstream == "" then null else $upstream end),
+          ahead: $ahead,
+          behind: $behind,
+          dirty: $dirty}')"
+
     jq -n \
         --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         --arg root "$HUD_ROOT_R" \
@@ -502,6 +694,7 @@ emit_status_json() {  # port-holder pid, HTTP code, service pid
         --arg link_target "$target" \
         --argjson link_linked "$linked" \
         --argjson link_on_path "$on_path" \
+        --argjson backup "$backup" \
         --argjson upstreams "$ups" \
         '{schema: "hud-status/v1",
           generated_at: $generated_at,
@@ -527,6 +720,7 @@ emit_status_json() {  # port-holder pid, HTTP code, service pid
                      target: (if $link_target == "" then null else $link_target end),
                      linked: $link_linked,
                      dir_on_path: $link_on_path},
+          backup: $backup,
           upstreams: $upstreams}'
 }
 
@@ -541,6 +735,7 @@ cmd_status() {
 
     load_config
     probe_upstreams
+    probe_backup
 
     local holder code health service_state pid
     holder="$(port_holder)"
@@ -579,6 +774,7 @@ cmd_status() {
     fi
     printf '  service   %-38s %s\n' "$LABEL" "$service_state"
     printf '  log       %s\n' "$LOG_FILE"
+    report_backup
     for warn in ${CONFIG_WARNS[@]+"${CONFIG_WARNS[@]}"}; do
         printf '  config!   %s\n' "$warn"
     done
@@ -616,6 +812,250 @@ cmd_logs() {
     # Both start paths write here: the plist names this file, and the
     # backgrounded fallback appends to it, so `hud logs` is correct either way.
     tail ${follow:+"$follow"} -n "$lines" -- "$LOG_FILE"
+}
+
+# ------------------------------------------------------------------ sync
+#
+# One verb for "back my notes up", because the tree is edited constantly — by
+# you, by the hud skill, by whatever agent was told to write a note — and the
+# only thing standing between all of that and a dead laptop was remembering to
+# run three git commands. Three commands you remember is not a backup.
+#
+# Nothing here is a new idea about git; it is `add`, `commit`, `push` with the
+# three answers that a wrapper has to get right pre-decided:
+#   - a clean tree is NOT an error. `hud sync` on an already-synced tree says so
+#     and exits 0, so it is safe to run reflexively, in a loop, from a hook.
+#   - it never force-pushes, and never offers to. A diverged remote means some
+#     other machine wrote here, and the only safe answer is a human pulling.
+#   - it refuses before it touches anything, so the operation is atomic: either
+#     the tree is staged, committed and pushed, or nothing happened at all.
+#     Half-syncs are the state that makes people distrust the verb.
+
+# What `git add` would pick up, as (status, path) pairs. Read with -z and
+# --untracked-files=all so the dry-run can name FILES rather than the collapsed
+# `newdir/` that porcelain prints by default: "would stage inbox/" is not an
+# answer to "what exactly are you about to commit".
+SYNC_XY=() SYNC_PATH=()
+sync_collect() {
+    SYNC_XY=() SYNC_PATH=()
+    local rec
+    while IFS= read -r -d '' rec; do
+        SYNC_XY+=("${rec:0:2}")
+        SYNC_PATH+=("${rec:3}")
+        # In -z mode a rename/copy is two NUL-terminated fields, `to` then
+        # `from`, with no ` -> ` between them. Consume the second or the next
+        # iteration reads a path as if it were a status code.
+        case "${rec:0:2}" in
+            R* | C*) IFS= read -r -d '' _ || true ;;
+        esac
+    done < <(git_tree status --porcelain --untracked-files=all -z -- . || true)
+}
+
+# A message that says what changed without pretending to know why. One file
+# gets named; several get counted and attributed to the sections they came
+# from, which is the level of detail `git log --oneline` in the tree is
+# actually read at. -m overrides it whenever the why is worth writing down.
+sync_message() {
+    local n=${#SYNC_PATH[@]}
+    (( n > 0 )) || return 0
+    if (( n == 1 )); then
+        printf 'hud sync: %s\n' "${SYNC_PATH[0]}"
+        return 0
+    fi
+    local p sec s seen secs=() joined=""
+    for p in "${SYNC_PATH[@]}"; do
+        if [[ "$p" == */* ]]; then sec="${p%%/*}"; else sec="top level"; fi
+        seen=""
+        for s in ${secs[@]+"${secs[@]}"}; do
+            [[ "$s" == "$sec" ]] && { seen=yes; break; }
+        done
+        [[ -n "$seen" ]] || secs+=("$sec")
+    done
+    for s in "${secs[@]}"; do
+        joined="${joined:+$joined, }$s"
+    done
+    printf 'hud sync: %d files (%s)\n' "$n" "$joined"
+}
+
+# Would the push fast-forward? Answered with ls-remote, which reads the remote's
+# ref and writes nothing locally — the property that lets --dry-run be genuinely
+# inert. A `git fetch` would answer the same question but move remote-tracking
+# refs to do it, and a --dry-run that edits .git/ is not one.
+#
+# Sets SYNC_FF to exactly one of: ff | new | diverged | unreachable, and
+# SYNC_REMOTE_TIP to the remote's commit when there is one. It assigns rather
+# than echoes because a `$(...)` caller would run it in a subshell and throw
+# SYNC_REMOTE_TIP away — which reads as "the remote is at nothing", i.e. as an
+# already-synced tree needing a push.
+SYNC_FF="" SYNC_REMOTE_TIP=""
+push_ff_state() {
+    SYNC_FF="" SYNC_REMOTE_TIP=""
+    local out tip head
+    if ! out="$(git_tree ls-remote --heads "$BACKUP_REMOTE" \
+            "refs/heads/$BACKUP_BRANCH" 2>/dev/null)"; then
+        SYNC_FF=unreachable
+        return 0
+    fi
+    tip="$(awk 'NR == 1 { print $1 }' <<<"$out")"
+    if [[ -z "$tip" ]]; then
+        # The branch does not exist there yet. The first push creates it, which
+        # can never be a non-fast-forward.
+        SYNC_FF=new
+        return 0
+    fi
+    SYNC_REMOTE_TIP="$tip"
+    head="$(git_tree rev-parse --verify --quiet HEAD 2>/dev/null || true)"
+    # No commits here at all, but commits there: pulling is the only way to
+    # reconcile that, so it is the same refusal as any other divergence.
+    [[ -n "$head" ]] || { SYNC_FF=diverged; return 0; }
+    # Having the object is a precondition for the ancestry test; not having it
+    # means the remote moved somewhere we have never seen.
+    if ! git_tree cat-file -e "${tip}^{commit}" 2>/dev/null; then
+        SYNC_FF=diverged
+        return 0
+    fi
+    if git_tree merge-base --is-ancestor "$tip" HEAD; then
+        SYNC_FF=ff
+    else
+        SYNC_FF=diverged
+    fi
+}
+
+cmd_sync() {
+    local dry="" message="" have_message=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -m | --message)
+                [[ $# -ge 2 ]] || die "sync: $1 needs a message"
+                message="$2"; have_message=yes; shift 2 ;;
+            --message=*) message="${1#--message=}"; have_message=yes; shift ;;
+            -n | --dry-run) dry=yes; shift ;;
+            *) die "sync: unknown argument $1" ;;
+        esac
+    done
+    [[ -z "$have_message" || -n "$message" ]] || die "sync: -m was given an empty message"
+
+    load_config
+    command -v git >/dev/null 2>&1 || die "no 'git' on PATH — 'hud sync' needs it."
+    git_tree rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+        || die "$HUD_ROOT_R is not a git repository.
+
+Backing the tree up starts with making it one:
+
+    git -C $HUD_ROOT_R init
+    git -C $HUD_ROOT_R remote add origin <url>"
+
+    probe_backup
+    if [[ "$BACKUP_STATUS" == absent || -z "$BACKUP_REMOTE" ]]; then
+        die "$HUD_ROOT_R has no git remote, so there is nowhere to back it up.
+
+    git -C $HUD_ROOT_R remote add origin <url>
+    hud sync
+
+Use a PRIVATE remote: this tree is your notes, not the machinery."
+    fi
+    [[ -n "$BACKUP_BRANCH" ]] \
+        || die "HEAD is detached in $HUD_ROOT_R — check out a branch first."
+
+    sync_collect
+    local nchanges=${#SYNC_PATH[@]}
+
+    # Assert the thing the whole split depends on, rather than trusting it.
+    # `git add -A` does honour .gitignore, and porcelain does omit ignored
+    # paths — so this can only ever fire if one of those stopped being true, or
+    # if a path was force-added into the index earlier. Either way it must stop
+    # the sync: .generated/ holds the service log and the peers snapshot, and
+    # the _hud symlink names a path that exists on exactly one machine.
+    if (( nchanges > 0 )); then
+        local leaked
+        leaked="$(printf '%s\0' "${SYNC_PATH[@]}" \
+            | git_tree check-ignore --stdin -z 2>/dev/null | tr '\0' ' ' || true)"
+        if [[ -n "${leaked// /}" ]]; then
+            die "refusing to sync: these are gitignored and must not be committed:
+  $leaked
+Nothing was staged."
+        fi
+    fi
+
+    push_ff_state
+    local head; head="$(git_tree rev-parse --verify --quiet HEAD 2>/dev/null || true)"
+
+    # Refuse first, and refuse having done nothing. Committing and then failing
+    # to push would leave the tree in a state whose repair depends on what the
+    # verb got through, and the notes are still on disk either way — so
+    # atomicity is worth more here than a salvaged local commit.
+    if [[ "$SYNC_FF" == diverged ]]; then
+        printf 'hud: %s/%s holds commits this tree does not — refusing to sync.\n\n' \
+            "$BACKUP_REMOTE" "$BACKUP_BRANCH" >&2
+        printf '    git -C %s pull --rebase\n    hud sync\n\n' "$HUD_ROOT_R" >&2
+        printf 'Nothing was staged, committed, or pushed. A force-push would make\n' >&2
+        printf 'the other side of that divergence — another machine, or an agent —\n' >&2
+        printf 'unrecoverable, so this command does not offer one.\n' >&2
+        exit 1
+    fi
+
+    # Whether the remote is missing commits we already have. `unreachable` means
+    # we could not ask, so fall back to the local remote-tracking ref and let
+    # the push itself be the authority.
+    local need_push=""
+    case "$SYNC_FF" in
+        new) need_push=yes ;;
+        ff) [[ "$SYNC_REMOTE_TIP" == "$head" ]] || need_push=yes ;;
+        unreachable) (( ${BACKUP_AHEAD:-0} > 0 )) && need_push=yes ;;
+    esac
+
+    if (( nchanges == 0 )) && [[ -z "$need_push" ]]; then
+        printf 'nothing to sync — %s is clean and in sync with %s/%s\n' \
+            "$HUD_ROOT_R" "$BACKUP_REMOTE" "$BACKUP_BRANCH"
+        return 0
+    fi
+
+    [[ -n "$have_message" ]] || message="$(sync_message)"
+
+    if [[ -n "$dry" ]]; then
+        printf 'hud sync --dry-run — none of the following was done.\n\n'
+        if (( nchanges > 0 )); then
+            printf 'would stage (%d):\n' "$nchanges"
+            local i
+            for i in "${!SYNC_PATH[@]}"; do
+                printf '  %-2s %s\n' "${SYNC_XY[$i]}" "${SYNC_PATH[$i]}"
+            done
+            printf '\nwould commit:\n  %s\n' "$message"
+        else
+            printf 'would stage: nothing — no uncommitted changes\n'
+        fi
+        printf '\nwould push: %s -> %s/%s' "${BACKUP_BRANCH}" "$BACKUP_REMOTE" "$BACKUP_BRANCH"
+        [[ -n "$BACKUP_URL" ]] && printf ' (%s)' "$BACKUP_URL"
+        printf '\n'
+        case "$SYNC_FF" in
+            new) printf '  the branch does not exist there yet — the push creates it\n' ;;
+            unreachable) printf '  could not reach %s to check — the real push may still fail\n' \
+                "$BACKUP_REMOTE" ;;
+        esac
+        printf '\nGitignored paths are never staged, so nothing under .generated/ and\n'
+        printf 'no _hud symlink appears above. Run without --dry-run to do it.\n'
+        return 0
+    fi
+
+    if (( nchanges > 0 )); then
+        git_tree add -A -- .
+        git_tree commit -q -m "$message"
+        printf 'committed %d file(s): %s\n' "$nchanges" "$message"
+    fi
+
+    # No --force, no --force-with-lease, no prompt offering either. -u only when
+    # there is no upstream yet, so the ordinary case does not rewrite config.
+    local push_args=("$BACKUP_REMOTE" "$BACKUP_BRANCH")
+    [[ -n "$BACKUP_UPSTREAM" ]] || push_args=(--set-upstream "${push_args[@]}")
+    if ! git_tree push "${push_args[@]}"; then
+        printf '\nhud: the push failed. Your notes are committed locally and nothing\n' >&2
+        printf 'was forced. If the remote moved while this ran:\n\n' >&2
+        printf '    git -C %s pull --rebase\n    hud sync\n' "$HUD_ROOT_R" >&2
+        exit 1
+    fi
+    probe_backup
+    printf 'synced %s -> %s/%s (%s)\n' \
+        "$HUD_ROOT_R" "$BACKUP_REMOTE" "$BACKUP_BRANCH" "$BACKUP_STATUS"
 }
 
 # Where the `hud` COMMAND goes — as opposed to `install`, which is the launchd
@@ -714,6 +1154,7 @@ case "$command" in
     open) cmd_open "$@" ;;
     logs) cmd_logs "$@" ;;
     root) load_config; printf '%s\n' "$HUD_ROOT_R" ;;
+    sync) cmd_sync "$@" ;;
     link) cmd_link "$@" ;;
     unlink) cmd_unlink "$@" ;;
     install) exec bash "$MACHINERY_DIR/service/install.sh" "$@" ;;
