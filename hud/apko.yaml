@@ -78,4 +78,8 @@ annotations:
   org.opencontainers.image.title: hud
   org.opencontainers.image.description: "hud — local work HUD: a markdown knowledge tree plus read-only panels"
   org.opencontainers.image.source: https://github.com/jamestexas/agents
-  org.opencontainers.image.licenses: MIT
+  # SPDX identifier, and the `-only` suffix is load-bearing: bare `AGPL-3.0` is
+  # deprecated in SPDX and `AGPL-3.0-or-later` grants something the owner did
+  # not. This is the whole image's license because the image is hud/ — the
+  # Apache-2.0 rest of the repository is not in it. See hud/LICENSE.
+  org.opencontainers.image.licenses: AGPL-3.0-only

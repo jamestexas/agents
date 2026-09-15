@@ -63,6 +63,32 @@ cp agent-name.md /path/to/project/.claude/agents/
     └── settings.local.json # Local permissions
 ```
 
+## Licensing — two licenses, and a one-way boundary
+
+This repository is **Apache-2.0** (`LICENSE`) *except* `hud/`, which is
+**AGPL-3.0-only** (`hud/LICENSE`). GitHub's detector reads only the root file
+and will report Apache-2.0 for the whole repository; that label is wrong about
+`hud/`. Do not treat the root `LICENSE` as covering every subdirectory.
+
+**Invariant — one-way compatibility.** Apache-2.0 code may be used *inside*
+`hud/`. Code from `hud/` may **not** be copied *out* into the Apache-2.0 part.
+Apache-2.0 is one-way compatible with the AGPL: permissive code can be absorbed
+into a copyleft work, but the reverse puts AGPL code under an Apache-2.0
+notice, mislicensing it for everyone downstream — and nothing here will flag
+it.
+
+The property that keeps this checkable: `hud/` imports nothing from outside
+itself, only Node builtins and its own modules. Preserve that. Concretely,
+before you factor a helper out of `hud/` into a shared `scripts/` module, or
+add an `import` in `hud/` that reaches above `hud/`, stop — the first is a
+license violation, the second dissolves the self-containment that makes the
+first visible. To share code across the boundary, move it *into* the
+Apache-2.0 part and import it from there.
+
+Vendored MIT bundles under `hud/ui/` keep their own notices; see
+`hud/THIRD-PARTY-NOTICES.md`. Rationale and the full statement live in
+`README.md` and `hud/README.md`.
+
 ## Git Workflow
 
 When committing agent definitions:

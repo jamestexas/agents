@@ -20,7 +20,11 @@ package:
   epoch: 0
   description: "hud — local work HUD: a markdown knowledge tree plus read-only panels"
   copyright:
-    - license: MIT
+    # SPDX identifier; the `-only` suffix matters (bare `AGPL-3.0` is deprecated
+    # in SPDX, and `-or-later` would grant more than intended). This lands in
+    # the APK metadata and the generated SBOM, so it is how a recipient learns
+    # which obligations came with the bits. See hud/LICENSE.
+    - license: AGPL-3.0-only
   dependencies:
     runtime:
       # The whole runtime. Pinned to a major rather than floating, so a Wolfi

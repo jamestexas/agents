@@ -247,4 +247,35 @@ pre-commit install
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+**Two licenses. The root one does not cover `hud/`.**
+
+| Path | License | Text |
+| --- | --- | --- |
+| everything except `hud/` | Apache-2.0 | [LICENSE](LICENSE) |
+| `hud/` and everything under it | **AGPL-3.0-only** | [hud/LICENSE](hud/LICENSE) |
+
+GitHub's license detector reads only the root file, so this repository's GitHub
+page says "Apache-2.0" for the whole thing. That label is wrong about `hud/`.
+Assume a root `LICENSE` governs every subdirectory and you will get `hud/`
+wrong, which is why the carve-out is also stated at the top of
+[LICENSE](LICENSE) itself.
+
+The split is deliberate. The agents and skills are text you copy into your own
+`~/.claude/` — permissive is the whole point. `hud/` is a served web
+application, so the AGPL's section 13 network clause matches what the artifact
+actually is: run it where others can reach it and they should be able to get
+the source.
+
+**One-way compatibility — an invariant, not a preference.** Apache-2.0 code
+from this repository may be used inside `hud/`. Code from `hud/` may **not** be
+copied out into the Apache-2.0 part: doing so would put AGPL-licensed code
+under an Apache-2.0 notice, silently mislicensing it for everyone downstream.
+Today `hud/` imports nothing from outside itself — only Node builtins and its
+own files — and that is the property being preserved. The violation is easy and
+quiet: lift a helper out of `hud/server.mjs` into a shared script, or add an
+`import` in `hud/` that reaches above `hud/`, and the boundary is gone with no
+error anywhere. If you want to share code across the boundary, move it *into*
+the Apache-2.0 part first and import it from there.
+
+Third-party bundles vendored under `hud/ui/` keep their own (MIT) licenses —
+see [hud/THIRD-PARTY-NOTICES.md](hud/THIRD-PARTY-NOTICES.md).
