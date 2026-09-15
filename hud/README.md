@@ -25,7 +25,7 @@ bash hud/service/install.sh            # optional macOS launchd agent
 Or reach all of it through one command, from any directory:
 
 ```bash
-hud/hud link                           # symlink onto PATH (~/.local/bin)
+hud/hud link                           # symlink onto PATH ($XDG_BIN_HOME)
 hud status                             # config, service, port, upstreams
 ```
 
@@ -52,7 +52,8 @@ chain before taking a dirname, so a single link into a directory on `PATH`
 makes it work from anywhere.
 
 ```bash
-hud/hud link      # ln -s into ~/.local/bin (HUD_LINK_DIR picks another dir)
+hud/hud link      # put the COMMAND on your PATH
+hud/hud install   # install the SERVICE — a different thing; see below
 ```
 
 | Command | Does |
@@ -60,11 +61,12 @@ hud/hud link      # ln -s into ~/.local/bin (HUD_LINK_DIR picks another dir)
 | `hud start` | Starts the launchd service if one is installed, otherwise `node server.mjs` backgrounded. Idempotent. If a process it did not start holds the port, it refuses and prints the pid — the same posture as `service/install.sh`. |
 | `hud stop` | Boots the service out rather than killing it, because `KeepAlive` would restart anything killed. The plist stays, so `hud start` brings the same service back. |
 | `hud restart` | `stop`, then `start`. |
-| `hud status` | Resolved `HUD_ROOT` and config file, service state and pid, port and health, and whether each configured upstream answers. |
+| `hud status [--json]` | Resolved `HUD_ROOT` and config file, service state and pid, port and health, and whether each configured upstream answers. `--json` emits the same facts as one document; see [Machine-readable status](#machine-readable-status). |
 | `hud open` | Opens the HUD in your browser. |
 | `hud logs [-f] [-n N]` | Tails `$HUD_ROOT/.generated/service.log` — the file both start paths write to. |
 | `hud root` | Prints the resolved `HUD_ROOT`. |
-| `hud install` / `hud uninstall` | `service/install.sh` / `service/uninstall.sh`, arguments passed through. |
+| `hud link` / `hud unlink` | Puts **this command** on your PATH, and takes it off. See [Two installs, two verbs](#two-installs-two-verbs). |
+| `hud install` / `hud uninstall` | Installs and removes **the launchd service**, via `service/install.sh` / `service/uninstall.sh`; arguments passed through. |
 | `hud index` | `hud-index.mjs` — rebuilds the mache index. |
 | `hud smoke` | `smoke.sh` — the integration gate against the real tree. |
 | `hud test` | `node --test test/` — the hermetic suite. |
@@ -79,6 +81,69 @@ an unreachable upstream is a normal state — the panel greys out and the HUD
 keeps serving everything else. A status command that failed the moment your
 digest daemon was down would be a worse tool for exactly the situation you run
 it in.
+
+### Two installs, two verbs
+
+There are two unrelated things you might mean by "install the HUD", so they
+have different verbs and neither does the other's job:
+
+- **`hud link`** puts the `hud` *command* on your PATH, by symlinking this
+  script into `$XDG_BIN_HOME` — falling back to `~/.local/bin`, which is the
+  de-facto user bin directory. (XDG does not actually specify a variable for
+  user binaries, so nothing here invents one; `HUD_LINK_DIR` overrides both for
+  a one-off.) It starts nothing. `hud unlink` reverses it.
+- **`hud install`** installs the launchd *service*, so the HUD keeps serving
+  without you. It touches nothing on your PATH. `hud uninstall` reverses it.
+
+`link` is idempotent — re-running when the link already points at this checkout
+is a no-op. If the link points somewhere *else*, it prints both paths and
+refuses, rather than quietly making `hud` mean a different checkout than you
+think; remove it yourself, or point `HUD_LINK_DIR` elsewhere. If the target
+directory is not on your PATH, that is a warning and not a failure: the link is
+correctly made, and the fix is a line in your shell rc, which this script
+prints but does not write.
+
+Note what does **not** move to an XDG directory: everything the HUD generates —
+the service log, snapshots, the mache index — stays under
+`$HUD_ROOT/.generated/`, and `hud.toml` stays in the content tree. That is the
+public-code / private-data split, and it is per-*tree* state, not per-*user*
+state: a shared XDG directory would scatter one tree's output into a location
+every other tree also writes to. Only the command on your PATH is genuinely a
+per-user concern, which is why it is the only thing here that consults XDG.
+
+### Machine-readable status
+
+`hud status --json` emits one document carrying a versioned `schema`
+(`hud-status/v1`): the resolved root, how the config resolved, serving state
+and HTTP code, the service's label/loaded/pid, the log path, where the CLI is
+linked, and an `upstreams` array.
+
+Every upstream entry carries `name`, `target`, a `status` from a closed
+four-state vocabulary, and a `reason` that is never blank:
+
+| `status` | Means |
+| --- | --- |
+| `ok` | Probed, and answering. |
+| `unreachable` | Probed, and did not answer, or does not exist. |
+| `absent` | Not configured — there is no panel to serve. |
+| `skipped` | Configured, but not probed; `reason` says what prevented it. |
+
+This is the same contract `scripts/pr-context.sh` emits — one status per entry,
+drawn from a fixed set, always with a reason — so a consumer tests one field
+and never infers meaning from an empty value. The words differ from that
+tool's because the question does: it asks whether a query returned rows, this
+asks whether the thing on the other end is there.
+
+The exit-code rule above holds in JSON mode too: `--json` changes the format,
+not what the command asserts, so an unreachable upstream still exits 0. Both
+views render from one probe, so they cannot drift from each other.
+
+The HUD's HTTP API already serves tree and panel data machine-readably at
+`/api/*`, so `--json` deliberately does not duplicate it. It exists for what
+HTTP cannot tell you — service state, config resolution, and install state —
+which is exactly what you want a program to see when the HUD is *not*
+answering. `hud root` has no `--json`: it already prints one bare path, and
+wrapping that in a document would add a schema to maintain for no information.
 
 </details>
 

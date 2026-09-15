@@ -24,18 +24,23 @@
 #                because KeepAlive would restart it; the plist stays, so
 #                `hud start` brings the same service back.
 #   restart      stop, then start
-#   status       what is actually true right now: resolved HUD_ROOT and config,
+#   status [--json]
+#                what is actually true right now: resolved HUD_ROOT and config,
 #                service state and pid, port and health, and whether each
 #                configured upstream answers. Always exits 0 — it reports
-#                state, it does not assert it.
+#                state, it does not assert it. --json emits the same facts as
+#                one document (schema hud-status/v1); the exit code is the same.
 #   open         open the HUD in your browser
 #   logs [-f] [-n N]
 #                tail the server log ($HUD_ROOT/.generated/service.log)
 #   root         print the resolved HUD_ROOT
 #
-#   install      install the launchd user agent (service/install.sh)
-#   uninstall    remove it (service/uninstall.sh); args are passed through
-#   link         symlink this script into ~/.local/bin (HUD_LINK_DIR overrides)
+#   install      install the launchd SERVICE, so the HUD runs without you
+#                (service/install.sh). Does NOT put `hud` on your PATH.
+#   uninstall    remove that SERVICE (service/uninstall.sh); args pass through
+#   link         put this COMMAND on your PATH, by symlinking this script into
+#                $XDG_BIN_HOME (else ~/.local/bin). Installs no service.
+#   unlink       remove that COMMAND symlink, if it points at this checkout
 #
 #   index        rebuild the mache index (hud-index.mjs)
 #   smoke        integration gate against the real tree (smoke.sh)
@@ -48,7 +53,8 @@
 #
 # Environment: HUD_ROOT selects the content tree (default ~/hud). HUD_PORT,
 # HUD_HOST, and HUD_LABEL override the [serve] table, as they do everywhere
-# else in the HUD.
+# else in the HUD. XDG_BIN_HOME picks the directory `link` installs into
+# (default ~/.local/bin); HUD_LINK_DIR overrides both for a one-off.
 
 set -euo pipefail
 
@@ -56,7 +62,7 @@ set -euo pipefail
 # from the file itself keeps --help correct when the header grows or shrinks; a
 # fixed `sed -n '2,Np'` silently starts printing code the moment it moves.
 usage() {
-    awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$SELF"
+    awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$SELF_ABS"
     exit "${1:-0}"
 }
 
@@ -75,6 +81,36 @@ while [[ -L "$SELF" ]]; do
 done
 MACHINERY_DIR="$(cd -P -- "$(dirname -- "$SELF")" && pwd)"
 SERVER_JS="$MACHINERY_DIR/server.mjs"
+
+# The absolute path to this script. $SELF is whatever argv named — `./hud/hud`
+# stays relative, and a symlink whose text is a relative path is resolved
+# against the *link's* directory, not the caller's cwd. `link` must write an
+# absolute target and compare absolute paths, so it uses this, never $SELF.
+SELF_ABS="$MACHINERY_DIR/$(basename -- "$SELF")"
+
+# Follow a symlink chain to the file it ultimately names, absolute. Same walk
+# as the SELF resolution above, for the same reason: comparing raw `readlink`
+# output against an absolute path answers the wrong question. A dangling link
+# reports the path it names rather than failing — that is a state `link` has to
+# describe, not choke on. The hop bound is a cycle guard: `[[ -L ]]` is an
+# lstat and will not detect one for us.
+resolve_path() {
+    local p="$1" dir hops=0
+    while [[ -L "$p" ]] && (( hops++ < 40 )); do
+        dir="$(cd -P -- "$(dirname -- "$p")" && pwd)"
+        p="$(readlink -- "$p")"
+        # ${dir%/} because dirname of a top-level path is "/": joining naively
+        # yields "//x", which macOS's pwd preserves (a leading "//" is
+        # implementation-defined) and which would then never compare equal to
+        # the same file named the ordinary way.
+        [[ "$p" == /* ]] || p="${dir%/}/$p"
+    done
+    if dir="$(cd -P -- "$(dirname -- "$p")" 2>/dev/null && pwd)"; then
+        printf '%s/%s\n' "${dir%/}" "$(basename -- "$p")"
+    else
+        printf '%s\n' "$p"
+    fi
+}
 
 # ------------------------------------------------------------------ config
 
@@ -155,6 +191,16 @@ load_config() {
     DOMAIN="gui/$(id -u)"
     TARGET="${DOMAIN}/${LABEL}"
     PLIST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
+    # Generated state stays under the content tree — NOT in XDG_STATE_HOME or
+    # XDG_DATA_HOME, and this is deliberate. The HUD's split is public code /
+    # private data: the machinery is a checkout, everything the HUD produces
+    # about your work (this log, the peers snapshot, the mache index) belongs to
+    # the tree it describes, travels with it, and is gitignored there. A
+    # per-user XDG dir would scatter one tree's output across a location shared
+    # by every tree, and would break `HUD_ROOT=other-tree hud logs`. hud.toml
+    # stays in the tree for the same reason: it is per-tree config, not per-user
+    # config. Only the `link` target below is an XDG concern, because the
+    # command on your PATH genuinely is per-user.
     LOG_DIR="${HUD_ROOT_R}/.generated"
     LOG_FILE="${LOG_DIR}/service.log"
     CFG_LOADED=yes
@@ -285,28 +331,229 @@ cmd_restart() {
     cmd_start
 }
 
-# One line per upstream: what it is, where it points, and whether it answers.
-report_upstream() {
-    printf '  %-9s %-38s %s\n' "$1" "$2" "$3"
+# ------------------------------------------------------------- upstreams
+#
+# Probed once into one table, then rendered either as lines or as JSON. The
+# point of giving the machine a format is that it agrees with what the human is
+# told, and two renderers reading one table is the only way that stays true
+# without anyone remembering to keep them in step.
+#
+# `status` is a closed four-state vocabulary, the same shape scripts/pr-context.sh
+# emits and for the same reason: a consumer tests one field and never has to
+# infer meaning from an empty value.
+#   ok           probed, and answering
+#   unreachable  probed, and did not answer / does not exist
+#   absent       not configured — there is no panel to serve
+#   skipped      configured, but not probed; `reason` says what prevented it
+# The words are not pr-context.sh's (`empty`/`unavailable`) because the question
+# is not the same one: that tool asks whether a query returned rows, this one
+# asks whether the thing on the other end is there. What the two tools share is
+# the contract — every entry carries exactly one status, drawn from a fixed set,
+# and a reason that is never blank.
+UP_NAMES=() UP_TARGETS=() UP_STATUSES=() UP_REASONS=()
+
+# add_upstream <name> <target> <status> <reason>. An empty target means "not
+# configured": the human view prints `-`, the JSON view prints null.
+add_upstream() {
+    UP_NAMES+=("$1"); UP_TARGETS+=("$2"); UP_STATUSES+=("$3"); UP_REASONS+=("$4")
 }
 
-report_http_upstream() {
+probe_http_upstream() {
     local name="$1" url="$2" code
+    # No curl is "we did not look", which is not the same claim as "it is down"
+    # — the distinction the `skipped` state exists to keep.
+    if ! command -v curl >/dev/null 2>&1; then
+        add_upstream "$name" "$url" skipped "curl not found — not probed"
+        return 0
+    fi
     code="$(http_code "$url")"
-    if [[ "$code" == "000" ]]; then
-        report_upstream "$name" "$url" "unreachable (panel greys out)"
+    if [[ -z "$code" || "$code" == "000" ]]; then
+        add_upstream "$name" "$url" unreachable "panel greys out"
     else
-        report_upstream "$name" "$url" "ok (HTTP $code)"
+        add_upstream "$name" "$url" ok "HTTP $code"
     fi
 }
 
+probe_upstreams() {
+    UP_NAMES=() UP_TARGETS=() UP_STATUSES=() UP_REASONS=()
+
+    if [[ -n "$BOARD_URL" ]]; then
+        probe_http_upstream board "$BOARD_URL"
+    else
+        add_upstream board "" absent "no panel"
+    fi
+
+    if [[ -n "$DIGEST_CMD" ]]; then
+        # The first token only. The server tokenizes the command properly and
+        # runs it without a shell; this is a "can it be found" check, not an
+        # invocation — `hud status` must not run your digest.
+        local digest_bin
+        read -r digest_bin _ <<<"$DIGEST_CMD"
+        if command -v "$digest_bin" >/dev/null 2>&1; then
+            add_upstream digest "$DIGEST_CMD" ok "$digest_bin on PATH"
+        else
+            add_upstream digest "$DIGEST_CMD" unreachable "$digest_bin not on PATH"
+        fi
+    else
+        add_upstream digest "" absent "no panel"
+    fi
+
+    if [[ -n "$SESSIONS_ROOT" ]]; then
+        if [[ -d "$SESSIONS_ROOT" ]]; then
+            add_upstream sessions "$SESSIONS_ROOT" ok "directory"
+        else
+            add_upstream sessions "$SESSIONS_ROOT" unreachable "no such directory"
+        fi
+    else
+        add_upstream sessions "" absent "no panel"
+    fi
+
+    if [[ -n "$LECTIO_URL" ]]; then
+        probe_http_upstream lectio "$LECTIO_URL"
+    else
+        add_upstream lectio "" absent "sessions stay tier-1"
+    fi
+}
+
+# One line per upstream: what it is, where it points, and whether it answers.
+# `absent` reads as "not configured" to a human; the JSON keeps the vocabulary
+# word, because that is the field a program matches on.
+report_upstreams() {
+    local i label
+    for i in ${UP_NAMES[@]+"${!UP_NAMES[@]}"}; do
+        case "${UP_STATUSES[$i]}" in
+            absent) label="not configured" ;;
+            *) label="${UP_STATUSES[$i]}" ;;
+        esac
+        printf '  %-9s %-38s %s (%s)\n' \
+            "${UP_NAMES[$i]}" "${UP_TARGETS[$i]:--}" "$label" "${UP_REASONS[$i]}"
+    done
+}
+
+# The JSON view. It exists for what the HTTP API does not expose: the HUD's
+# /api/* routes already serve tree and panel data machine-readably, but nothing
+# over HTTP can tell you about the service, how the config resolved, or where
+# the CLI is installed — and all three are the things you want a program to see
+# when the HUD is NOT answering. jq is required only on this path, so the human
+# default keeps working on a box without it.
+emit_status_json() {  # port-holder pid, HTTP code, service pid
+    command -v jq >/dev/null 2>&1 || die "status --json needs jq on PATH"
+    local holder="$1" code="$2" pid="$3"
+
+    local ups='[]' i
+    for i in ${UP_NAMES[@]+"${!UP_NAMES[@]}"}; do
+        ups="$(jq --arg n "${UP_NAMES[$i]}" --arg t "${UP_TARGETS[$i]}" \
+                  --arg s "${UP_STATUSES[$i]}" --arg r "${UP_REASONS[$i]}" \
+                  '. + [{name: $n,
+                         target: (if $t == "" then null else $t end),
+                         status: $s,
+                         reason: $r}]' <<<"$ups")"
+    done
+
+    local warns='[]' w
+    for w in ${CONFIG_WARNS[@]+"${CONFIG_WARNS[@]}"}; do
+        warns="$(jq --arg w "$w" '. + [$w]' <<<"$warns")"
+    done
+
+    # Numbers reach jq as JSON literals, so anything that is not a number
+    # becomes null rather than a string that a consumer has to re-parse. `000`
+    # is curl's "no response" sentinel, not an HTTP status, so it is null too.
+    local code_json=null holder_json=null pid_json=null
+    [[ "$code" =~ ^[0-9]+$ && "$code" != "000" ]] && code_json="$code"
+    [[ "$holder" =~ ^[0-9]+$ ]] && holder_json="$holder"
+    [[ "$pid" =~ ^[0-9]+$ ]] && pid_json="$pid"
+
+    local holder_is_hud=false svc_available=false svc_loaded=false plist_present=false
+    if [[ -n "$holder" ]] && is_hud_server "$holder"; then holder_is_hud=true; fi
+    if have_launchd; then svc_available=true; fi
+    if service_loaded; then svc_loaded=true; fi
+    if [[ -f "$PLIST" ]]; then plist_present=true; fi
+
+    local dir dest target="" linked=false on_path=false
+    dir="$(link_target_dir)"
+    dest="$dir/hud"
+    if [[ -L "$dest" ]]; then
+        target="$(resolve_path "$dest")"
+        [[ "$target" == "$SELF_ABS" ]] && linked=true
+    elif [[ -e "$dest" ]]; then
+        target="$dest"
+    fi
+    case ":${PATH}:" in *":$dir:"*) on_path=true ;; esac
+
+    jq -n \
+        --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --arg root "$HUD_ROOT_R" \
+        --arg config_file "$CFG_FILE" \
+        --argjson config_warnings "$warns" \
+        --arg url "$URL" \
+        --argjson port "$PORT" \
+        --argjson http_code "$code_json" \
+        --argjson holder_pid "$holder_json" \
+        --argjson holder_is_hud "$holder_is_hud" \
+        --arg service_label "$LABEL" \
+        --argjson service_available "$svc_available" \
+        --argjson service_loaded "$svc_loaded" \
+        --argjson service_pid "$pid_json" \
+        --arg plist "$PLIST" \
+        --argjson plist_present "$plist_present" \
+        --arg log "$LOG_FILE" \
+        --arg link_dir "$dir" \
+        --arg link_path "$dest" \
+        --arg link_target "$target" \
+        --argjson link_linked "$linked" \
+        --argjson link_on_path "$on_path" \
+        --argjson upstreams "$ups" \
+        '{schema: "hud-status/v1",
+          generated_at: $generated_at,
+          root: $root,
+          config: {file: (if $config_file == "" then null else $config_file end),
+                   found: ($config_file != ""),
+                   warnings: $config_warnings},
+          serving: {url: $url,
+                    port: $port,
+                    ok: ($http_code != null),
+                    http_code: $http_code,
+                    holder_pid: $holder_pid,
+                    holder_is_hud_server: $holder_is_hud},
+          service: {label: $service_label,
+                    available: $service_available,
+                    loaded: $service_loaded,
+                    pid: $service_pid,
+                    plist: $plist,
+                    plist_present: $plist_present},
+          log: $log,
+          cli_link: {dir: $link_dir,
+                     path: $link_path,
+                     target: (if $link_target == "" then null else $link_target end),
+                     linked: $link_linked,
+                     dir_on_path: $link_on_path},
+          upstreams: $upstreams}'
+}
+
 cmd_status() {
+    local as_json=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --json) as_json=yes; shift ;;
+            *) die "status: unknown argument $1" ;;
+        esac
+    done
+
     load_config
+    probe_upstreams
 
     local holder code health service_state pid
     holder="$(port_holder)"
     code="$(http_code "$URL")"
-    if [[ "$code" == "000" ]]; then health="not serving"; else health="HTTP $code"; fi
+    if [[ -z "$code" || "$code" == "000" ]]; then health="not serving"; else health="HTTP $code"; fi
+
+    # An unreachable upstream is a normal state, so JSON mode reports it and
+    # exits 0 exactly as the human view does. The format changed; what the
+    # command ASSERTS did not.
+    if [[ -n "$as_json" ]]; then
+        emit_status_json "$holder" "$code" "$(service_pid)"
+        return 0
+    fi
 
     pid="$(service_pid)"
     if service_loaded; then
@@ -337,42 +584,7 @@ cmd_status() {
     done
 
     printf '\nupstreams\n'
-    if [[ -n "$BOARD_URL" ]]; then
-        report_http_upstream board "$BOARD_URL"
-    else
-        report_upstream board "-" "not configured (no panel)"
-    fi
-
-    if [[ -n "$DIGEST_CMD" ]]; then
-        # The first token only. The server tokenizes the command properly and
-        # runs it without a shell; this is a "can it be found" check, not an
-        # invocation — `hud status` must not run your digest.
-        local digest_bin
-        read -r digest_bin _ <<<"$DIGEST_CMD"
-        if command -v "$digest_bin" >/dev/null 2>&1; then
-            report_upstream digest "$DIGEST_CMD" "ok ($digest_bin on PATH)"
-        else
-            report_upstream digest "$DIGEST_CMD" "unreachable ($digest_bin not on PATH)"
-        fi
-    else
-        report_upstream digest "-" "not configured (no panel)"
-    fi
-
-    if [[ -n "$SESSIONS_ROOT" ]]; then
-        if [[ -d "$SESSIONS_ROOT" ]]; then
-            report_upstream sessions "$SESSIONS_ROOT" "ok (directory)"
-        else
-            report_upstream sessions "$SESSIONS_ROOT" "unreachable (no such directory)"
-        fi
-    else
-        report_upstream sessions "-" "not configured (no panel)"
-    fi
-
-    if [[ -n "$LECTIO_URL" ]]; then
-        report_http_upstream lectio "$LECTIO_URL"
-    else
-        report_upstream lectio "-" "not configured (sessions stay tier-1)"
-    fi
+    report_upstreams
 
     printf '\nAn unreachable upstream is a normal state: the HUD greys that panel out\n'
     printf 'and keeps serving everything else, so this command still exits 0.\n'
@@ -406,27 +618,86 @@ cmd_logs() {
     tail ${follow:+"$follow"} -n "$lines" -- "$LOG_FILE"
 }
 
+# Where the `hud` COMMAND goes — as opposed to `install`, which is the launchd
+# service and touches nothing on your PATH.
+#
+# This is the one thing in this script that is a per-user concern rather than a
+# per-tree one, which is why it is the one thing that consults XDG:
+# $XDG_BIN_HOME if set, else ~/.local/bin. XDG does not actually define a
+# variable for user binaries — ~/.local/bin is convention, not spec — so
+# nothing here invents one to go with it. HUD_LINK_DIR remains the explicit
+# override for installing somewhere else once.
+link_target_dir() {
+    printf '%s\n' "${HUD_LINK_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}"
+}
+
+# Not being on PATH is a warning, not a failure: the link is correctly made,
+# and whether your shell can find it is a fact about your rc file — which this
+# script does not edit, so it prints the line for you to paste instead.
+warn_if_not_on_path() {
+    case ":${PATH}:" in
+        *":$1:"*) return 0 ;;
+    esac
+    printf '\n%s is not on your PATH. Add this to your shell rc:\n\n' "$1" >&2
+    # shellcheck disable=SC2016  # $PATH is literal: this is a line to paste
+    printf '    export PATH="%s:$PATH"\n' "$1" >&2
+}
+
 cmd_link() {
-    local dir="${HUD_LINK_DIR:-$HOME/.local/bin}"
-    local dest="$dir/hud"
-    mkdir -p -- "$dir"
+    local dir dest current
+    dir="$(link_target_dir)"
+    dest="$dir/hud"
+
     if [[ -e "$dest" && ! -L "$dest" ]]; then
         die "$dest exists and is not a symlink — move it yourself."
     fi
     if [[ -L "$dest" ]]; then
-        local current
-        current="$(readlink -- "$dest")"
-        if [[ "$current" == "$SELF" ]]; then
-            printf 'already linked: %s -> %s\n' "$dest" "$SELF"
+        current="$(resolve_path "$dest")"
+        if [[ "$current" == "$SELF_ABS" ]]; then
+            printf 'already linked: %s -> %s\n' "$dest" "$SELF_ABS"
+            warn_if_not_on_path "$dir"
             return 0
         fi
+        # Another install, or an older checkout of this one. Overwriting it is
+        # how you find out, much later and from a confusing symptom, that `hud`
+        # stopped being the hud you thought it was.
+        printf 'hud: %s is a link to somewhere else — not replacing it:\n' "$dest" >&2
+        printf '  existing  %s\n' "$current" >&2
+        printf '  this one  %s\n' "$SELF_ABS" >&2
+        printf "\nRun 'hud unlink' from the checkout that owns it, remove it yourself,\n" >&2
+        printf 'or set HUD_LINK_DIR to install this one somewhere else.\n' >&2
+        exit 1
     fi
-    ln -sfn -- "$SELF" "$dest"
-    printf 'linked %s -> %s\n' "$dest" "$SELF"
-    case ":${PATH}:" in
-        *":$dir:"*) ;;
-        *) printf "%s is not on your PATH — add it to use 'hud' from anywhere.\n" "$dir" ;;
-    esac
+
+    mkdir -p -- "$dir"
+    ln -sfn -- "$SELF_ABS" "$dest"
+    printf 'linked %s -> %s\n' "$dest" "$SELF_ABS"
+    warn_if_not_on_path "$dir"
+}
+
+cmd_unlink() {
+    local dir dest current
+    dir="$(link_target_dir)"
+    dest="$dir/hud"
+
+    # -e is false for a dangling symlink, so both tests are needed to tell
+    # "nothing here" from "a link to something that is gone".
+    if [[ ! -e "$dest" && ! -L "$dest" ]]; then
+        printf 'nothing to unlink: %s does not exist\n' "$dest"
+        return 0
+    fi
+    if [[ ! -L "$dest" ]]; then
+        die "$dest is not a symlink — this command did not put it there."
+    fi
+    current="$(resolve_path "$dest")"
+    if [[ "$current" != "$SELF_ABS" ]]; then
+        printf 'hud: %s points at another install — leaving it alone:\n' "$dest" >&2
+        printf '  existing  %s\n' "$current" >&2
+        printf '  this one  %s\n' "$SELF_ABS" >&2
+        exit 1
+    fi
+    rm -- "$dest"
+    printf 'unlinked %s\n' "$dest"
 }
 
 # --------------------------------------------------------------- dispatch
@@ -444,6 +715,7 @@ case "$command" in
     logs) cmd_logs "$@" ;;
     root) load_config; printf '%s\n' "$HUD_ROOT_R" ;;
     link) cmd_link "$@" ;;
+    unlink) cmd_unlink "$@" ;;
     install) exec bash "$MACHINERY_DIR/service/install.sh" "$@" ;;
     uninstall) exec bash "$MACHINERY_DIR/service/uninstall.sh" "$@" ;;
     index) exec node "$MACHINERY_DIR/hud-index.mjs" "$@" ;;
