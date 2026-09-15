@@ -135,7 +135,7 @@ fill it once the lenses have returned, and before synthesis in R.5.
 by hand what it already collects:
 
 ```bash
-bash scripts/pr-context.sh --pr owner/repo#$PR_NUM > /tmp/pr-ctx-$PR_NUM.json
+pr-context.sh --pr owner/repo#$PR_NUM > /tmp/pr-ctx-$PR_NUM.json
 ```
 
 It emits one JSON document (`schema: pr-context/v1`) in which every section

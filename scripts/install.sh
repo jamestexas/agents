@@ -1,8 +1,19 @@
 #!/usr/bin/env bash
-# install.sh — symlink this repo's agents and skills into ~/.claude.
+# install.sh — symlink this repo's agents, skills, and commands into place.
 #
 # Idempotent. Reports stale symlinks (point to a missing path) and skipped
 # entries (different target already in place).
+#
+# Three destinations, because the three things are used differently:
+#   agents/     → ~/.claude/agents     (read by Claude Code)
+#   skills/     → ~/.claude/skills     (read by Claude Code)
+#   scripts/*   → a directory on PATH  (RUN by a skill, from any repo)
+#
+# The third exists because a skill body that says `bash scripts/pr-context.sh`
+# resolves that relative path against whatever repo the skill is running in —
+# which is never this one. The script was therefore absent in the common case
+# and the step silently degraded. Putting the commands on PATH is what makes
+# the documented invocation true from anywhere.
 #
 # Usage:
 #   scripts/install.sh           # dry-run, report what would change
@@ -18,6 +29,16 @@ SKILLS_SRC="$REPO_ROOT/skills"
 AGENTS_DST="$HOME/.claude/agents"
 SKILLS_DST="$HOME/.claude/skills"
 
+# Where the runnable commands go. Same resolution order the HUD's `link` verb
+# uses: an explicit override, else $XDG_BIN_HOME, else ~/.local/bin — which is
+# convention rather than spec, so nothing here invents an XDG variable for it.
+BIN_DST="${AGENTS_BIN_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}"
+
+# Explicit allowlist, not `scripts/*.sh`. These are the scripts a SKILL invokes
+# by name; build.sh and install.sh are this repo's own machinery and have no
+# business in a user's PATH. Adding a name here is a deliberate act.
+BIN_SCRIPTS="pr-context.sh pr-suggest.sh which-applies.sh"
+
 mode="dry-run"
 case "${1:-}" in
     --apply)  mode="apply" ;;
@@ -26,7 +47,7 @@ case "${1:-}" in
     *)        echo "Usage: $0 [--apply|--doctor]"; exit 2 ;;
 esac
 
-mkdir -p "$AGENTS_DST" "$SKILLS_DST"
+mkdir -p "$AGENTS_DST" "$SKILLS_DST" "$BIN_DST"
 
 count_link=0 count_skip=0 count_stale=0
 
@@ -90,7 +111,23 @@ for d in "$SKILLS_SRC"/*/; do
 done
 
 echo ""
-echo "Doctor: scanning ~/.claude/agents and ~/.claude/skills for broken symlinks…"
+echo "Commands → $BIN_DST"
+for name in $BIN_SCRIPTS; do
+    [ -f "$SCRIPT_DIR/$name" ] || { echo "  ⚠️  missing: scripts/$name"; continue; }
+    link_one "$SCRIPT_DIR/$name" "$BIN_DST/$name"
+done
+
+# A link into a directory PATH does not search is a link that does nothing, and
+# the failure it produces later ("command not found" inside a skill) points
+# nowhere near here. Say it now. This is a warning, not a failure: the link is
+# correct, the shell just cannot see it yet.
+case ":${PATH}:" in
+    *":$BIN_DST:"*) ;;
+    *) echo "  ⚠️  $BIN_DST is not on your PATH — add it, or set AGENTS_BIN_DIR to a directory that is." ;;
+esac
+
+echo ""
+echo "Doctor: scanning for broken symlinks…"
 for dst in "$AGENTS_DST" "$SKILLS_DST"; do
     for l in "$dst"/*; do
         [ -L "$l" ] || continue
@@ -104,6 +141,24 @@ for dst in "$AGENTS_DST" "$SKILLS_DST"; do
             fi
         fi
     done
+done
+
+# $BIN_DST is swept by NAME, not by globbing the directory. ~/.claude/agents and
+# ~/.claude/skills belong to this installer; ~/.local/bin belongs to the user and
+# to every other tool that links into it. Sweeping it wholesale would delete some
+# other tool's broken link as a side effect of running our doctor.
+for name in $BIN_SCRIPTS; do
+    l="$BIN_DST/$name"
+    [ -L "$l" ] || continue
+    if [ ! -e "$l" ]; then
+        target="$(readlink "$l")"
+        echo "  🪦 broken: $l -> $target"
+        count_stale=$((count_stale+1))
+        if [ "$mode" = "apply" ]; then
+            rm "$l"
+            echo "     ↪ removed"
+        fi
+    fi
 done
 
 echo ""

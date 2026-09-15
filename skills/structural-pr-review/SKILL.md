@@ -96,8 +96,16 @@ look for in Phases 3–5.
 ### 2.1 Gather the PR's own context
 
 ```bash
-bash scripts/pr-context.sh --pr owner/repo#N > /tmp/pr-ctx-N.json
+pr-context.sh --pr owner/repo#N > /tmp/pr-ctx-N.json
 ```
+
+**Invoke it by bare name, from PATH.** `scripts/install.sh --apply` links it
+into `$XDG_BIN_HOME` (else `~/.local/bin`) for exactly this reason: a relative
+`scripts/pr-context.sh` resolves against *the repo under review*, which is never
+the repo the script lives in, so the documented command was absent in the common
+case and this node silently did nothing. If `command -v pr-context.sh` comes up
+empty, say so and gather the sections by hand — do not fall back to a relative
+path that will appear to work only when reviewing this repo.
 
 One read-only JSON document (`schema: pr-context/v1`) holding what the PR
 *claims*, which ticket it is meant to satisfy and that ticket's acceptance
@@ -107,7 +115,7 @@ status, so `empty` ("we looked, nothing is here") is never confusable with
 `unavailable` ("we did not look") — carry an `unavailable` section forward as a
 named gap rather than reviewing as though it were empty.
 
-`scripts/pr-context.sh --help` documents the sections and the status contract;
+`pr-context.sh --help` documents the sections and the status contract;
 read it there rather than re-deriving it here. `--similar 0` drops the slowest
 section when you need the context fast.
 
@@ -185,6 +193,39 @@ Classify from the diff + body:
   **Verify every agent claim against the code yourself before relaying it**
   (pr-review-kit's own Phase 6). Agent confidence is not evidence.
 
+### When the fan-out is optional
+
+Dispatching four agents at a twelve-line config change is not rigor, it is
+theater that costs a reader's attention. **Skip the deep-lens fan-out only when
+all three conditions hold:**
+
+1. **The diff is small and legible** — you have read every changed line, not
+   skimmed it.
+2. **Code-reach is zero** — the change introduces no new caller, branch, or
+   control flow that other code enters. Config, data, docs, and declarative
+   resources usually qualify; anything with a new conditional does not.
+3. **Every load-bearing claim is already verified against the artifact**, not
+   against the PR body — you ran the gate, read the generated output, or
+   checked the resource as it will exist.
+
+Miss one and you dispatch. **What runs regardless of this decision: the
+dimension sweep below and the Phase 6 triage gate.** They are not depth, they
+are coverage and significance — the two things a small diff is *most* likely to
+get wrong, because "it's small" is exactly the reasoning that skips looking at
+the migration it also touches. Record the skip and its three conditions as a
+row in the Phase 8 artifact, so it reads as a decision rather than an omission.
+
+### A named trap: two symmetric exclusion lists
+
+When a file contains two similar guard, filter, or exclusion lists — an
+allow/deny pair, include/exclude, or two resources each excluding the other's
+members — **identify which list is which before filing anything about a gap in
+either.** Read the list's own declaration, not the one your eye landed on. The
+symmetry is the trap: both lists are plausible, so reading the wrong one yields
+a confident, specific, entirely false finding of the form "X falls into neither
+branch." A false structural finding costs the author more than a missed nit,
+because they must disprove it.
+
 **Exit gate — sweep the dimensions.** The lenses above are deep and narrow: they
 find what they were pointed at, which is how a review ends up with three sharp
 findings about the code you understood and total silence about the migration, the
@@ -260,9 +301,59 @@ the seam/ownership/intent that makes it make sense.
 
 ## Phase 8 — Falsifiable matrix (the durable artifact)
 
-Write a per-PR notes file OUTSIDE the reviewed repo (e.g.
-`~/Downloads/<scope>-review/PR-N-<slug>.md`), one row per checkable claim so a
-future reader verifies each in ~30s:
+Write a per-PR notes file, one row per checkable claim so a future reader
+verifies each in ~30s.
+
+<!-- @include-begin _shared/review-artifact-destination.md -->
+**Where the notes file goes.** Resolve the destination in this order, and state
+which one you used when you hand the review over:
+
+1. **`$HUD_ROOT/projects/<project>/notes/PR-N-<slug>.md`** when `HUD_ROOT`
+   resolves — the env var if set, else `~/hud` if that directory exists. This is
+   the default, and it is the HUD consolidation rule applied: a review artifact
+   *is* a note, and notes live in exactly one tree — the one that is backed up,
+   indexed, and searchable months later when you need the matrix again.
+2. **`/tmp/<owner>-<repo>-review/PR-N-<slug>.md`** only when no HUD tree
+   resolves. A scratch path is an honest "this is not being kept"; say so
+   rather than letting the author assume it was filed somewhere.
+
+Two destinations are wrong regardless of which branch you took. **Never a
+browser's download directory** — it is unbacked-up, unindexed, and invisible to
+every later search, so work content put there is work content lost. **Never
+inside the repo under review**, which is how a private review note becomes a
+commit. And never inside the agents/skills repo either: that repo holds the
+review machinery, not the output of running it.
+<!-- @include-end _shared/review-artifact-destination.md -->
+
+The artifact has two required tables, and they are required in this order.
+
+**Table 1 — the dimension sweep (Phase 4's exit gate, made visible).** Copy this
+block in with all eight rows present, then fill each one. The rows ship with the
+template precisely so that a dimension you did not sweep is a *blank cell a
+reader can see*, rather than an absence they cannot distinguish from a clean
+result. Deleting a row is not an option the format offers:
+
+```markdown
+| Dimension         | Result | Evidence / finding |
+|-------------------|--------|--------------------|
+| Correctness       |        |                    |
+| Security          |        |                    |
+| Performance       |        |                    |
+| Code quality      |        |                    |
+| Testing           |        |                    |
+| Edge cases        |        |                    |
+| Breaking changes  |        |                    |
+| Documentation     |        |                    |
+```
+
+Every `Result` is one of `FINDING` / `CLEAR` / `N/A` / `NOT ASSESSED`, each with
+the evidence `skills/pr-review/DIMENSIONS.md` requires of it; an empty cell is an
+unswept dimension and reads as a defect in the review, not in the PR. **If you
+are writing this table for the first time here in Phase 8, the sweep did not
+happen** — it is Phase 4's exit gate, and back-filling it at artifact time is the
+failure mode the gate exists to catch.
+
+**Table 2 — the falsifiable matrix.**
 
 ```markdown
 | # | Claim | Evidence location | Disposition | Verdict | Verified by |
@@ -278,10 +369,10 @@ is indistinguishable from a triage that read three items and stopped, so the
 dropped rows *are* the evidence the gate ran. State both counts — candidates in,
 dispositions out.
 
-Include: what it does (your words), design anchor (body/ticket/spec quotes), the
-Phase 4 dimension table, the matrix, open gaps (deferred to other PRs — a
-skipped structural tier belongs here as a deferred row, per Phase 1), and quick
-verification commands.
+Around the two tables include: what it does (your words), design anchor
+(body/ticket/spec quotes), open gaps (deferred to other PRs — a skipped
+structural tier belongs here as a deferred row, per Phase 1; so does a skipped
+fan-out, per Phase 4), and quick verification commands.
 
 ---
 
@@ -334,7 +425,8 @@ only the scaffolding changes.
 verify it landed (`gh api …/reviews | select(.user.login==ME) | last`). For
 inline replies / thread resolution / re-request, follow `skills/pr-review-kit/ENGAGE.md` (its Phase 9). For
 a finding small enough to land as a one-click applyable suggestion, use
-`scripts/pr-suggest.sh` (dry-run by default; refuses unchanged-context anchors).
+`pr-suggest.sh` (on PATH via the same install; dry-run by default; refuses
+unchanged-context anchors).
 Posting is the only action that touches shared state — never infer authorization.
 
 ---

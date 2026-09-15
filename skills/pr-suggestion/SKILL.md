@@ -200,11 +200,11 @@ whether to `APPROVE`.
 
 ```bash
 # Preview (dry-run by default — posts nothing):
-scripts/pr-suggest.sh --pr owner/repo#N --file path/f.go --line 42 \
+pr-suggest.sh --pr owner/repo#N --file path/f.go --line 42 \
     --replacement /tmp/fix.txt [--start 40] [--note /tmp/why.md]
 
 # Post it (COMMENT review) once you've eyeballed the payload:
-scripts/pr-suggest.sh --pr owner/repo#N --file path/f.go --line 42 \
+pr-suggest.sh --pr owner/repo#N --file path/f.go --line 42 \
     --replacement /tmp/fix.txt --note /tmp/why.md --post
 ```
 
