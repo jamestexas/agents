@@ -8,7 +8,12 @@ they support.
 - `agents/` — focused subagent definitions with enforced tool posture.
 - `skills/` — user-invocable workflows such as review, handoff, and work-board
   access.
-- `scripts/` — lint, generation, and idempotent local installation.
+- `scripts/` — lint, generation, and idempotent local installation, plus two
+  read/write helpers the review skills call rather than re-describe:
+  `pr-context.sh` (read-only: gathers a PR's claims, threads, linked tickets
+  and similar PRs as JSON) and `pr-suggest.sh` (posts an applyable
+  `suggestion`; dry-run by default, and refuses an anchor that is not a
+  changed line).
 - `hud/` — the work-HUD server and its authoring skill; the content it renders
   lives in a private tree outside this repository.
 - `work-board/` — a workerd-native UI staged here before transfer to

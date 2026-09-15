@@ -26,6 +26,15 @@ only lectio can do.
 whether that's fresh enough and refreshes if not (the "derive current state"
 move). gh is the fallback for what lectio doesn't cover, never the first reach.
 
+**Sibling view, different mode.** The work HUD's needs-you dial and MY PRS
+panel answer the same question *ambiently* — a page that is always up, fed by
+a local work-board service over Canonical Hours. This skill is the
+*interactive* mode: you ask, it refreshes, and it answers the follow-up that
+an always-on dial cannot ("did I address the review?") by joining PR threads
+to your local worktrees. Two substrates on purpose — lectio is historical and
+cross-source, Canonical Hours is a scheduled fold serving a current board.
+Reach for the dial to notice; reach for this to act.
+
 ## Arguments
 
 - `--since <dur>` — window for "new activity" (e.g. `24h`, `3d`). Default `24h`.
