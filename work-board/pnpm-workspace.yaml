@@ -1,0 +1,27 @@
+# pnpm settings. Not a workspace definition — `packages:` is deliberately
+# omitted, which means only the root package is included.
+#
+# This file exists because pnpm settings moved out of package.json. Since
+# pnpm 11 the `pnpm` field there is not read at all, and 10.30 already warns
+# that it ignores it, so an override written to package.json is a pin that
+# quietly stops existing when someone upgrades pnpm — the lockfile gets
+# regenerated without it, the vulnerable version comes back, and nothing
+# fails. That is the specific trap this avoids:
+# https://pnpm.io/settings
+
+overrides:
+  # CVE remediation, not a preference. `@cloudflare/vitest-pool-workers@0.22.0`
+  # (the latest published) hard-pins `miniflare@5.20260815.0-alpha`, which in
+  # turn pins `sharp` at exactly 0.35.2 — vulnerable to GHSA-rgj7-g3m4-5g8c
+  # (high; libheif, patched in 0.35.4). There is no upstream release of
+  # vitest-pool-workers that resolves this, so the pin cannot be fixed by
+  # upgrading a direct dependency.
+  #
+  # 0.35.4 is not a guess: it is the exact version Cloudflare's own next
+  # miniflare (5.20260911.1-alpha, already in this tree via wrangler) depends
+  # on, so it is the version upstream ships with miniflare 5.x.
+  #
+  # Remove this once vitest-pool-workers ships a release whose miniflare
+  # depends on sharp >= 0.35.4. Check with `pnpm why sharp` — the override is
+  # no longer load-bearing when every path already resolves to >= 0.35.4.
+  sharp: 0.35.4
