@@ -18,14 +18,16 @@ hud/hud install   # install the SERVICE — a different thing; see below
 ```
 
 Upstream endpoints, the launchd label, and the port the *service* runs on all
-come from `$HUD_ROOT/hud.toml`. Two caveats the file itself cannot tell you:
-`server.mjs` reads `HUD_PORT` from the environment, not `[serve] port` — the
-service works because `install.sh` renders that value into the plist — and it
-binds `127.0.0.1` literally, so **`[serve] host` is not read by anything**. It
-cannot expose the HUD, and it is not what keeps it loopback-only
-through the server's own `loadConfig()`. There is no second config path and no
-second TOML parser; `HUD_ROOT`, `HUD_PORT`, `HUD_HOST` and `HUD_LABEL` override
-the file, as they do everywhere else in the HUD.
+come from `$HUD_ROOT/hud.toml`, read through the server's own `loadConfig()`.
+There is no second config path and no second TOML parser; `HUD_ROOT`,
+`HUD_PORT`, `HUD_HOST` and `HUD_LABEL` override the file, as they do everywhere
+else in the HUD.
+
+Two caveats the file itself cannot tell you: `server.mjs` reads `HUD_PORT` from
+the environment, not `[serve] port` — the service works because `install.sh`
+renders that value into the plist — and it binds `127.0.0.1` literally, so
+**`[serve] host` is not read by anything**. It cannot expose the HUD, and it is
+not what keeps it loopback-only.
 
 ## What the verbs refuse to do
 
