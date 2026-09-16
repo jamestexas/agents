@@ -43,6 +43,7 @@ HUD_ROOT=~/hud node hud/server.mjs     # then open http://127.0.0.1:4870
 ```bash
 node --test hud/test/                  # hermetic suite; touches no real tree
 bash hud/smoke.sh                      # asserts against a real HUD_ROOT
+bash hud/container-smoke.sh            # asserts against the built image; skips if absent
 bash hud/service/install.sh            # optional macOS launchd agent
 ```
 

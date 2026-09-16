@@ -108,3 +108,32 @@ loadout caveat above before trusting what the panel says:
 `/home/hud` is the run-as user's home, so that path is what the loadout
 default (`~/.claude`) resolves to inside the image. For sessions, mount it
 wherever you like and name that path in `sources.sessions.root`.
+
+## Checking a build
+
+```bash
+bash hud/container-smoke.sh                  # against hud:0.1.0-arm64
+HUD_IMAGE=hud:0.1.0 HUD_CTR_PORT=4899 bash hud/container-smoke.sh
+```
+
+Nine asserts against a tree `hud init` scaffolds for the run, not your real
+one: the shell renders, `/api/tree` returns a dropped note with its
+frontmatter parsed, `/api/md` is byte-identical to the file on the host, every
+dynamic route answers in its documented envelope, and the watch-only 405s hold
+inside the container. It stops the container and removes the tree on the way
+out.
+
+It **skips with exit 0** when docker or the image is absent, naming which — so
+an unrun gate cannot be mistaken for a passing one. Only `PASS` lines are
+assertions.
+
+This is the gate the other two cannot be: `test/bootstrap.test.mjs` covers the
+same onboarding path hermetically but runs `server.mjs` in-process, so it never
+exercises the two things `container-entry.mjs` exists for (the import-not-exec
+start and the `0.0.0.0` bind), and `smoke.sh` only ever sees the host. A
+loopback-bind regression is invisible to both and fails assert 03 here.
+
+The image is a build artifact and is gitignored, so it can lag the source
+without anything complaining. `container-smoke.sh` tests **the image you have
+loaded**, never the working tree — rebuild before reading a result as a verdict
+on your current code.
