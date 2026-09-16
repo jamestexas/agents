@@ -83,11 +83,11 @@ come from `$HUD_ROOT/hud.toml`; `HUD_ROOT`, `HUD_PORT`, `HUD_HOST` and
 `HUD_LABEL` override the file. `hud status` always exits 0 — it reports state
 rather than asserting it.
 
-Two caveats `hud.toml` cannot tell you: `server.mjs` reads `HUD_PORT` from the
-environment, not `[serve] port` — the service works because `install.sh`
-renders that value into the plist — and it binds `127.0.0.1` literally, so
-**`[serve] host` is not read by anything**. It cannot expose the HUD, and it is
-not what keeps it loopback-only.
+Two keys are not read by `server.mjs` at all, and `hud.toml` cannot tell you
+so: `[serve] port` reaches it only as `HUD_PORT`, and **`[serve] host` is read
+by nothing** — the server binds `127.0.0.1` literally, so that key cannot
+expose the HUD. Which component consumes each key:
+[docs/SOURCES.md](docs/SOURCES.md#serve).
 
 ## Further reading
 
