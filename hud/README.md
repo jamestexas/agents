@@ -78,7 +78,12 @@ is the fastest way to see what this HUD is wired to and what it is not.
 | `hud smoke` | `smoke.sh` — the integration gate against the real tree. |
 | `hud test` | `node --test test/` — the hermetic suite. |
 
-Ports, hosts, labels, and upstream endpoints all come from `$HUD_ROOT/hud.toml`;
+Upstream endpoints, the launchd label, and the port the *service* runs on all
+come from `$HUD_ROOT/hud.toml`. Two caveats the file itself cannot tell you:
+`server.mjs` reads `HUD_PORT` from the environment, not `[serve] port` — the
+service works because `install.sh` renders that value into the plist — and it
+binds `127.0.0.1` literally, so **`[serve] host` is not read by anything**. It
+cannot expose the HUD, and it is not what keeps it loopback-only;
 `HUD_ROOT`, `HUD_PORT`, `HUD_HOST` and `HUD_LABEL` override the file. `hud
 status` always exits 0 — it reports state rather than asserting it.
 

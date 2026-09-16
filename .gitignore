@@ -59,6 +59,9 @@ scripts/which-applies.sh
 # publishing work data, not the mechanism.
 hud/generated/
 hud/.generated/
+# ...and a repo-root .generated/, which a HUD run with HUD_ROOT=this-repo
+# creates. It can hold peer handles and PR data; this repo is public.
+.generated/
 
 # hud/ apko + melange build artifacts. The signing key is generated per-clone
 # by `melange keygen` and is a local build credential, not a release key —

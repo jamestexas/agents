@@ -17,7 +17,12 @@ hud/hud link      # put the COMMAND on your PATH
 hud/hud install   # install the SERVICE — a different thing; see below
 ```
 
-Ports, hosts, labels, and upstream endpoints all come from `$HUD_ROOT/hud.toml`
+Upstream endpoints, the launchd label, and the port the *service* runs on all
+come from `$HUD_ROOT/hud.toml`. Two caveats the file itself cannot tell you:
+`server.mjs` reads `HUD_PORT` from the environment, not `[serve] port` — the
+service works because `install.sh` renders that value into the plist — and it
+binds `127.0.0.1` literally, so **`[serve] host` is not read by anything**. It
+cannot expose the HUD, and it is not what keeps it loopback-only
 through the server's own `loadConfig()`. There is no second config path and no
 second TOML parser; `HUD_ROOT`, `HUD_PORT`, `HUD_HOST` and `HUD_LABEL` override
 the file, as they do everywhere else in the HUD.
@@ -29,6 +34,11 @@ the file, as they do everywhere else in the HUD.
 - **`hud stop`** boots the service out rather than killing it, because
   `KeepAlive` would restart anything killed. The plist stays, so `hud start`
   brings the same service back.
+- **`hud init`** refuses more than the rest of these put together — it will not
+  overwrite a `hud.toml`, clobber an existing scaffold, create a git remote, or
+  accept `/` or `$HOME` as a tree. Those are stated where the reader meets them
+  rather than repeated here: see
+  [SOURCES.md](SOURCES.md#what-hud-init-probes-and-what-it-writes).
 - **`hud status`** always exits 0, which is a contract rather than an
   oversight; see [STATUS-JSON.md](STATUS-JSON.md#the-exit-code-rule).
 
