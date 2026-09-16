@@ -210,8 +210,8 @@ content tree, but peers needs the `gh` CLI and your auth, digest needs the
 exist because `~/.claude` is a tree of symlinks whose targets are not in the
 image. Adding those CLIs would not help — they need your credentials, which is
 exactly what a shareable image must not carry.
-[`hud/README.md`](hud/README.md) has the verified per-panel matrix and the
-mount recipes.
+[`hud/docs/CONTAINER.md`](hud/docs/CONTAINER.md) has the verified per-panel
+matrix and the mount recipes.
 
 ## Creating agents, skills, and operational packages
 

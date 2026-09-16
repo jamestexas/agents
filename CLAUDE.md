@@ -87,7 +87,8 @@ Apache-2.0 part and import it from there.
 
 Vendored MIT bundles under `hud/ui/` keep their own notices; see
 `hud/THIRD-PARTY-NOTICES.md`. Rationale and the full statement live in
-`README.md` and `hud/README.md`.
+`README.md` and `hud/docs/LICENSING.md`; `hud/README.md` carries the
+load-bearing fact so no reader has to click to learn which license applies.
 
 ## Git Workflow
 

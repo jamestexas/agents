@@ -8,8 +8,8 @@
 #
 # The image carries the machinery, never the content. Everything the HUD
 # renders lives in a tree mounted at /hud, and the image has no idea what is
-# in it — same split as the repository. See hud/README.md for which panels
-# survive that isolation and which cannot.
+# in it — same split as the repository. See hud/docs/CONTAINER.md for which
+# panels survive that isolation and which cannot.
 
 contents:
   repositories:
