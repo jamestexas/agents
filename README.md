@@ -19,6 +19,36 @@ they support.
 - `work-board/` — a workerd-native UI staged here before transfer to
   Canonical Hours.
 
+## Start here — the doors
+
+There are 65 entries in the tables below. You invoke about eight of them. The
+rest are the library those eight call.
+
+| You want to | Type | It calls |
+|---|---|---|
+| Review a PR (incl. one you have no context on) | `/structural-pr-review <pr>` | `pr-context.sh`, `pr-review-kit`, `DIMENSIONS`, `finding-triage`, `explain-work` |
+| Know what's waiting on you | `/pr-board` | lectio, `gh` |
+| Review several PRs at once | `/review-queue` | one isolated `/structural-pr-review` per PR |
+| Build a feature or fix | `/implement <task>` | `problem-decomposer`, `feature-impl`, TDD, `self-audit`, `test-fidelity`, `structural-pr-review` |
+| Slice a huge branch into small PRs | `/pr-buckets` then `/jj-stack` | jj, `gh` |
+| Cut a findings list down to what matters | `/finding-triage` | — |
+| Keep a note, playbook, or peer record | `/hud` | the HUD tree |
+| Stop mid-task, or resume | `/handoff`, `/park-work` | rosary, jj |
+
+**Called, not invoked.** `pr-review-kit` (the review discipline),
+`review-prep`, `explain-work`, `DIMENSIONS.md`, `mache-usage`, `feature-impl`,
+`work-scope`, `taskfile-ci-parity` — these are libraries. Reading them is
+useful; typing them usually means you wanted one of the doors above. The
+orchestrators are deliberately thin: they name what they call and don't
+restate it, so the discipline lives in exactly one place.
+
+**Browse it as a site instead of a table.** The HUD renders this repository —
+sections derive from the directories, every file gets a deep link:
+
+```bash
+HUD_ROOT=$(pwd) hud start && hud open      # or: HUD_ROOT=$(pwd) node hud/server.mjs
+```
+
 ## Install
 
 ```bash
