@@ -21,6 +21,21 @@ statement and rationale: [docs/LICENSING.md](docs/LICENSING.md).
 
 ## Run it
 
+Start here — you have no content tree yet, and this makes one:
+
+```bash
+hud/hud init                           # scaffold a tree + hud.toml, then follow
+hud/hud init --dry-run                 # the whole plan, writing nothing
+```
+
+`init` probes for each source and configures only what is actually running on
+your machine; everything it cannot find is written into `hud.toml` as a
+commented stub saying why and what to install. It never overwrites an existing
+`hud.toml` and never creates a git remote — see
+[docs/SOURCES.md](docs/SOURCES.md).
+
+With a tree in place:
+
 ```bash
 HUD_ROOT=~/hud node hud/server.mjs     # then open http://127.0.0.1:4870
 ```
@@ -39,14 +54,16 @@ hud status                             # config, service, port, upstreams, backu
 hud sync                               # back the content tree up to its remote
 ```
 
-**New here?** → run the quickstart above, then `hud status`: it prints the
-resolved tree, the service state, and which upstreams are actually answering,
-which is the fastest way to see what this HUD is wired to.
+**New here?** → `hud/hud init`, then `hud status`: init tells you what it
+found and what it left as a stub, and status prints the resolved tree, the
+service state, and which upstreams are actually answering. Between them, that
+is the fastest way to see what this HUD is wired to and what it is not.
 
 ## The `hud` command
 
 | Command | Does |
 | --- | --- |
+| `hud init [--root DIR] [--yes] [--dry-run]` | Scaffolds a new content tree and its `hud.toml`, configuring only the sources it can actually detect and commenting out the rest with a reason. Adds what is missing to an existing tree, never overwrites `hud.toml`, never creates a git remote. See [docs/SOURCES.md](docs/SOURCES.md). |
 | `hud start` | Starts the launchd service if one is installed, otherwise `node server.mjs` backgrounded; idempotent. |
 | `hud stop` | Boots the service out; the plist stays, so `hud start` brings it back. |
 | `hud restart` | `stop`, then `start`. |
@@ -67,6 +84,8 @@ status` always exits 0 — it reports state rather than asserting it.
 
 ## Further reading
 
+- [docs/SOURCES.md](docs/SOURCES.md) — every `hud.toml` key, what tool or
+  service enables it, and what each panel does when its source is absent
 - [docs/CLI.md](docs/CLI.md) — what each verb refuses to do, `link` vs
   `install` vs `sync`, the XDG reasoning, and what `hud sync` pre-decides
 - [docs/STATUS-JSON.md](docs/STATUS-JSON.md) — the `hud-status/v1` document,

@@ -16,6 +16,18 @@
 # Usage:
 #   hud <command> [args]
 #
+#   init [--root DIR] [--yes] [--dry-run]
+#                create a new content tree and its hud.toml — the command a new
+#                user runs first, and the only one here that makes a tree
+#                rather than talking to one. It PROBES for each source and
+#                configures only what is actually there; every source it could
+#                not find is written into the same file as a commented stub
+#                carrying the reason and what to install, so a grey panel
+#                always has its explanation next to its own config. Never
+#                clobbers an existing tree, never overwrites a hud.toml, and
+#                never creates a git remote — it prints that command instead.
+#                --dry-run prints the whole plan and writes nothing at all.
+#                Key-by-key reference: docs/SOURCES.md.
 #   start        start the HUD — the launchd service if one is installed,
 #                otherwise `node server.mjs` backgrounded. Idempotent. If a
 #                process this script did not start holds the port, it refuses
@@ -149,6 +161,8 @@ const emit = (k, v) => {
 };
 emit("root", root);
 emit("config.file", detail.file);
+emit("config.name", m.CONFIG_TOML);
+emit("known.sections", (m.KNOWN_SECTIONS || []).join(" "));
 for (const w of detail.warns || []) emit("config.warn", w);
 emit("default.port", m.DEFAULT_PORT);
 emit("serve.host", serve.host);
@@ -162,8 +176,9 @@ emit("sessions.lectio", table(sources, "sessions").lectio);
 '
 
 CFG_LOADED=""
-CFG_FILE="" CFG_DEFAULT_PORT="" CFG_HOST="" CFG_PORT="" CFG_LABEL=""
+CFG_FILE="" CFG_NAME="" CFG_DEFAULT_PORT="" CFG_HOST="" CFG_PORT="" CFG_LABEL=""
 BOARD_URL="" DIGEST_CMD="" SESSIONS_ROOT="" LECTIO_URL=""
+KNOWN_SECTIONS=""
 CONFIG_WARNS=()
 
 load_config() {
@@ -176,6 +191,8 @@ load_config() {
         case "$key" in
             root) HUD_ROOT_R="$value" ;;
             config.file) CFG_FILE="$value" ;;
+            config.name) CFG_NAME="$value" ;;
+            known.sections) KNOWN_SECTIONS="$value" ;;
             config.warn) CONFIG_WARNS+=("$value") ;;
             default.port) CFG_DEFAULT_PORT="$value" ;;
             serve.host) CFG_HOST="$value" ;;
@@ -248,6 +265,30 @@ is_hud_server() {
 # `000` is curl's code for "never got a response", which is how an upstream
 # that is simply not running reports itself. Not an error here.
 http_code() { curl -s -o /dev/null -w '%{http_code}' --max-time "${2:-3}" "$1" 2>/dev/null || true; }
+
+# Whether anything answers at a URL, with the code it answered with left in
+# HTTP_ANSWER_CODE. Three outcomes, not two, because "we did not look" is a
+# different claim from "it is down":
+#
+#   0  answering            1  not answering            2  could not look
+#
+# `hud status` and `hud init` both ask this question — of a configured upstream
+# and of a candidate one respectively — so they ask it through one function.
+# Two probes that could disagree about what "reachable" means would be a way to
+# hand someone a config init called good and status calls dead.
+HTTP_ANSWER_CODE=""
+http_answers() {
+    HTTP_ANSWER_CODE=""
+    command -v curl >/dev/null 2>&1 || return 2
+    HTTP_ANSWER_CODE="$(http_code "$1")"
+    [[ -n "$HTTP_ANSWER_CODE" && "$HTTP_ANSWER_CODE" != "000" ]]
+}
+
+# The first token of a configured command — the part that has to be on PATH.
+# The server tokenizes the whole command properly and runs it without a shell;
+# this is a "can it be found" check and never an invocation, so neither `status`
+# nor `init` ever runs your digest.
+cmd_head() { local head; read -r head _ <<<"$1"; printf '%s\n' "$head"; }
 
 wait_healthy() {
     local _
@@ -373,20 +414,16 @@ add_upstream() {
     UP_NAMES+=("$1"); UP_TARGETS+=("$2"); UP_STATUSES+=("$3"); UP_REASONS+=("$4")
 }
 
+# The `skipped` state is where "no curl" lands: we did not look, which is not
+# the same claim as "it is down".
 probe_http_upstream() {
-    local name="$1" url="$2" code
-    # No curl is "we did not look", which is not the same claim as "it is down"
-    # — the distinction the `skipped` state exists to keep.
-    if ! command -v curl >/dev/null 2>&1; then
-        add_upstream "$name" "$url" skipped "curl not found — not probed"
-        return 0
-    fi
-    code="$(http_code "$url")"
-    if [[ -z "$code" || "$code" == "000" ]]; then
-        add_upstream "$name" "$url" unreachable "panel greys out"
-    else
-        add_upstream "$name" "$url" ok "HTTP $code"
-    fi
+    local name="$1" url="$2" rc=0
+    http_answers "$url" || rc=$?
+    case "$rc" in
+        0) add_upstream "$name" "$url" ok "HTTP $HTTP_ANSWER_CODE" ;;
+        2) add_upstream "$name" "$url" skipped "curl not found — not probed" ;;
+        *) add_upstream "$name" "$url" unreachable "panel greys out" ;;
+    esac
 }
 
 probe_upstreams() {
@@ -399,11 +436,8 @@ probe_upstreams() {
     fi
 
     if [[ -n "$DIGEST_CMD" ]]; then
-        # The first token only. The server tokenizes the command properly and
-        # runs it without a shell; this is a "can it be found" check, not an
-        # invocation — `hud status` must not run your digest.
         local digest_bin
-        read -r digest_bin _ <<<"$DIGEST_CMD"
+        digest_bin="$(cmd_head "$DIGEST_CMD")"
         if command -v "$digest_bin" >/dev/null 2>&1; then
             add_upstream digest "$DIGEST_CMD" ok "$digest_bin on PATH"
         else
@@ -1140,6 +1174,727 @@ cmd_unlink() {
     printf 'unlinked %s\n' "$dest"
 }
 
+# ------------------------------------------------------------------- init
+#
+# The command a new user runs first, and the only one in this script that
+# creates a content tree rather than talking to one that already exists.
+#
+# Its whole design is one idea: DETECT, DO NOT ASSUME. A generated config that
+# simply listed the sources the author happens to run would hand a new user a
+# HUD with four grey panels and no way to tell broken from not-configured —
+# which is the worst first impression this tool can make, because every other
+# explanation lives in a file they have not read yet. So init probes for each
+# source and writes a live entry only for what is actually there; everything it
+# could not find goes into the same file as a commented stub carrying the
+# reason it was skipped and the one thing to install to enable it. The
+# explanation for a grey panel sits next to that panel's own config, which is
+# the only place the user is guaranteed to look.
+#
+# The probes are the ones `hud status` already uses — `http_answers`, `cmd_head`
+# plus `command -v`, and a directory test — asked of candidate endpoints rather
+# than configured ones. A second opinion about what "reachable" means is how you
+# get a config that init calls good and status calls dead.
+#
+# Four things it deliberately does not do:
+#   - it never overwrites an existing hud.toml. It prints what it would have
+#     written, and a diff against what is there when `diff` is available;
+#   - it never clobbers any existing scaffold file — it adds only what is
+#     genuinely missing, and says `keep` for the rest;
+#   - it never creates a git remote. That is outward-facing and the user's
+#     decision, so it prints the command and stops;
+#   - `--dry-run` writes nothing at all, not even the root directory.
+
+# Candidate endpoints and commands — the things init PROBES for. They are
+# defaults to test, never values to assume: one that does not answer is written
+# out commented, with the reason, and is not configured. This is also the only
+# place in this script that names a candidate port or CLI, so there is one line
+# to change when a default moves.
+INIT_BOARD_URL="http://127.0.0.1:8787/api/board"
+INIT_DIGEST_CMD="lectio digest --since 24h"
+# The tilde is deliberately NOT expanded here: this string is written into
+# hud.toml, where the server's own expandHome() handles a leading `~`. Writing
+# an expanded absolute path would put this user's home directory into a file
+# that is meant to be safe to check in.
+# shellcheck disable=SC2088
+INIT_SESSIONS_ROOT="~/.claude"
+INIT_LECTIO_URL="http://127.0.0.1:7533"
+# RFC 2606 reserves `.invalid`, and the UI treats this exact placeholder the
+# same as unconfigured: ticket ids render as plain chips until a real tracker
+# replaces it. So the default is safe to ship and obvious to spot.
+INIT_TICKET_TEMPLATE="https://example.invalid/issue/{id}"
+
+INIT_ROOT="" INIT_YES="" INIT_DRY=""
+INIT_TICKET="" INIT_DO_LINK="" INIT_DO_INSTALL=""
+
+# Detection results, one row per source: name, state, what was probed, why, and
+# the fix. Same shape as the upstream table `status` keeps, for the same reason
+# — the plan output and the config renderer read from one set of facts, so the
+# file cannot claim something the report did not.
+DET_NAMES=() DET_STATES=() DET_TARGETS=() DET_REASONS=() DET_FIXES=()
+
+det() {
+    DET_NAMES+=("$1"); DET_STATES+=("$2"); DET_TARGETS+=("$3")
+    DET_REASONS+=("$4"); DET_FIXES+=("$5")
+}
+
+# det_get <name> <state|target|reason|fix>
+det_get() {
+    local i
+    for i in ${DET_NAMES[@]+"${!DET_NAMES[@]}"}; do
+        [[ "${DET_NAMES[$i]}" == "$1" ]] || continue
+        case "$2" in
+            state) printf '%s\n' "${DET_STATES[$i]}" ;;
+            target) printf '%s\n' "${DET_TARGETS[$i]}" ;;
+            reason) printf '%s\n' "${DET_REASONS[$i]}" ;;
+            fix) printf '%s\n' "${DET_FIXES[$i]}" ;;
+        esac
+        return 0
+    done
+}
+
+det_is() { [[ "$(det_get "$1" state)" == "$2" ]]; }
+
+detect_sources() {
+    DET_NAMES=() DET_STATES=() DET_TARGETS=() DET_REASONS=() DET_FIXES=()
+    local rc
+
+    rc=0; http_answers "$INIT_BOARD_URL" || rc=$?
+    case "$rc" in
+        0) det board present "$INIT_BOARD_URL" \
+            "answered HTTP $HTTP_ANSWER_CODE" "" ;;
+        2) det board skipped "$INIT_BOARD_URL" \
+            "curl not found — could not probe" \
+            "install curl, then set url yourself if a board is running" ;;
+        *) det board absent "$INIT_BOARD_URL" \
+            "nothing answered there" \
+            "start your work-board service, or point url at wherever it serves" ;;
+    esac
+
+    local digest_bin
+    digest_bin="$(cmd_head "$INIT_DIGEST_CMD")"
+    if command -v "$digest_bin" >/dev/null 2>&1; then
+        det digest present "$INIT_DIGEST_CMD" "$digest_bin is on PATH" ""
+    else
+        det digest absent "$INIT_DIGEST_CMD" "$digest_bin is not on PATH" \
+            "install the $digest_bin CLI, or set cmd to anything that prints the digest JSON on stdout"
+    fi
+
+    local sroot="${INIT_SESSIONS_ROOT/#\~/$HOME}"
+    if [[ -d "$sroot" ]]; then
+        det sessions present "$INIT_SESSIONS_ROOT" "the directory exists" ""
+    else
+        det sessions absent "$INIT_SESSIONS_ROOT" "no such directory" \
+            "point root at wherever your agent sessions are written"
+    fi
+
+    rc=0; http_answers "$INIT_LECTIO_URL" || rc=$?
+    case "$rc" in
+        0) det graft present "$INIT_LECTIO_URL" \
+            "answered HTTP $HTTP_ANSWER_CODE" "" ;;
+        2) det graft skipped "$INIT_LECTIO_URL" \
+            "curl not found — could not probe" \
+            "install curl, then set lectio yourself if the daemon is running" ;;
+        *) det graft absent "$INIT_LECTIO_URL" \
+            "nothing answered there" \
+            "start the lectio daemon; sessions still work without it, ungrafted" ;;
+    esac
+
+    # peers is the one source with no config key at all: handles come from
+    # `peers/*.md`, and the lookup shells out to `gh`. So both halves have to be
+    # true, and neither is something a config line can express — which is
+    # exactly why init reports it and writes a comment rather than a stub.
+    if ! command -v gh >/dev/null 2>&1; then
+        det peers absent gh "the gh CLI is not on PATH" \
+            "install gh, run 'gh auth login', then add one file per colleague under peers/"
+    elif gh auth status >/dev/null 2>&1; then
+        det peers present gh "gh is on PATH and authenticated" \
+            "add one file per colleague under peers/ to populate the panel"
+    else
+        det peers absent gh "gh is on PATH but not authenticated" \
+            "run 'gh auth login', then add one file per colleague under peers/"
+    fi
+
+    # loadout reads the local filesystem and calls nothing, so there is nothing
+    # to detect and nothing to configure: it is on unless switched off.
+    det loadout present "(local filesystem)" "needs no endpoint — on by default" ""
+}
+
+report_detection() {
+    local i state
+    for i in ${DET_NAMES[@]+"${!DET_NAMES[@]}"}; do
+        case "${DET_STATES[$i]}" in
+            present) state="configured" ;;
+            absent) state="stub" ;;
+            *) state="${DET_STATES[$i]}" ;;
+        esac
+        printf '  %-9s %-10s %-34s %s\n' \
+            "${DET_NAMES[$i]}" "$state" "${DET_TARGETS[$i]}" "${DET_REASONS[$i]}"
+    done
+}
+
+# ------------------------------------------------------------ init prompts
+
+# One prompt, one default. Non-interactive — `--yes`, `--dry-run`, or a
+# non-TTY stdin — takes the default without asking, so the same invocation can
+# be scripted. Reads from /dev/tty rather than stdin so init still prompts when
+# its stdin is a pipe but a terminal is attached; `read -p` writes the prompt to
+# stderr, which keeps it out of the captured answer.
+ask() {
+    local prompt="$1" def="$2" ans=""
+    if [[ -n "$INIT_YES" || -n "$INIT_DRY" || ! -t 0 ]]; then
+        printf '%s\n' "$def"
+        return 0
+    fi
+    read -r -p "  $prompt [$def]: " ans </dev/tty || ans=""
+    printf '%s\n' "${ans:-$def}"
+}
+
+ask_yn() {
+    local ans
+    ans="$(ask "$1 (y/n)" "$2")"
+    case "$ans" in [Yy]*) printf 'yes\n' ;; *) printf 'no\n' ;; esac
+}
+
+# --------------------------------------------------------- init templates
+#
+# Generated from templates here, never copied from an existing tree: a copy
+# would carry one person's content conventions, their project names, and
+# whatever had drifted in their file, none of which is the contract.
+
+tmpl_gitignore() {
+    cat <<'EOF'
+.generated/
+_hud
+EOF
+}
+
+tmpl_index_md() {
+    cat <<'EOF'
+# index
+
+One line per entry: a link to the file plus a one-line summary. Agents append
+here after any write to the tree (see the ingest workflow in `HUD.md`). This
+file is a catalog, not a duplicate of content — read it first, then load
+individual pages selectively.
+
+<!-- entries below, newest last -->
+EOF
+}
+
+tmpl_log_md() {
+    cat <<'EOF'
+# log
+
+Append-only record of ingests, lint passes, and migrations. Agents append one
+dated entry per action; never edit or remove prior entries.
+
+EOF
+    printf '## %s\n\n' "$(date -u '+%Y-%m-%d')"
+    cat <<'EOF'
+- Scaffolded this tree with `hud init`: `HUD.md`, `index.md`, `log.md`,
+  `hud.toml`, `.gitignore`, the `_hud` symlink, and the content directories.
+  Sources were detected rather than assumed — `hud.toml` records which were
+  found and which were left commented out, and why.
+EOF
+}
+
+tmpl_hud_md() {
+    cat <<'EOF'
+# HUD.md — schema and conventions for this tree
+
+This file is the whole contract. Any agent told "load `$HUD_ROOT/HUD.md`" can
+read and write this tree correctly with no other context.
+
+## Frontmatter spec
+
+Every field is optional. A bare markdown file with no frontmatter is a valid
+entry — filename and directory supply defaults.
+
+```yaml
+---
+title: …                 # default: first heading, else filename
+date: 2026-01-31          # default: filename date prefix, else file mtime
+type: note | context | playbook | peer   # default: inferred from directory
+status: active | parked | done           # default: active
+tags: []
+repos: []                 # owner/name — lights up PR panels for this entry
+tickets: []               # e.g. ABC-123 — rendered as links via hud.toml's
+                          #   ticket_url_template
+---
+```
+
+`peers/*.md` also carries `gh: <handle>`, which drives that peer's PR lookup.
+
+## Path conventions
+
+```
+projects/<project>/CONTEXT.md        # LLM-loadable brief: goal, state, key
+                                     # paths, decisions. frontmatter:
+                                     # status, repos[], tickets[], links[]
+projects/<project>/notes/YYYY-MM-DD-<slug>.md   # dated entries
+projects/<project>/raw/              # immutable drops (transcripts, html
+                                     # exports, patches). Agents read,
+                                     # never modify.
+playbooks/<slug>.md                  # reusable process. frontmatter:
+                                     # applies_to[], last_verified
+peers/<handle>.md                    # one file per person. frontmatter: gh
+inbox/                               # unsorted capture — files land here when
+                                     # the right project or section is
+                                     # unclear; the ingest workflow sorts them
+                                     # out later
+archive/                             # done or parked material, same
+                                     # substructure as the live tree
+_hud                                 # SYMLINK to the machinery repo — code,
+                                     # not content. Never write here.
+.generated/                          # machine-written only. Never write here.
+```
+
+`<project>` is kebab-case and *is* the section label — a new directory under
+`projects/` is a new section with zero config. Same for any other top-level
+directory you add.
+
+## The rule
+
+**Never write a standalone note file outside `$HUD_ROOT`.** If you are about
+to create a scratch markdown file somewhere else to capture a decision, a
+transcript, or a note-to-self — put it here instead, under the closest
+matching path above, or `inbox/` if unsure. This is the consolidation rule; it
+is the entire point of this tree existing.
+
+## Workflows
+
+**Ingest** — drop a file in, classify it (playbook / project note / raw
+material), file it under the right path with frontmatter added if useful, then
+append one line to `index.md` and one line to `log.md` describing the ingest.
+
+**Query** — search and read across the tree to answer a question; optionally
+file the answer back as a note if it is worth keeping.
+
+**Lint** — periodic audit: stale `status: active` entries, contradictions
+between notes, orphan pages (no inbound link and not referenced from
+`index.md`), drift between `index.md` and what is actually on disk. Report
+findings; fix only on approval.
+
+## Generated vs. authored
+
+`$HUD_ROOT/.generated/` is machine-written only — snapshots, the service log,
+the mache index. Never hand-edit it; it is gitignored. `_hud` is a symlink to
+the machinery repository: public code, versioned elsewhere, and not content
+either. Everything else in this tree is authored content and gets committed.
+
+## The HUD app
+
+`hud start` serves this tree; `hud status` says what it is actually wired to.
+The server locates the tree by `HUD_ROOT`, never by where its own file sits.
+
+`hud.toml`'s `[sources.*]` tables are the switchboard: a source present enables
+its panel, absent removes it, no code change either way. Every key, what
+enables it, and what each panel does when its source is absent:
+`_hud/docs/SOURCES.md`.
+
+**Watch-only invariant:** the HUD renders and links out, it never acts on a PR,
+a ticket, or a session. Every "do" happens in the tool the human is already in.
+EOF
+}
+
+# The generated config. Detected sources become live tables; the rest become
+# commented stubs with their reason and their fix on the lines above, because
+# the config file is where someone looks when a panel is not there.
+tmpl_toml() {
+    cat <<'EOF'
+# hud.toml — the HUD's only config. Hand-edit this file; nothing regenerates it.
+#
+# `hud init` wrote this from what was actually running on this machine at the
+# time (see the date at the bottom). Every source below is either a live entry
+# — init found the tool or the service — or a COMMENTED STUB carrying the
+# reason it was skipped and what to install to enable it. Uncomment a stub once
+# you have the thing it names; a panel whose source is absent is a panel that
+# does not exist, so there is nothing else to switch on.
+#
+# It holds localhost endpoints, commands, and defaults — never a name, handle,
+# or URL that identifies a person, company, or project. Those live in the tree
+# as content, which is what keeps this file safe to check in.
+#
+# The subset the parser reads: [tables], `key = "string"`, `key = 123`,
+# `key = true`, and `#` comments. A line outside that is skipped with a warning
+# printed at startup, so a typo costs you one key, not the whole config.
+#
+# Every key, and what each panel does when its source is absent:
+# `_hud/docs/SOURCES.md`.
+
+# ------------------------------------------------------------- top level
+#
+# This comes first on purpose: in TOML every key after a [table] header belongs
+# to that table, so a top-level key written at the bottom of the file would
+# quietly become `serve.whatever`.
+
+# Ticket ids in frontmatter render as links through this template, with `{id}`
+# substituted. The default points at a reserved documentation domain
+# (RFC 2606), which the UI treats the same as unconfigured: ids stay plain
+# chips until you put a real tracker here.
+EOF
+    printf 'ticket_url_template = "%s"\n' "$INIT_TICKET"
+
+    cat <<'EOF'
+
+# ---------------------------------------------------------------- sources
+#
+# The panel switchboard. A source present enables its panel; a source removed
+# removes the panel. There is no other registration and no code change either
+# way.
+
+EOF
+
+    # ---- board
+    printf '# MY PRS and the needs-you dial: a local work-board service.\n'
+    if det_is board present; then
+        printf '[sources.board]\nurl = "%s"\n' "$(det_get board target)"
+    else
+        printf '# NOT CONFIGURED: %s.\n' "$(det_get board reason)"
+        printf '# To enable: %s.\n# Then uncomment:\n' "$(det_get board fix)"
+        printf '#   [sources.board]\n#   url = "%s"\n' "$(det_get board target)"
+    fi
+
+    # ---- digest
+    printf '\n# RECENT ACTIVITY: a local digest CLI, run with no shell (argv only).\n'
+    if det_is digest present; then
+        printf '[sources.digest]\ncmd = "%s"\n' "$(det_get digest target)"
+    else
+        printf '# NOT CONFIGURED: %s.\n' "$(det_get digest reason)"
+        printf '# To enable: %s.\n# Then uncomment:\n' "$(det_get digest fix)"
+        printf '#   [sources.digest]\n#   cmd = "%s"\n' "$(det_get digest target)"
+    fi
+
+    # ---- sessions (+ the graft daemon, which is only useful with a root)
+    cat <<'EOF'
+
+# SESSIONS: your agent sessions on disk, grafted to commits, PRs and tickets
+# when the lectio daemon answers. Remove `root` and the panel disappears;
+# `lectio` is optional sugar on top of it.
+EOF
+    if det_is sessions present; then
+        printf '[sources.sessions]\nroot = "%s"\n' "$(det_get sessions target)"
+        if det_is graft present; then
+            printf 'lectio = "%s"\n' "$(det_get graft target)"
+        else
+            printf '# lectio NOT CONFIGURED: %s.\n' "$(det_get graft reason)"
+            printf '# To enable: %s.\n# Then uncomment:\n' "$(det_get graft fix)"
+            printf '# lectio = "%s"\n' "$(det_get graft target)"
+        fi
+    else
+        printf '# NOT CONFIGURED: %s at %s.\n' \
+            "$(det_get sessions reason)" "$(det_get sessions target)"
+        printf '# To enable: %s.\n# Then uncomment:\n' "$(det_get sessions fix)"
+        printf '#   [sources.sessions]\n#   root = "%s"\n' "$(det_get sessions target)"
+        printf '#   lectio = "%s"   # optional: %s\n' \
+            "$(det_get graft target)" "$(det_get graft reason)"
+    fi
+
+    # ---- peers: no config key exists, so this section is comment only.
+    cat <<'EOF'
+
+# PEERS has no config key, and that is not an omission: handles come from
+# `peers/*.md` frontmatter (`gh:`, defaulting to the filename), and the PR
+# lookup shells out to an authenticated `gh`. Adding a colleague is adding a
+# file.
+EOF
+    printf '# At init time: %s.\n' "$(det_get peers reason)"
+    printf '# Next: %s.\n' "$(det_get peers fix)"
+
+    # ---- loadout: on by default, so only the off switch is worth writing.
+    printf '\n# LOADOUT reads the local filesystem and needs no endpoint, so it is on by\n'
+    printf '# default — these lines only exist to turn it off or point it elsewhere.\n'
+    printf '#   [sources]\n'
+    printf '#   loadout = false            # switch the panel off entirely\n'
+    printf '#   [sources.loadout]\n'
+    printf '#   claude_root = "~/.claude"  # a non-default install to inspect\n'
+
+    cat <<'EOF'
+
+# ------------------------------------------------------------------ serve
+#
+# Read by the `hud` command and by _hud/service/install.sh, which pass the port
+# to the server in the environment. HUD_PORT, HUD_HOST, HUD_LABEL and HUD_ROOT
+# in the environment win over anything here.
+
+EOF
+    cat <<'EOF'
+[serve]
+# The server always binds loopback. This is the address the health check and
+# the printed URL use, so changing it does not expose the HUD.
+host = "127.0.0.1"
+EOF
+    printf 'port = %s\n' "${CFG_DEFAULT_PORT:-4870}"
+    cat <<'EOF'
+# launchd label, which is also the plist filename.
+label = "local.hud"
+# Printed by install.sh as /etc/hosts guidance and nothing else — the server
+# binds `host` above and never this name. `.internal` is ICANN-reserved for
+# exactly this private use; `.local` would collide with mDNS. Commented out
+# because enabling it is a manual sudo step.
+# hostname = "hud.internal"
+EOF
+    # shellcheck disable=SC2016  # markdown ticks, not an expansion
+    printf '\n# Written by `hud init` on %s.\n' "$(date -u '+%Y-%m-%d')"
+}
+
+# ------------------------------------------------------------ init actions
+
+# install_file <relpath> <generator>. Existing files are kept and said so:
+# "add what is missing" is the only write init does to a tree it did not make,
+# and the difference between that and "reinitialize" is someone's notes.
+install_file() {
+    local rel="$1" fn="$2"
+    local abs="$INIT_ROOT/$rel"
+    if [[ -e "$abs" ]]; then
+        printf '  keep    %s (already there)\n' "$rel"
+        return 0
+    fi
+    printf '  create  %s\n' "$rel"
+    [[ -n "$INIT_DRY" ]] && return 0
+    mkdir -p -- "$(dirname -- "$abs")"
+    # Rendered to a temp file and moved into place, so a generator that dies
+    # half-way leaves no file rather than a truncated one. "Adding only what is
+    # missing" is decided by whether the file exists, and a 0-byte HUD.md that
+    # exists is the one state that rule handles badly.
+    "$fn" >"$abs.hud-init.tmp"
+    mv -f -- "$abs.hud-init.tmp" "$abs"
+}
+
+install_dir() {
+    local rel="$1" abs="$INIT_ROOT/$1"
+    if [[ -d "$abs" ]]; then
+        printf '  keep    %s/ (already there)\n' "$rel"
+        return 0
+    fi
+    printf '  create  %s/\n' "$rel"
+    [[ -n "$INIT_DRY" ]] && return 0
+    mkdir -p -- "$abs"
+    # An empty directory is not a git object, so a clone of this tree would come
+    # back without its sections. The keepfile is dot-prefixed, which is the rule
+    # the tree walker already skips by, so it never renders as an entry.
+    : >"$abs/.gitkeep"
+}
+
+# The `_hud` symlink. Content-side name for the machinery, so HUD.md can say
+# `_hud/docs/SOURCES.md` without knowing where anyone checked this out.
+install_machinery_link() {
+    local abs="$INIT_ROOT/_hud"
+    if [[ -L "$abs" ]]; then
+        printf '  keep    _hud -> %s\n' "$(resolve_path "$abs")"
+        return 0
+    fi
+    if [[ -e "$abs" ]]; then
+        printf '  keep    _hud (exists and is not a symlink — left alone)\n'
+        return 0
+    fi
+    printf '  create  _hud -> %s\n' "$MACHINERY_DIR"
+    [[ -n "$INIT_DRY" ]] && return 0
+    ln -sfn -- "$MACHINERY_DIR" "$abs"
+}
+
+# hud.toml is the one file that is never overwritten, because it is the one file
+# the user edits by hand. An existing one is reported and diffed against what
+# init would have written, so the choice of what to merge stays theirs.
+install_config() {
+    local name="${CFG_NAME:-hud.toml}" abs
+    abs="$INIT_ROOT/$name"
+    if [[ ! -e "$abs" ]]; then
+        printf '  create  %s\n' "$name"
+        [[ -n "$INIT_DRY" ]] && return 0
+        tmpl_toml >"$abs.hud-init.tmp"
+        mv -f -- "$abs.hud-init.tmp" "$abs"
+        return 0
+    fi
+
+    printf '  keep    %s (already there — NOT overwritten)\n' "$name"
+    if command -v diff >/dev/null 2>&1; then
+        # A diff is the point here, so "they differ" (exit 1) is the expected
+        # status and must not take the command down with it. An EMPTY diff is
+        # worth saying out loud rather than printing a header over nothing:
+        # "no output" would read as "it did not look".
+        local delta
+        delta="$(diff -u --label "$name (yours)" --label "$name (init would write)" \
+            "$abs" <(tmpl_toml) || true)"
+        if [[ -z "$delta" ]]; then
+            printf '          identical to what init would write right now\n'
+        else
+            printf '\nwhat init would have written, against what is there:\n\n%s\n' "$delta"
+        fi
+    else
+        # shellcheck disable=SC2016  # markdown ticks, not an expansion
+        printf '\nwhat init would have written (no `diff` on PATH to compare):\n\n'
+        tmpl_toml
+    fi
+}
+
+# git init, and nothing about a remote. A tree nested inside another repository
+# is reported rather than initialized: a repo inside a repo is a trap, and which
+# one wins is not init's call to make.
+init_git() {
+    if ! command -v git >/dev/null 2>&1; then
+        printf '  git     not found — skipped; a tree with no repo cannot be backed up\n'
+        return 0
+    fi
+    local top=""
+    top="$(git -C "$INIT_ROOT" rev-parse --show-toplevel 2>/dev/null || true)"
+    if [[ -n "$top" ]]; then
+        if [[ "$(resolve_path "$top")" == "$(resolve_path "$INIT_ROOT")" ]]; then
+            printf '  git     already a repository\n'
+        else
+            printf '  git     inside %s — not creating a nested repository\n' "$top"
+        fi
+        return 0
+    fi
+    printf '  git     init\n'
+    [[ -n "$INIT_DRY" ]] && return 0
+    git -C "$INIT_ROOT" init -q
+    git -C "$INIT_ROOT" add -A >/dev/null 2>&1 || true
+    # Explicitly UNSIGNED, overriding whatever is in the user's global config.
+    # This is a local bookkeeping commit of template files in a private tree,
+    # and on a machine configured for keyless signing — `commit.gpgsign = true`
+    # with a sigstore-backed gpg.x509.program — signing it would make `hud init`
+    # reach a public transparency log, and would open a browser for an OIDC
+    # flow if no credential were cached. A scaffold command must not do either.
+    # The user's own commits here sign however they have configured; only this
+    # one is forced off.
+    if git -C "$INIT_ROOT" \
+        -c commit.gpgsign=false -c tag.gpgsign=false \
+        commit -qm 'hud: scaffold content tree' >/dev/null 2>&1; then
+        printf '  git     initial commit (unsigned — see init_git)\n'
+    else
+        printf '  git     nothing committed (no git identity configured?) — commit it yourself\n'
+    fi
+}
+
+init_closing() {
+    local sections_hint="${KNOWN_SECTIONS:-projects playbooks peers inbox archive}"
+    printf '\nnext\n'
+    if [[ "$INIT_ROOT" != "$HOME/hud" ]]; then
+        printf '  # this tree is not the default ~/hud, so name it:\n'
+        printf '  export HUD_ROOT=%s\n' "$INIT_ROOT"
+    fi
+    printf '  hud start                  serve it, then open the printed URL\n'
+    printf '  hud status                 what it is wired to, and what is grey\n'
+    [[ "$INIT_DO_LINK" == yes ]] || printf '  hud link                   put this command on your PATH\n'
+    [[ "$INIT_DO_INSTALL" == yes ]] || printf '  hud install                keep it serving without you (launchd)\n'
+
+    printf '\nbackup\n'
+    printf '  This tree is private and has no git remote. init does not create one —\n'
+    printf '  that is outward-facing and your decision. When you want it backed up:\n\n'
+    printf '    gh repo create <name> --private --source %s \\\n' "$INIT_ROOT"
+    printf '      --remote origin --push\n'
+    printf '    hud sync                   stage, commit, push, from then on\n'
+
+    printf '\nwhere things go\n'
+    printf '  content    %s/{%s}\n' "$INIT_ROOT" "${sections_hint// /,}"
+    printf '  contract   %s/HUD.md — what every agent reads\n' "$INIT_ROOT"
+    printf '  sources    %s/docs/SOURCES.md — every key, what\n' "$MACHINERY_DIR"
+    printf '             enables it, and what each panel does when it is absent\n'
+}
+
+cmd_init() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --root) [[ $# -ge 2 ]] || die 'init --root needs a directory'
+                    INIT_ROOT="$2"; shift 2 ;;
+            --root=*) INIT_ROOT="${1#--root=}"; shift ;;
+            --yes | -y) INIT_YES=yes; shift ;;
+            --dry-run) INIT_DRY=yes; shift ;;
+            -h | --help) usage 0 ;;
+            *) die "init: unknown option $1" ;;
+        esac
+    done
+
+    # Read the server's own constants — the config filename, the default port,
+    # the section list — rather than restating them here, where they would drift.
+    # HUD_ROOT is set for the probe so a --root that does not exist yet still
+    # resolves to itself instead of to the default tree.
+    HUD_ROOT="${INIT_ROOT:-${HUD_ROOT:-}}" load_config || true
+
+    printf 'hud init\n'
+
+    local default_root="${INIT_ROOT:-${HUD_ROOT:-$HOME/hud}}"
+    INIT_ROOT="$(ask 'content tree root' "$default_root")"
+    INIT_ROOT="${INIT_ROOT/#\~/$HOME}"
+    [[ "$INIT_ROOT" == /* ]] || INIT_ROOT="$PWD/${INIT_ROOT#./}"
+    INIT_ROOT="${INIT_ROOT%/}"
+
+    # Three roots that would do real damage, all rejected before anything is
+    # probed. The machinery directory is the load-bearing one: the whole design
+    # is public code in one place and private notes in another, and a tree
+    # rooted in the checkout collapses that distinction silently.
+    [[ -n "$INIT_ROOT" && "$INIT_ROOT" != "/" ]] || die 'init: refusing to use / as a content tree'
+    [[ "$INIT_ROOT" != "$HOME" ]] || die "init: refusing to use your home directory as a content tree"
+    case "$INIT_ROOT/" in
+        "$MACHINERY_DIR"/*) die "init: $INIT_ROOT is inside the machinery checkout — the content tree must live outside it" ;;
+    esac
+
+    INIT_TICKET="$(ask 'ticket url template ({id} is substituted)' "$INIT_TICKET_TEMPLATE")"
+    INIT_DO_LINK="$(ask_yn 'put the hud command on your PATH' n)"
+    INIT_DO_INSTALL="$(ask_yn 'install the launchd service' n)"
+
+    printf '\ndetecting sources (probing, not assuming)\n'
+    detect_sources
+    report_detection
+
+    # Named either way: interactively these are the answers given, and in the
+    # non-interactive modes they are the questions that were not asked and the
+    # defaults taken instead — which a dry run has to show, or it is not a
+    # preview of what the real run would do.
+    if [[ -n "$INIT_DRY" ]]; then
+        printf '\nprompts it would ask (a dry run never asks — defaults shown)\n'
+    elif [[ -n "$INIT_YES" || ! -t 0 ]]; then
+        printf '\nprompts, defaulted (non-interactive)\n'
+    else
+        printf '\nanswers\n'
+    fi
+    printf '  %-28s %s\n' 'root' "$INIT_ROOT"
+    printf '  %-28s %s\n' 'ticket_url_template' "$INIT_TICKET"
+    printf '  %-28s %s\n' 'link the hud command' "$INIT_DO_LINK"
+    printf '  %-28s %s\n' 'install the service' "$INIT_DO_INSTALL"
+
+    printf '\nscaffold at %s\n' "$INIT_ROOT"
+    if [[ -e "$INIT_ROOT" ]]; then
+        printf '  (exists — adding only what is missing, clobbering nothing)\n'
+    fi
+    [[ -n "$INIT_DRY" ]] || mkdir -p -- "$INIT_ROOT"
+
+    install_file HUD.md tmpl_hud_md
+    install_file index.md tmpl_index_md
+    install_file log.md tmpl_log_md
+    install_file .gitignore tmpl_gitignore
+    install_machinery_link
+
+    local section
+    for section in ${KNOWN_SECTIONS:-projects playbooks peers inbox archive}; do
+        install_dir "$section"
+    done
+
+    install_config
+    init_git
+
+    if [[ -n "$INIT_DRY" ]]; then
+        printf '\nthe config it would write:\n\n'
+        tmpl_toml
+        printf '\n--dry-run: nothing was written'
+        [[ -e "$INIT_ROOT" ]] || printf ' (%s does not exist)' "$INIT_ROOT"
+        printf '.\n'
+        return 0
+    fi
+
+    if [[ "$INIT_DO_LINK" == yes ]]; then
+        printf '\n'
+        cmd_link
+    fi
+    if [[ "$INIT_DO_INSTALL" == yes ]]; then
+        printf '\n'
+        HUD_ROOT="$INIT_ROOT" bash "$MACHINERY_DIR/service/install.sh"
+    fi
+
+    init_closing
+}
+
 # --------------------------------------------------------------- dispatch
 
 [[ $# -gt 0 ]] || usage 1
@@ -1147,6 +1902,7 @@ command="$1"
 shift
 
 case "$command" in
+    init) cmd_init "$@" ;;
     start) cmd_start "$@" ;;
     stop) cmd_stop "$@" ;;
     restart) cmd_restart "$@" ;;
