@@ -43,6 +43,10 @@ not what keeps it loopback-only.
   [SOURCES.md](SOURCES.md#what-hud-init-probes-and-what-it-writes).
 - **`hud status`** always exits 0, which is a contract rather than an
   oversight; see [STATUS-JSON.md](STATUS-JSON.md#the-exit-code-rule).
+- **`hud pull`** refuses any store it cannot advance without losing something:
+  a dirty worktree, local commits absent from the remote, or a diverged branch.
+  It fast-forwards or it does nothing — see
+  [Pulling read-only stores](#pulling-read-only-stores).
 
 ## Two installs, two verbs
 
@@ -132,3 +136,44 @@ else's queue — which the HUD only ever reads. Pushing your own tree to your ow
 remote is not acting on someone else's surface; it is authoring, the same
 category as writing the note. `hud status` still only reads, and `sync` is a
 separate verb you type.
+
+## Pulling read-only stores
+
+`hud sync` and `hud pull` are mirrors, and neither can reach the other's store:
+
+| | Store | Direction |
+| --- | --- | --- |
+| `hud sync` | the one writable store (`HUD_ROOT`) | pushes |
+| `hud pull` | every `[read.<name>]` store | fetches |
+
+That split is what makes write-1:1 structural rather than careful. `sync` has
+no knowledge that read stores exist, so it cannot push one to the wrong remote;
+`pull` never reads `HUD_ROOT`, so it cannot fast-forward over your own notes.
+
+One outcome per store, from a closed set:
+
+| | Means |
+| --- | --- |
+| `updated` | fast-forwarded |
+| `current` | already matches the remote |
+| `skipped` | cannot participate — not a repo, no upstream, detached HEAD, remote unreachable. A normal state. |
+| `refused` | could have moved and should not. **The only outcome that exits non-zero.** |
+
+Three things earn a refusal, and each would otherwise lose work:
+
+- **A dirty worktree.** Checked *before* any network call, so a store with
+  local edits is left completely untouched, `.git` included.
+- **Local commits not on the remote.** A store mounted read-only here may still
+  be the writable store on another machine. Refusing beats rebasing them away.
+- **A diverged branch.** Reconciling a store you do not own is not this verb's
+  business.
+
+`--dry-run` uses `ls-remote`, so it writes nothing at all — not even
+`FETCH_HEAD`. A dry run that moves remote-tracking refs is not one, which is
+the same standard `sync --dry-run` is held to.
+
+**Why fast-forward only.** The guard is the ancestry check, not the `--ff-only`
+flag: the merge is attempted only once `HEAD` is already an ancestor of the
+fetched ref. The flag is there for the window between those two steps, where an
+upstream that moved would otherwise produce a merge commit in a store you do
+not own.

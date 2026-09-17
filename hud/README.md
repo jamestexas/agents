@@ -72,6 +72,7 @@ is the fastest way to see what this HUD is wired to and what it is not.
 | `hud open` | Opens the HUD in your browser. |
 | `hud logs [-f] [-n N]` | Tails `$HUD_ROOT/.generated/service.log` — the file both start paths write to. |
 | `hud root` | Prints the resolved `HUD_ROOT`. |
+| `hud pull [--dry-run]` | Fast-forwards every read-only store; refuses any it cannot advance without losing work, and never touches the writable one. See [Pulling read-only stores](docs/CLI.md#pulling-read-only-stores). |
 | `hud sync [-m MSG] [--dry-run]` | Backs the **content tree** up: stage, commit, push to its git remote in one verb. Never force-pushes. See [Backing the content tree up](docs/CLI.md#backing-the-content-tree-up). |
 | `hud link` / `hud unlink` | Puts **this command** on your PATH, and takes it off. See [Two installs, two verbs](docs/CLI.md#two-installs-two-verbs). |
 | `hud install` / `hud uninstall` | Installs and removes **the launchd service**, via `service/install.sh` / `service/uninstall.sh`; arguments passed through. |

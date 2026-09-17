@@ -55,6 +55,14 @@
 #                force-pushes: if the remote moved ahead it refuses and tells
 #                you to pull. --dry-run names exactly what would be staged,
 #                committed and pushed and changes nothing, here or there.
+#   pull [--dry-run]
+#                bring read-only stores up to date: fast-forward only, never on
+#                a dirty tree, and never touching the writable store. The
+#                mirror of sync — sync pushes the one store you own and reads
+#                no other; pull reads the others and writes none. Reports one
+#                of updated | current | skipped | refused per store, and exits
+#                non-zero only if something was refused. --dry-run uses
+#                ls-remote, so it writes nothing, not even to .git.
 #
 #   install      install the launchd SERVICE, so the HUD runs without you
 #                (service/install.sh). Does NOT put `hud` on your PATH.
@@ -1378,6 +1386,114 @@ report_detection() {
     done
 }
 
+# ------------------------------------------------------------------ pull
+
+# Bring read-only stores up to date. The mirror image of `sync`: sync pushes
+# the ONE store this machine owns and never reads others; pull reads the others
+# and never touches the writable one. Neither verb can reach the other's store,
+# which is what keeps write-1:1 true by construction rather than by care.
+#
+# Fast-forward only, and never on a dirty tree. A mounted store is not yours to
+# reconcile: if it has diverged or carries local work, saying so and doing
+# nothing is the useful outcome.
+#
+# Four outcomes, closed: updated | current | skipped | refused. `skipped` is a
+# store that cannot participate (no remote, no upstream, not a repo) and is a
+# normal state; `refused` is one that could have and should not, and is the
+# only outcome that makes this command exit non-zero.
+cmd_pull() {
+    local dry=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -n | --dry-run) dry=yes; shift ;;
+            *) die "pull: unknown argument $1" ;;
+        esac
+    done
+
+    load_config
+    command -v git >/dev/null 2>&1 || die "no 'git' on PATH — 'hud pull' needs it."
+
+    if [[ ${#READ_STORES[@]} -eq 0 ]]; then
+        printf 'no read-only stores configured — nothing to pull.\n\n'
+        printf 'Add one in %s:\n\n    [read.<name>]\n    path = "~/stores/<name>"\n' \
+            "${CFG_FILE:-hud.toml}"
+        return 0
+    fi
+
+    local entry name p refused=0 branch remote head want
+    for entry in ${READ_STORES[@]+"${READ_STORES[@]}"}; do
+        name="${entry%% *}"
+        p="${entry#* }"
+
+        if ! git -C "$p" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            pull_say "$name" skipped "not a git repository"
+            continue
+        fi
+        branch="$(git -C "$p" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+        if [[ -z "$branch" ]]; then
+            pull_say "$name" skipped "HEAD is detached"
+            continue
+        fi
+        remote="$(git -C "$p" config --get "branch.$branch.remote" 2>/dev/null || true)"
+        if [[ -z "$remote" ]]; then
+            pull_say "$name" skipped "no upstream for $branch"
+            continue
+        fi
+        # Dirty first: refusing before touching the network keeps a store with
+        # local edits completely untouched, including its .git.
+        if [[ -n "$(git -C "$p" status --porcelain 2>/dev/null)" ]]; then
+            pull_say "$name" refused "uncommitted changes — resolve them in $p first"
+            refused=1
+            continue
+        fi
+
+        head="$(git -C "$p" rev-parse HEAD 2>/dev/null || true)"
+
+        if [[ -n "$dry" ]]; then
+            # ls-remote, not fetch: --dry-run must not write even to .git.
+            want="$(git -C "$p" ls-remote "$remote" "refs/heads/$branch" 2>/dev/null | awk '{print $1}')"
+            if [[ -z "$want" ]]; then
+                pull_say "$name" skipped "$remote has no $branch"
+            elif [[ "$want" == "$head" ]]; then
+                pull_say "$name" current "$branch matches $remote (as of this probe)"
+            else
+                pull_say "$name" updated "would fast-forward $branch toward ${want:0:8} (dry run)"
+            fi
+            continue
+        fi
+
+        if ! git -C "$p" fetch --quiet "$remote" "$branch" 2>/dev/null; then
+            pull_say "$name" skipped "could not reach $remote"
+            continue
+        fi
+        want="$(git -C "$p" rev-parse FETCH_HEAD 2>/dev/null || true)"
+        if [[ -z "$want" ]]; then
+            pull_say "$name" skipped "$remote has no $branch"
+        elif [[ "$want" == "$head" ]]; then
+            pull_say "$name" current "$branch matches $remote"
+        elif git -C "$p" merge-base --is-ancestor "$head" "$want" 2>/dev/null; then
+            if git -C "$p" merge --ff-only "$want" >/dev/null 2>&1; then
+                pull_say "$name" updated "$branch fast-forwarded to ${want:0:8}"
+            else
+                pull_say "$name" refused "fast-forward failed — reconcile $p by hand"
+                refused=1
+            fi
+        elif git -C "$p" merge-base --is-ancestor "$want" "$head" 2>/dev/null; then
+            pull_say "$name" refused "local commits are not on $remote — this store is read-only here"
+            refused=1
+        else
+            pull_say "$name" refused "$branch has diverged from $remote — reconcile $p by hand"
+            refused=1
+        fi
+    done
+
+    printf '\nThe writable store is untouched: '"'"'hud pull'"'"' never reads it and\n'
+    printf "'hud sync' never reads these. Only a 'refused' row needs you.\n"
+    return "$refused"
+}
+
+pull_say() { printf '  %-9s %-9s %s\n' "$1" "$2" "$3"; }
+
 # ------------------------------------------------------------ init prompts
 
 # One prompt, one default. Non-interactive — `--yes`, `--dry-run`, or a
@@ -1957,6 +2073,7 @@ case "$command" in
     logs) cmd_logs "$@" ;;
     root) load_config; printf '%s\n' "$HUD_ROOT_R" ;;
     sync) cmd_sync "$@" ;;
+    pull) cmd_pull "$@" ;;
     link) cmd_link "$@" ;;
     unlink) cmd_unlink "$@" ;;
     install) exec bash "$MACHINERY_DIR/service/install.sh" "$@" ;;
