@@ -662,7 +662,11 @@
         return (n / (1024 * 1024)).toFixed(1) + " MB";
       }
 
-      function entryNode(e) {
+      // `showStore` is passed down rather than read from a global so a
+       // single-store tree renders exactly as it did before this existed.
+       // Only non-writable stores are badged: your own notes are the default,
+       // and a mounted one is the exception worth marking.
+      function entryNode(e, showStore) {
         const li = document.createElement("li");
         const b = document.createElement("button");
         b.className = "entry";
@@ -678,6 +682,13 @@
         title.textContent = e.title || e.name || e.path;
         b.appendChild(title);
 
+        if (showStore && e.store && e.store !== "local") {
+          const st = document.createElement("span");
+          st.className = "badge";
+          st.textContent = e.store;
+          st.title = "from the '" + e.store + "' store, which this machine reads but never writes";
+          b.appendChild(st);
+        }
         if (e.warn) {
           const w = document.createElement("span");
           w.className = "badge warn";
@@ -708,15 +719,40 @@
         return li;
       }
 
-      function entriesNode(entries) {
+      function entriesNode(entries, showStore) {
         const ul = document.createElement("ul");
         ul.className = "entries";
-        for (const e of entries) ul.appendChild(entryNode(e));
+        for (const e of entries) ul.appendChild(entryNode(e, showStore));
         return ul;
       }
 
       function renderTree(tree) {
         listView.textContent = "";
+
+        // Provenance is shown only once more than one store contributed, so a
+        // single-store HUD looks untouched by this feature.
+        const contributing = new Set();
+        for (const section of tree.sections) {
+          for (const e of section.entries) if (e.store) contributing.add(e.store);
+        }
+        const showStore = contributing.size > 1;
+
+        // A shadowed note is one the server deliberately did not serve. The
+        // API reports it; if the page stayed silent, "reported rather than
+        // dropped" would be true only for machines, and a human would see a
+        // tree that looks complete.
+        const shadowed = Array.isArray(tree.shadowed) ? tree.shadowed : [];
+        if (shadowed.length) {
+          const d = document.createElement("div");
+          d.className = "drift";
+          const n = shadowed.length;
+          d.textContent =
+            n + (n === 1 ? " note is" : " notes are") + " shadowed: " +
+            shadowed.map((x) => x.path + " (" + x.store + " → " + x.shadowed_by + ")").join(", ");
+          d.title = "the same path exists in more than one store; the writable copy is served";
+          listView.appendChild(d);
+        }
+
         for (const section of tree.sections) {
           const h = document.createElement("h2");
           h.className = "section";
@@ -748,12 +784,12 @@
                 gh.appendChild(s);
               }
               listView.appendChild(gh);
-              listView.appendChild(entriesNode(section.entries.filter((e) => e.group === g.name)));
+              listView.appendChild(entriesNode(section.entries.filter((e) => e.group === g.name), showStore));
             }
             const loose = section.entries.filter((e) => !e.group);
-            if (loose.length) listView.appendChild(entriesNode(loose));
+            if (loose.length) listView.appendChild(entriesNode(loose, showStore));
           } else {
-            listView.appendChild(entriesNode(section.entries));
+            listView.appendChild(entriesNode(section.entries, showStore));
           }
         }
       }

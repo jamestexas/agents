@@ -127,3 +127,42 @@ test("leading hr not eaten", () => {
   assert.equal(meta, null, "no key: value line inside means this was never frontmatter");
   assert.equal(body, md, "the whole document, both rules included, is returned unchanged");
 });
+
+// --------------------------------------------------- store provenance wiring
+
+// `entryNode` badges a mounted entry only when `renderTree` tells it to, and
+// that flag is threaded through `entriesNode` to four call sites. There is no
+// DOM here to render against — the UI is dependency-free and there is no jsdom
+// — so this asserts the wiring at the source level instead.
+//
+// It is not decoration: writing this caught a real miss. The `loose` branch
+// (ungrouped entries inside `projects`) was calling `entriesNode(loose)` with
+// no flag, so those entries would never have shown provenance while every
+// other branch did. A source check is the only thing that would have found it.
+
+test("every entriesNode call site forwards the store flag", () => {
+  const calls = [...html.matchAll(/entriesNode\(([^;]*?)\)\s*\)?\s*;/g)].map((m) => m[0]);
+  assert.ok(calls.length >= 3, `expected the known call sites, found ${calls.length}`);
+  for (const call of calls) {
+    assert.match(
+      call,
+      /,\s*showStore\s*\)/,
+      `an entriesNode call omits showStore, so those entries can never badge: ${call.trim()}`,
+    );
+  }
+});
+
+test("the shadowed notice reads from tree.shadowed and tolerates its absence", () => {
+  // An older server, or a hand-written fixture, may not carry the key at all.
+  // Rendering must degrade to "no notice" rather than throwing on .length.
+  assert.match(html, /Array\.isArray\(tree\.shadowed\)/,
+    "the shadowed notice does not guard against a missing key");
+  assert.match(html, /shadowed_by/, "the notice never names what shadowed a note");
+});
+
+test("provenance is conditional, so a single-store tree renders as before", () => {
+  // The badge must be gated on more than one contributing store. Dropping the
+  // gate would put a chip on every entry of every existing single-store HUD.
+  assert.match(html, /contributing\.size > 1/, "provenance is not gated on multiple stores");
+  assert.match(html, /e\.store !== "local"/, "the writable store is badged, which is noise");
+});

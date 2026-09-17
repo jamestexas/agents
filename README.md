@@ -142,6 +142,7 @@ It links three things, not two: `agents/` and `skills/` into `~/.claude/`, and t
 | [`test-fidelity`](skills/test-fidelity/SKILL.md) | pre-approved | Hunt vacuous / low-fidelity tests — the ones that pass whether or not the code is wrong in the way they claim to catch. |
 | [`work-scope`](skills/work-scope/SKILL.md) | pre-approved | Decompose feature work into reviewable, shippable PR-sized units before coding starts. |
 | [`workflow-audit`](skills/workflow-audit/SKILL.md) | pre-approved | Mine the user's Claude Code chat corpus for self-optimization patterns — repeated corrections, tool thrash, dropped threads — into a ranked, PII-scrubbed report. |
+| [`writing-pr-descriptions`](skills/writing-pr-descriptions/SKILL.md) | prompts | Use when creating or updating a pull request description or body — opening a PR, or when a PR body is a raw template, a bot/scanner/generated dump, or a wall of headings a reviewer must read through. |
 <!-- END: SKILLS -->
 
 ## How agents and skills differ
