@@ -9,7 +9,30 @@ way it does. `hud status` itself is a row in
 `hud status --json` emits one document carrying a versioned `schema`
 (`hud-status/v1`): the resolved root, how the config resolved, serving state
 and HTTP code, the service's label/loaded/pid, the log path, where the CLI is
-linked, a `backup` object, and an `upstreams` array.
+linked, a `backup` object, a `stores` array, and an `upstreams` array.
+
+`stores` is additive within `v1`: a consumer written before it existed still
+validates, since nothing was renamed or removed.
+
+## Stores
+
+One row per store, in the order the server resolves them — the writable store
+first, then each read-only mount, then anything refused.
+
+| Field | Meaning |
+| --- | --- |
+| `name` | The store name entries carry. `local` for the writable store; the `[read.<name>]` name otherwise; `null` for a refused row. |
+| `writable` | True for exactly one row. This is the store `hud sync` pushes and the only one anything writes to. |
+| `path` | Resolved absolute path, `~` expanded. `null` for a refused row. |
+| `status` | `ok` or `ignored`. |
+| `reason` | Why a row was ignored; `null` when `ok`. |
+
+A refused mount is a row with `status: "ignored"`, **not** an omission. That is
+the difference between a machine with no mounts and a machine whose mounts all
+failed, and the two must not read the same. Refusals come from the server's own
+resolution — absent or unreadable path, not a directory, pointing at the
+writable root, or claiming the reserved `local` name — so the CLI and the tree
+cannot disagree about which stores are live.
 
 ## Upstreams
 

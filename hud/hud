@@ -173,6 +173,12 @@ emit("digest.cmd", table(sources, "digest").cmd);
 const sroot = table(sources, "sessions").root;
 emit("sessions.root", sroot ? m.expandHome(String(sroot)) : "");
 emit("sessions.lectio", table(sources, "sessions").lectio);
+// Read-only stores come from the module rather than the raw config: the
+// rejections (absent path, reserved name, not a directory) are decided there,
+// and a warning nobody prints is the same as no warning at all.
+const rs = m.readStores(root);
+for (const st of rs.stores) emit("read.store", st.name + " " + st.path);
+for (const w of rs.warns) emit("read.warn", w);
 '
 
 CFG_LOADED=""
@@ -180,6 +186,8 @@ CFG_FILE="" CFG_NAME="" CFG_DEFAULT_PORT="" CFG_HOST="" CFG_PORT="" CFG_LABEL=""
 BOARD_URL="" DIGEST_CMD="" SESSIONS_ROOT="" LECTIO_URL=""
 KNOWN_SECTIONS=""
 CONFIG_WARNS=()
+READ_STORES=()
+READ_WARNS=()
 
 load_config() {
     [[ -z "$CFG_LOADED" ]] || return 0
@@ -194,6 +202,8 @@ load_config() {
             config.name) CFG_NAME="$value" ;;
             known.sections) KNOWN_SECTIONS="$value" ;;
             config.warn) CONFIG_WARNS+=("$value") ;;
+            read.store) READ_STORES+=("$value") ;;
+            read.warn) READ_WARNS+=("$value") ;;
             default.port) CFG_DEFAULT_PORT="$value" ;;
             serve.host) CFG_HOST="$value" ;;
             serve.port) CFG_PORT="$value" ;;
@@ -706,9 +716,28 @@ emit_status_json() {  # port-holder pid, HTTP code, service pid
           behind: $behind,
           dirty: $dirty}')"
 
+    # Stores, in the order the server resolves them: writable first, then each
+    # read-only mount, then anything refused. A rejection is a row with
+    # status "ignored" rather than an omission, so a consumer can tell a
+    # machine with no mounts from one whose mounts all failed.
+    local stores entry nm pth
+    stores="$(jq -n --arg root "$HUD_ROOT_R" \
+        '[{name: "local", writable: true, path: $root, status: "ok", reason: null}]')"
+    for entry in ${READ_STORES[@]+"${READ_STORES[@]}"}; do
+        nm="${entry%% *}"
+        pth="${entry#* }"
+        stores="$(jq -n --argjson acc "$stores" --arg name "$nm" --arg path "$pth" \
+            '$acc + [{name: $name, writable: false, path: $path, status: "ok", reason: null}]')"
+    done
+    for entry in ${READ_WARNS[@]+"${READ_WARNS[@]}"}; do
+        stores="$(jq -n --argjson acc "$stores" --arg reason "$entry" \
+            '$acc + [{name: null, writable: false, path: null, status: "ignored", reason: $reason}]')"
+    done
+
     jq -n \
         --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         --arg root "$HUD_ROOT_R" \
+        --argjson stores "$stores" \
         --arg config_file "$CFG_FILE" \
         --argjson config_warnings "$warns" \
         --arg url "$URL" \
@@ -733,6 +762,7 @@ emit_status_json() {  # port-holder pid, HTTP code, service pid
         '{schema: "hud-status/v1",
           generated_at: $generated_at,
           root: $root,
+          stores: $stores,
           config: {file: (if $config_file == "" then null else $config_file end),
                    found: ($config_file != ""),
                    warnings: $config_warnings},
@@ -812,6 +842,22 @@ cmd_status() {
     for warn in ${CONFIG_WARNS[@]+"${CONFIG_WARNS[@]}"}; do
         printf '  config!   %s\n' "$warn"
     done
+
+    # Stores are printed only when there are some, or something was refused:
+    # a single-store machine is the common case and does not need a heading.
+    if [[ ${#READ_STORES[@]} -gt 0 || ${#READ_WARNS[@]} -gt 0 ]]; then
+        printf '\nstores\n'
+        printf '  %-9s %-10s %s\n' 'local' 'writable' "$HUD_ROOT_R"
+        local entry
+        for entry in ${READ_STORES[@]+"${READ_STORES[@]}"}; do
+            printf '  %-9s %-10s %s\n' "${entry%% *}" 'read-only' "${entry#* }"
+        done
+        for entry in ${READ_WARNS[@]+"${READ_WARNS[@]}"}; do
+            printf '  %-9s %-10s %s\n' '!' 'ignored' "$entry"
+        done
+        printf '\nOnly the writable store is pushed by '"'"'hud sync'"'"'. A read-only store is\n'
+        printf 'on this machine because it was cloned here; nothing here enforces that.\n'
+    fi
 
     printf '\nupstreams\n'
     report_upstreams

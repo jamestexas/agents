@@ -89,6 +89,47 @@ trees: **nothing reads it.** Grepping the server, the UI, and the CLI turns up
 no consumer — only two test fixtures that carry it as an inert key. It parses
 and it is ignored. `hud init` does not write it, and neither should you.
 
+## `[read.<name>]` — stores this machine reads but never writes
+
+| Key | Type | Read by |
+| --- | --- | --- |
+| `path` | string, `~` expanded | `readStores()` in `server.mjs` |
+
+```toml
+[read.work]
+path = "~/stores/work"
+```
+
+One machine writes to exactly one store and may read from several. The writable
+store is `HUD_ROOT` and **cannot be named here** — that keeps one fact in one
+place, and it is why there is no `[store]` table. `hud sync` stages, commits and
+pushes only the writable store, so a mounted store cannot be pushed to the
+wrong remote: sync has no knowledge that other roots exist.
+
+What the union does:
+
+- **Sections merge by name.** `projects/` in two stores is *one* section whose
+  groups come from both, because grouping is computed after the merge.
+- **Every entry carries a `store`.** Entries from the writable store are
+  `local`, which is reserved: a `[read.local]` is refused with a warning rather
+  than shadowing the root.
+- **Collisions resolve writable-first and are reported.** The same relative path
+  in two stores serves the writable copy, and the losing one is listed in the
+  tree's `shadowed` array — always present, empty when there is nothing to say.
+  Resolving silently would make a note that stopped being reachable look
+  identical to one that never existed.
+- **Mounted entries are openable**, not just listed: `/api/md` resolves across
+  stores in the same order, re-checking containment against each root.
+
+A store that is absent, unreadable, not a directory, or pointed at the writable
+root is **ignored with a warning**. That is deliberate — quietly dropping it
+renders a tree that looks complete and is not.
+
+**What this does not do.** Mounting a private store puts its data on this
+machine. Only declining to clone it prevents that. The guarantees here are
+"never writes across stores" and "never pushes a store it does not own"; the
+config makes the boundary legible rather than enforcing it.
+
 ## `[serve]`
 
 Read by the `hud` command and by `service/install.sh`, **not** by `server.mjs`.

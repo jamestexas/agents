@@ -68,7 +68,7 @@ is the fastest way to see what this HUD is wired to and what it is not.
 | `hud start` | Starts the launchd service if one is installed, otherwise `node server.mjs` backgrounded; idempotent. |
 | `hud stop` | Boots the service out; the plist stays, so `hud start` brings it back. |
 | `hud restart` | `stop`, then `start`. |
-| `hud status [--json]` | Resolved `HUD_ROOT` and config file, service state and pid, port and health, and whether each configured upstream answers. `--json` emits the same facts as one document — see [docs/STATUS-JSON.md](docs/STATUS-JSON.md). |
+| `hud status [--json]` | Resolved `HUD_ROOT` and config file, service state and pid, port and health, which stores are mounted and which were refused, and whether each configured upstream answers. `--json` emits the same facts as one document — see [docs/STATUS-JSON.md](docs/STATUS-JSON.md). |
 | `hud open` | Opens the HUD in your browser. |
 | `hud logs [-f] [-n N]` | Tails `$HUD_ROOT/.generated/service.log` — the file both start paths write to. |
 | `hud root` | Prints the resolved `HUD_ROOT`. |

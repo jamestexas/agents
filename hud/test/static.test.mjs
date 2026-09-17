@@ -18,6 +18,7 @@ import {
   inferType,
   parseFrontmatter,
   resolveWithin,
+  WRITABLE_STORE,
 } from "../server.mjs";
 
 /** Build a tmp tree from {relative path: contents}; empty string ⇒ empty file. */
@@ -62,6 +63,7 @@ test("bare md without frontmatter is listed with defaults", (t) => {
     date: "2026-01-02", // filename prefix
     type: "note", // inferred from directory
     status: "active", // default
+    store: WRITABLE_STORE, // provenance: a single-store tree is all writable
   });
   assert.equal(withHeading.warn, undefined, "a bare file is not a warning");
 
@@ -246,6 +248,7 @@ test("raw/ files are listed, never parsed", (t) => {
     listed: true,
     raw: true,
     group: "project-a",
+    store: WRITABLE_STORE,
   });
   assert.equal(drop.title, undefined, "no title means the file was never opened");
 
@@ -433,6 +436,7 @@ test("api/tree responds with the documented shape", async (t) => {
     date: "2026-04-04",
     type: "note",
     status: "active",
+    store: WRITABLE_STORE,
   });
 });
 

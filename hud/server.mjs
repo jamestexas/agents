@@ -48,6 +48,16 @@ export function defaultRoot() {
 /** Left-column order. Any other top-level directory is appended alphabetically. */
 export const KNOWN_SECTIONS = ["projects", "playbooks", "peers", "inbox", "archive"];
 
+/**
+ * The name carried by entries from the one store this machine writes to.
+ *
+ * Writing is 1:1 and reading is 1:many: `HUD_ROOT` is the writable store and
+ * the config file deliberately cannot name it, so there is one source for that
+ * fact. The name is reserved — a `[read.<name>]` claiming it is refused rather
+ * than silently shadowing the root.
+ */
+export const WRITABLE_STORE = "local";
+
 /** Dynamic-source budgets. Every outward call is bounded in time and size. */
 export const LIMITS = {
   httpTimeoutMs: 4000,
@@ -458,7 +468,8 @@ function compareEntries(rankOf) {
   };
 }
 
-function buildSection(root, name) {
+/** One section's entries from one store, each tagged with where it came from. */
+function sectionEntries(root, name, store) {
   const entries = [];
   for (const rel of walkFiles(root, name, [])) {
     const entry = buildEntry(root, rel);
@@ -467,9 +478,21 @@ function buildSection(root, name) {
     // Within projects, the subdirectory *is* the group label (eve.dev's
     // names-derive-from-paths). Zero config: a new dir is a new group.
     if (name === "projects" && parts.length >= 3) entry.group = parts[1];
+    entry.store = store;
     entries.push(entry);
   }
+  return entries;
+}
 
+/**
+ * Group, order and seal a section once every store has contributed to it.
+ *
+ * Split from the walk so grouping runs on the *merged* entry list. Computing
+ * it per store would give each store its own group list and its own ordering,
+ * which is the difference between one combined section and several that merely
+ * share a name.
+ */
+function finishSection(name, entries) {
   const section = { name, entries };
 
   if (name === "projects") {
@@ -498,28 +521,121 @@ function buildSection(root, name) {
 }
 
 /**
- * Project HUD_ROOT as `{generated, sections:[{name, entries, groups?}]}`.
- * Sections are the top-level directories: known ones first in KNOWN_SECTIONS
- * order, then anything else alphabetically. Adding a directory adds a section.
+ * Read-only stores, from `[read.<name>] path = "…"`.
+ *
+ * Every rejection is reported rather than skipped. A mounted store that is
+ * absent, unreadable or misconfigured is a mistake worth seeing: quietly
+ * omitting it renders a tree that looks complete and is not.
+ *
+ * @returns {{stores: {name: string, path: string}[], warns: string[]}}
  */
-export function buildTree(root) {
+export function readStores(root) {
+  const cfg = loadConfig(root);
+  const table = cfg && typeof cfg.read === "object" && cfg.read ? cfg.read : {};
+  const stores = [];
+  const warns = [];
+
+  for (const name of Object.keys(table)) {
+    const entry = table[name];
+    const raw = entry && typeof entry === "object" ? entry.path : undefined;
+
+    if (name === WRITABLE_STORE) {
+      warns.push(`read store '${name}' uses the reserved writable-store name; ignored`);
+      continue;
+    }
+    if (typeof raw !== "string" || raw === "") {
+      warns.push(`read store '${name}' has no path; ignored`);
+      continue;
+    }
+
+    const abs = expandHome(raw);
+    let stat;
+    try {
+      stat = fs.statSync(abs);
+    } catch {
+      warns.push(`read store '${name}' is absent or unreadable: ${abs}`);
+      continue;
+    }
+    if (!stat.isDirectory()) {
+      warns.push(`read store '${name}' is not a directory: ${abs}`);
+      continue;
+    }
+    if (realpathOr(abs) === realpathOr(root)) {
+      warns.push(`read store '${name}' points at the writable root; ignored`);
+      continue;
+    }
+
+    stores.push({ name, path: abs });
+  }
+
+  return { stores, warns };
+}
+
+/** Top-level directories of one store, minus dotfiles and machinery. */
+function topDirs(root) {
   let dirents = [];
   try {
     dirents = fs.readdirSync(root, { withFileTypes: true });
   } catch {
     dirents = [];
   }
-  const dirs = dirents
+  return dirents
     .filter((d) => d.isDirectory() && !d.name.startsWith(".") && !SKIP_NAMES.has(d.name))
     .map((d) => d.name);
+}
+
+/**
+ * Every store this machine reads, writable first.
+ *
+ * Writable-first is the whole collision policy: the first store to claim a
+ * relative path keeps it, so no precedence table is needed and the answer
+ * cannot depend on directory iteration order.
+ */
+export function storeChain(root, opts = {}) {
+  const read = opts.stores || readStores(root).stores;
+  return [{ name: WRITABLE_STORE, path: root }, ...read];
+}
+
+/**
+ * Project the configured stores as
+ * `{generated, sections:[{name, entries, groups?}], shadowed:[…]}`.
+ *
+ * Sections are the union of top-level directories across stores — known ones
+ * in KNOWN_SECTIONS order, then anything else alphabetically — so a section
+ * that exists only in a mounted store still appears in its usual place.
+ *
+ * `shadowed` is always an array. A path present in more than one store is
+ * served from the writable store and the losing copy is listed here rather
+ * than dropped: silently resolving a collision makes a note that stopped
+ * being reachable indistinguishable from one that never existed.
+ */
+export function buildTree(root, opts = {}) {
+  const stores = storeChain(root, opts);
+
+  const seen = new Set();
+  for (const store of stores) for (const n of topDirs(store.path)) seen.add(n);
   const ordered = [
-    ...KNOWN_SECTIONS.filter((n) => dirs.includes(n)),
-    ...dirs.filter((n) => !KNOWN_SECTIONS.includes(n)).sort(),
+    ...KNOWN_SECTIONS.filter((n) => seen.has(n)),
+    ...[...seen].filter((n) => !KNOWN_SECTIONS.includes(n)).sort(),
   ];
-  return {
-    generated: new Date().toISOString(),
-    sections: ordered.map((n) => buildSection(root, n)),
-  };
+
+  const shadowed = [];
+  const sections = ordered.map((name) => {
+    const byPath = new Map();
+    for (const store of stores) {
+      for (const entry of sectionEntries(store.path, name, store.name)) {
+        const held = byPath.get(entry.path);
+        if (!held) {
+          byPath.set(entry.path, entry);
+          continue;
+        }
+        shadowed.push({ path: entry.path, store: entry.store, shadowed_by: held.store });
+      }
+    }
+    return finishSection(name, [...byPath.values()]);
+  });
+
+  return { generated: new Date().toISOString(), sections, shadowed };
 }
 
 // ------------------------------------------------------------ path safety
@@ -1751,16 +1867,34 @@ function serveMarkdown(res, root, rel) {
   if (rel === null || rel === "") return sendText(res, 400, "missing ?path\n");
   if (rel.includes("\0")) return sendText(res, 400, "bad path\n");
 
-  const abs = resolveWithin(root, rel);
-  if (abs === null) return sendText(res, 400, "path escapes HUD_ROOT\n");
-
-  let stat;
-  try {
-    stat = fs.statSync(abs);
-  } catch {
-    return sendText(res, 404, "not found\n");
+  // Resolved per store, writable first, so the bytes served match the entry
+  // /api/tree advertised. Containment is re-checked against each root rather
+  // than once against the writable one: a read store lives outside HUD_ROOT,
+  // so a single check would reject every mounted entry.
+  let abs = null;
+  let escaped = false;
+  for (const store of storeChain(root)) {
+    const candidate = resolveWithin(store.path, rel);
+    if (candidate === null) {
+      escaped = true;
+      continue;
+    }
+    let stat;
+    try {
+      stat = fs.statSync(candidate);
+    } catch {
+      continue;
+    }
+    if (!stat.isFile()) return sendText(res, 400, "not a file\n");
+    abs = candidate;
+    break;
   }
-  if (!stat.isFile()) return sendText(res, 400, "not a file\n");
+  if (abs === null) {
+    // An escape attempt is a client error; a path no store holds is a miss.
+    return escaped
+      ? sendText(res, 400, "path escapes its store\n")
+      : sendText(res, 404, "not found\n");
+  }
 
   // Exact bytes; the client decides how to render them.
   sendFile(res, abs, "text/plain; charset=utf-8");
