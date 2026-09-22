@@ -43,6 +43,14 @@
       a {
         color: var(--accent);
       }
+      /* `.badge` (0-1-0) outranks `a` (0-0-1), so a linked ticket chip rendered
+         in the same muted grey as an inert one — the one place in a design whose
+         whole premise is "every affordance is a link out" where the affordance
+         was invisible. */
+      a.badge {
+        color: var(--accent);
+        border-color: currentColor;
+      }
 
       /* ---- header bar: dial is a placeholder until the dynamic bead ---- */
       header {
@@ -233,6 +241,14 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         color: var(--cyan);
+      }
+      /* The project brief. Borrows the group heading's weight and colour
+         rather than inventing a treatment, so the eye reads brief-then-notes
+         as one hierarchy. Not a chip: this is the axis that deserves weight,
+         and the review's whole direction was fewer chips, not another one. */
+      .entry .title.brief {
+        color: var(--fg);
+        font-weight: 600;
       }
       .entry .meta {
         font-family: var(--mono);
@@ -729,8 +745,14 @@
         caret.textContent = "▸";
         b.appendChild(caret);
 
-        b.title = e.path + " — click to open";
+        b.title =
+          (e.type === "context" ? "project brief — " : "") + e.path + " — click to open";
         const title = document.createElement("span");
+        // The brief is the entry a reader wants first when opening a cold
+        // project, and in the tree it looked identical to the notes under it —
+        // distinguished only by sorting first, which is invisible. `type` is
+        // the one axis that earns emphasis and was the only one getting none.
+        if (e.type === "context") title.classList.add("brief");
         title.className = "title";
         title.textContent = e.title || e.name || e.path;
         b.appendChild(title);

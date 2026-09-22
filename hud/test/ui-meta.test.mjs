@@ -360,7 +360,9 @@ test("every data-bearing element in an entry row is annotated", () => {
   // store, warn, status, meta, and the row's own path.
   const titles = (fn.match(/\.title\s*=/g) || []).length;
   assert.ok(titles >= 5, `only ${titles} annotated elements in entryNode; expected every fact to carry one`);
-  assert.match(fn, /b\.title = e\.path/, "the row does not say what it opens");
+  // Matches the property, not the expression: the previous version pinned
+  // `b.title = e.path` and broke when the brief gained a prefix.
+  assert.match(fn, /b\.title =[\s\S]{0,140}e\.path/, "the row does not say what it opens");
   // Three assertions, because each catches a different break. Both branch
   // texts must exist, AND the condition must be a bare ternary on `e.listed`:
   // asserting only `meta.title = e.listed` still matched a mutation to
@@ -392,4 +394,36 @@ test("counts, group headings and the tail line are annotated", () => {
   assert.match(html, /gh\.title =/, "the group heading is bare");
   assert.match(html, /summary\.title =/, "the tail summary is bare");
   assert.match(html, /e\.title = "nothing filed here yet/, "the empty state is bare");
+});
+
+test("the project brief carries weight the notes under it do not", () => {
+  // It is the entry a reader wants first on a cold project, and it looked
+  // identical to its notes — distinguished only by sorting first, which is
+  // invisible. Emphasis, not another chip: the direction here was fewer chips.
+  assert.match(html, /if \(e\.type === "context"\) title\.classList\.add\("brief"\)/,
+    "the brief gets no distinguishing class");
+  const rule = html.slice(html.indexOf(".entry .title.brief"), html.indexOf("}", html.indexOf(".entry .title.brief")));
+  assert.match(rule, /var\(--fg\)/, "the brief does not take the foreground colour");
+  assert.match(rule, /font-weight: 600/, "the brief is not weighted");
+  assert.doesNotMatch(html, /"badge brief"|brief.*badge/, "the brief was given a chip instead of weight");
+});
+
+test("a chip that links looks different from one that does not", () => {
+  // `.badge` is 0-1-0 and `a` is 0-0-1, so a linked ticket chip rendered in the
+  // same muted grey as an inert one — the single place in this design where an
+  // affordance was invisible.
+  const i = html.indexOf("a.badge {");
+  assert.ok(i > 0, "no a.badge rule: linked chips still inherit .badge's muted colour");
+  const rule = html.slice(i, html.indexOf("}", i));
+  assert.match(rule, /var\(--accent\)/, "a linked chip does not take the link colour");
+  assert.match(rule, /border-color: currentColor/, "a linked chip's border still reads as inert");
+  // No order assertion: `a.badge` is 0-1-1 and `.badge` is 0-1-0, so it wins
+  // on specificity wherever it sits. (The first version of this test asserted
+  // it had to come later in the sheet, which was wrong — cascade order only
+  // decides ties, and this is not one.) What matters is that the selector is
+  // more specific than the rule it is overriding:
+  assert.ok(
+    html.includes("a.badge {") && html.includes("      .badge {"),
+    "both rules must exist for the override to mean anything",
+  );
 });
