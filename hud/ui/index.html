@@ -158,6 +158,15 @@
       /* Warmth, shown because it is what the order is computed from. Pushed
          right so the group names stay left-aligned and scannable as a column;
          muted because it explains the order rather than competing with it. */
+      /* The section's one-line answer to "what is this". Muted and small: it
+         is there to be read once and then ignored, not to compete with the
+         entries under it. */
+      .about {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--muted);
+        margin: 0 0 8px;
+      }
       .tail-label {
         font-family: var(--mono);
         font-size: 11px;
@@ -720,6 +729,7 @@
         caret.textContent = "▸";
         b.appendChild(caret);
 
+        b.title = e.path + " — click to open";
         const title = document.createElement("span");
         title.className = "title";
         title.textContent = e.title || e.name || e.path;
@@ -747,10 +757,21 @@
           const s = document.createElement("span");
           s.className = "badge " + e.status;
           s.textContent = e.status;
+          // Deliberately says which of two things this means. On a brief it is
+          // project lifecycle and it drives ordering; on a note it is
+          // hand-added frontmatter meaning "about work that is over", and the
+          // note template does not define it at all.
+          s.title =
+            e.type === "context"
+              ? "project lifecycle — drives this group's rank and default fold"
+              : "marked " + e.status + " in this file's frontmatter; notes have no status by default";
           b.appendChild(s);
         }
 
         const meta = document.createElement("span");
+        meta.title = e.listed
+          ? "file size — entries under raw/ are listed, never parsed, so there is no date to show"
+          : "date, from this file's frontmatter, its filename prefix, or its mtime";
         meta.className = "meta";
         meta.textContent = e.listed ? fmtSize(e.size) : e.date || "";
         b.appendChild(meta);
@@ -818,6 +839,8 @@
         // same order the label does.
         const ordered = [...tail].sort((a, b) => Number(a.listed) - Number(b.listed));
         const summary = node("span", "tail-label", label);
+        summary.title =
+          "entries that cannot need you: finished work, and files under raw/ that are listed but never parsed";
         const fold = foldNode([summary], entriesNode(ordered, showStore));
         const key = "hud.tail." + sectionName + "/" + groupName;
         const saved = foldState(key);
@@ -857,10 +880,13 @@
           const h = document.createElement("h2");
           h.className = "section";
           h.textContent = section.name;
-          const count = document.createElement("span");
-          count.className = "count";
-          count.textContent = " (" + section.entries.length + ")";
+          const count = node("span", "count", " (" + section.entries.length + ")");
+          count.title = section.entries.length === 1 ? "1 entry" : section.entries.length + " entries";
           h.appendChild(count);
+          // The sentence rides the heading as a tooltip and sits under it as
+          // text. Hover alone would leave it undiscoverable — a reader has to
+          // suspect there is something to hover before they hover.
+          if (section.about) h.title = section.about;
 
           // The section body goes into a fold, same primitive as the groups
           // one level down. Built into a detached div first so every branch
@@ -879,8 +905,12 @@
           sfold.addEventListener("toggle", () => setFoldState(skey, sfold.open));
           listView.appendChild(sfold);
 
+          if (section.about) sbody.appendChild(node("div", "about", section.about));
+
           if (!section.entries.length) {
-            sbody.appendChild(node("div", "empty", "empty"));
+            const e = node("div", "empty", "empty");
+            e.title = "nothing filed here yet — the directory exists, it just has no entries";
+            sbody.appendChild(e);
             continue;
           }
 
@@ -891,10 +921,16 @@
             for (const g of section.groups) {
               const rows = section.entries.filter((e) => e.group === g.name);
               const gh = node("h3", "group in-summary", g.name);
+              gh.title =
+                "project — the directory name under " + section.name + "/, ranked by its newest entry";
               if (g.status && g.status !== "active") {
-                gh.appendChild(node("span", "badge " + g.status, g.status));
+                const gs = node("span", "badge " + g.status, g.status);
+                gs.title = "project lifecycle, from status: in this project's CONTEXT.md";
+                gh.appendChild(gs);
               }
-              gh.appendChild(node("span", "count", " (" + rows.length + ")"));
+              const gcount = node("span", "count", " (" + rows.length + ")");
+              gcount.title = rows.length === 1 ? "1 entry" : rows.length + " entries, tail included";
+              gh.appendChild(gcount);
               // The key the server sorted on. Groups rank by warmth, and an
               // order the reader cannot see explains nothing — without this
               // the sequence looks arbitrary even though it is not.

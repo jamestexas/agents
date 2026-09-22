@@ -341,3 +341,55 @@ test("the section heading's block margin moves to the wrapper", () => {
   assert.match(html, /details\.section-fold:first-child \{/,
     "the first-child spacing was not moved to the wrapper");
 });
+
+// --------------------------------------------------------------- annotation
+
+// "No data is missable or unannotated." Every element that carries a fact
+// should say what the fact is; containers and the decorative caret need not.
+
+test("the section sentence is visible, not hover-only", () => {
+  // Hover alone leaves it undiscoverable — a reader has to suspect there is
+  // something to hover before they hover. So it is both.
+  assert.match(html, /node\("div", "about", section\.about\)/, "the section sentence is never rendered as text");
+  assert.match(html, /h\.title = section\.about/, "the section heading carries no tooltip");
+  assert.match(html, /\.about \{/, "the section sentence has no styling of its own");
+});
+
+test("every data-bearing element in an entry row is annotated", () => {
+  const fn = html.slice(html.indexOf("function entryNode("), html.indexOf("function entriesNode("));
+  // store, warn, status, meta, and the row's own path.
+  const titles = (fn.match(/\.title\s*=/g) || []).length;
+  assert.ok(titles >= 5, `only ${titles} annotated elements in entryNode; expected every fact to carry one`);
+  assert.match(fn, /b\.title = e\.path/, "the row does not say what it opens");
+  // Three assertions, because each catches a different break. Both branch
+  // texts must exist, AND the condition must be a bare ternary on `e.listed`:
+  // asserting only `meta.title = e.listed` still matched a mutation to
+  // `e.listed && false`, which collapsed both meanings into one while leaving
+  // both strings in the file.
+  //
+  // The honest limit of source-level testing: this pins the shape, not the
+  // evaluation. A condition that is a ternary on `e.listed` but semantically
+  // wrong would pass. Closing that needs a DOM, and the UI has no jsdom by
+  // design.
+  assert.match(fn, /meta\.title = e\.listed\s*\n?\s*\?/,
+    "the meta title is no longer a direct ternary on e.listed");
+  assert.match(fn, /never parsed, so there is no date to show/, "the meta slot does not explain a size");
+  assert.match(fn, /its filename prefix, or its mtime/, "the meta slot does not explain a date");
+});
+
+test("the status chip says which of its two meanings applies", () => {
+  // The field means project lifecycle on a brief and "about finished work" on
+  // a note — and the note template does not define it at all. A single tooltip
+  // for both would restate the collision instead of explaining it.
+  const fn = html.slice(html.indexOf("function entryNode("), html.indexOf("function entriesNode("));
+  assert.match(fn, /e\.type === "context"/, "the status tooltip does not branch on entry type");
+  assert.match(fn, /notes have no status by default/, "the tooltip does not admit notes have no status");
+});
+
+test("counts, group headings and the tail line are annotated", () => {
+  assert.match(html, /count\.title =/, "the section count is bare");
+  assert.match(html, /gcount\.title =/, "the group count is bare");
+  assert.match(html, /gh\.title =/, "the group heading is bare");
+  assert.match(html, /summary\.title =/, "the tail summary is bare");
+  assert.match(html, /e\.title = "nothing filed here yet/, "the empty state is bare");
+});

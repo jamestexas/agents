@@ -18,6 +18,10 @@ import {
   loadConfig,
   loadConfigDetail,
   parseToml,
+  SECTION_ABOUT,
+  aboutSection,
+  KNOWN_SECTIONS,
+  buildTree,
 } from "../server.mjs";
 
 /** Build a tmp HUD_ROOT from {relative path: contents}. */
@@ -218,4 +222,40 @@ test("toml wins when both exist", async (t) => {
 
   // Read-only, like every other GET route here.
   assert.equal((await fetch(`${base}/api/config`, { method: "POST" })).status, 405);
+});
+
+// -------------------------------------------------------- section descriptions
+
+test("every known section has a one-sentence description", () => {
+  // Server-owned so the sentence, the section order and the entry model cannot
+  // drift apart, and so the reference doc has one place to point at.
+  for (const name of KNOWN_SECTIONS) {
+    const about = SECTION_ABOUT[name];
+    assert.ok(about, `no description for the known section '${name}'`);
+    assert.ok(about.length > 25, `'${name}' description is too short to answer "what is this": ${about}`);
+    // One sentence, not a paragraph — this sits under a heading, not in a doc.
+    assert.ok(about.length < 130, `'${name}' description is too long for a heading subtitle`);
+  }
+});
+
+test("a section the map has never seen is still annotated", () => {
+  // Sections are top-level directories, so a reader can always invent one.
+  // Falling back beats leaving it bare, which is the whole point.
+  const about = aboutSection("scratchpad");
+  assert.ok(about && about.length > 25, "an unknown section got no description");
+  assert.match(about, /scratchpad/, "the fallback does not name the section it describes");
+  assert.notEqual(about, SECTION_ABOUT.projects, "the fallback reused another section's sentence");
+});
+
+test("the description ships on the section, not just in the constant", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "hud-about-"));
+  try {
+    fs.mkdirSync(path.join(root, "playbooks"), { recursive: true });
+    fs.writeFileSync(path.join(root, "playbooks/p.md"), "---\ntitle: P\n---\n# P\n");
+    const tree = buildTree(root);
+    const s = tree.sections.find((x) => x.name === "playbooks");
+    assert.equal(s.about, SECTION_ABOUT.playbooks, "/api/tree does not carry the description");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

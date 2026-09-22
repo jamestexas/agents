@@ -49,6 +49,32 @@ export function defaultRoot() {
 export const KNOWN_SECTIONS = ["projects", "playbooks", "peers", "inbox", "archive"];
 
 /**
+ * One sentence per section, answering "what is this" for a reader who did not
+ * design the tree.
+ *
+ * Server-owned rather than written into the UI so the description, the section
+ * order and the entry model cannot drift apart — and so `hud.toml`'s reference
+ * doc has one place to point at. A section is a top-level directory, so a
+ * reader can always create one this map does not know; `aboutSection` falls
+ * back rather than leaving it unannotated.
+ */
+export const SECTION_ABOUT = {
+  projects: "Live work — one directory per project, its CONTEXT.md the brief, notes beneath it.",
+  playbooks: "Procedures worth not re-deriving: how a thing is done, written down once.",
+  peers: "One file per colleague, naming the GitHub handle whose PRs light up the peers panel.",
+  inbox: "Unfiled capture — notes taken before there was a project to put them in.",
+  archive: "Finished or parked work, kept for reference. Nothing here needs you.",
+};
+
+/** The sentence for a section, including one the map has never seen. */
+export function aboutSection(name) {
+  return (
+    SECTION_ABOUT[name] ||
+    `A directory in your content tree. Sections are top-level directories, so "${name}" became one by existing.`
+  );
+}
+
+/**
  * The name carried by entries from the one store this machine writes to.
  *
  * Writing is 1:1 and reading is 1:many: `HUD_ROOT` is the writable store and
@@ -493,7 +519,7 @@ function sectionEntries(root, name, store) {
  * share a name.
  */
 function finishSection(name, entries) {
-  const section = { name, entries };
+  const section = { name, about: aboutSection(name), entries };
 
   if (name === "projects") {
     const statuses = new Map();

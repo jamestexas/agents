@@ -89,6 +89,46 @@ trees: **nothing reads it.** Grepping the server, the UI, and the CLI turns up
 no consumer — only two test fixtures that carry it as an inert key. It parses
 and it is ignored. `hud init` does not write it, and neither should you.
 
+## The tree's own vocabulary
+
+Not a `hud.toml` key — but the review that prompted the section descriptions
+found this written down nowhere except the code and the skill's frontmatter
+templates, which is a plausible reason `status: done` drifted onto notes that
+have no `status` field at all.
+
+**Sections** are top-level directories. `KNOWN_SECTIONS` in `server.mjs` fixes
+the order of the five the HUD knows; any other directory becomes a section too,
+appended alphabetically. Each carries a one-sentence description from
+`SECTION_ABOUT`, rendered under the heading and on its tooltip; a section the
+map has never seen gets a fallback rather than nothing.
+
+**Groups** exist only inside `projects`: the subdirectory *is* the group, and
+its `CONTEXT.md` is the brief. Groups rank active-first, then by warmth — the
+newest date any entry in the group carries — then by name. The heading shows
+that date, because an order the reader cannot see explains nothing.
+
+**Entry facts, and which are badged:**
+
+| Fact | Source | Shown as |
+| --- | --- | --- |
+| `title` | frontmatter, else first heading, else filename | the row |
+| `date` | frontmatter, else filename prefix, else mtime | the meta slot |
+| `size` | the file | the meta slot, *instead of* a date, for `raw/` entries |
+| `type` | frontmatter, else inferred from the path | **not badged in the tree** — it sorts briefs first |
+| `status` | frontmatter, defaulting to `active` | a chip when not `active` |
+| `store` | which store served it | a chip when not the writable one |
+| `warn` | malformed frontmatter | a chip |
+
+Two things worth knowing about `status`. It means **project lifecycle** on a
+`CONTEXT.md`, where it drives group rank and the default fold state — and on a
+note it means only what the author intended by typing it, because the note
+template defines no `status` field. And `active` is never badged, so an entry
+with no chip is the common case rather than a missing value.
+
+Entries that cannot need the reader — finished work and `raw/` files — fold
+behind one summary line per group. That is why there is no `raw` chip: the
+meta slot already shows a size instead of a date for exactly those entries.
+
 ## `[read.<name>]` — stores this machine reads but never writes
 
 | Key | Type | Read by |
