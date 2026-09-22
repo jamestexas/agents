@@ -324,10 +324,14 @@ test("projects group by subdir, active projects first", (t) => {
   });
 
   const projects = section(treeOf(root), "projects");
+  // Every CONTEXT.md here is undated, so each group's warmth is its mtime —
+  // today for all of them. They tie, and the name tiebreak decides. The
+  // warmth ordering itself is exercised separately, with explicit dates.
+  const today = projects.groups[0].date;
   assert.deepEqual(projects.groups, [
-    { name: "project-a", status: "active" },
-    { name: "project-z", status: "active" },
-    { name: "project-m", status: "done" }, // non-active sinks below active
+    { name: "project-a", status: "active", date: today },
+    { name: "project-z", status: "active", date: today },
+    { name: "project-m", status: "done", date: today }, // non-active sinks below active
   ]);
 
   // Entries are ordered group-by-group, CONTEXT first, then newest note first.
@@ -343,6 +347,78 @@ test("projects group by subdir, active projects first", (t) => {
   );
   assert.equal(projects.entries[0].group, "project-a");
   assert.equal(projects.entries[0].type, "context");
+});
+
+// Group order is warmth, not the alphabet. Before this, groups sorted A→Z
+// while entries inside them sorted newest-first: two orderings on one screen,
+// and the outer one — the one the eye reaches first — carried no information.
+// The group touched today could render last.
+test("project groups rank by their newest entry, not by name", (t) => {
+  const root = fixture(t, {
+    // Named so the alphabet and warmth disagree: alphabetical would be
+    // aaa, mmm, zzz; warmth is zzz, aaa, mmm.
+    "projects/aaa/CONTEXT.md": "---\nstatus: active\ndate: 2026-02-01\n---\n# A\n",
+    "projects/mmm/CONTEXT.md": "---\nstatus: active\ndate: 2026-01-01\n---\n# M\n",
+    "projects/zzz/CONTEXT.md": "---\nstatus: active\ndate: 2026-03-01\n---\n# Z\n",
+  });
+
+  const projects = section(treeOf(root), "projects");
+  assert.deepEqual(
+    projects.groups.map((g) => g.name),
+    ["zzz", "aaa", "mmm"],
+  );
+  // The date rides along so the UI can show what the order was computed from.
+  // An order the reader cannot see explains nothing, which is half the defect.
+  assert.deepEqual(
+    projects.groups.map((g) => g.date),
+    ["2026-03-01", "2026-02-01", "2026-01-01"],
+  );
+});
+
+// Warmth is the newest entry anywhere in the group, not the brief's own date:
+// a project whose CONTEXT.md is old but whose notes are current is warm.
+test("group warmth comes from the newest entry, including notes", (t) => {
+  const root = fixture(t, {
+    "projects/stale-brief/CONTEXT.md": "---\nstatus: active\ndate: 2026-01-01\n---\n# Stale\n",
+    "projects/stale-brief/notes/2026-09-01-fresh.md": "# Fresh\n",
+    "projects/fresh-brief/CONTEXT.md": "---\nstatus: active\ndate: 2026-05-01\n---\n# Fresh brief\n",
+  });
+
+  const projects = section(treeOf(root), "projects");
+  assert.deepEqual(
+    projects.groups.map((g) => g.name),
+    ["stale-brief", "fresh-brief"],
+    "a note newer than the other project's brief did not lift its group",
+  );
+});
+
+// Status still outranks warmth: a finished project sinks even if it was
+// touched more recently than a live one.
+test("the active tier outranks warmth", (t) => {
+  const root = fixture(t, {
+    "projects/finished/CONTEXT.md": "---\nstatus: done\ndate: 2026-09-01\n---\n# Done\n",
+    "projects/ongoing/CONTEXT.md": "---\nstatus: active\ndate: 2026-01-01\n---\n# Ongoing\n",
+  });
+
+  const projects = section(treeOf(root), "projects");
+  assert.deepEqual(
+    projects.groups.map((g) => g.name),
+    ["ongoing", "finished"],
+    "warmth overtook the active tier",
+  );
+});
+
+// A group with nothing dated must sink, not lead: "" is lexically below every
+// ISO day, and the comparator is descending.
+test("a group with no dated entry sorts last within its tier", (t) => {
+  const root = fixture(t, {
+    "projects/dated/CONTEXT.md": "---\nstatus: active\ndate: 2026-01-01\n---\n# Dated\n",
+    "projects/undated/raw/dump.bin": "not markdown, never parsed, no date",
+  });
+
+  const projects = section(treeOf(root), "projects");
+  const names = projects.groups.map((g) => g.name);
+  assert.equal(names[0], "dated", `undated group led: ${names.join(", ")}`);
 });
 
 test("peers frontmatter carries gh, repos and tickets through", (t) => {

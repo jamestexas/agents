@@ -497,17 +497,34 @@ function finishSection(name, entries) {
 
   if (name === "projects") {
     const statuses = new Map();
+    const newest = new Map();
     for (const e of entries) {
       if (!e.group) continue;
       if (!statuses.has(e.group)) statuses.set(e.group, "active");
       if (e.type === "context") statuses.set(e.group, e.status || "active");
+      // Warmth: the newest date anything in the group carries. ISO-8601 days
+      // compare lexically, so no parsing.
+      if (e.date && (!newest.has(e.group) || e.date > newest.get(e.group))) {
+        newest.set(e.group, e.date);
+      }
     }
+    // Ranked by warmth inside the active tier, not alphabetically. Two sorts
+    // ran on one screen before this: groups A→Z while entries went
+    // newest-first, so the outer order — the one the eye reaches first — was
+    // the uninformative one, and the group touched today could render last.
+    // `date` rides along on the group so the UI can show what it sorted on;
+    // an order the reader cannot see explains nothing. Matches the sessions
+    // panel, which already groups newest-first.
     const groups = [...statuses.entries()]
-      .map(([gname, status]) => ({ name: gname, status }))
+      .map(([gname, status]) => ({ name: gname, status, date: newest.get(gname) || "" }))
       .sort((a, b) => {
         const ra = a.status === "active" ? 0 : 1;
         const rb = b.status === "active" ? 0 : 1;
         if (ra !== rb) return ra - rb;
+        // A group with no dated entry sorts last rather than first: "" is less
+        // than any ISO day, and this is descending.
+        if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+        // Name last, so equal warmth is still deterministic.
         return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
       });
     section.groups = groups;

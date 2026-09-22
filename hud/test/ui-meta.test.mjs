@@ -208,3 +208,11 @@ test("the fold key namespaces section and group, so names cannot collide", () =>
   assert.match(html, /"hud\.fold\." \+ section\.name \+ "\/" \+ g\.name/,
     "the fold key does not include both section and group");
 });
+
+test("the group heading renders the date the server sorted on", () => {
+  // Half of "the order looks arbitrary" was that the order was invisible, not
+  // that it was wrong. Showing the key is what makes the sequence explicable
+  // without reading server.mjs.
+  assert.match(html, /node\("span", "gdate", g\.date\)/, "the group heading omits its warmth date");
+  assert.match(html, /h3\.group \.gdate \{/, "the gdate chip has no styling of its own");
+});

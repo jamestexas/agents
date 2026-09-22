@@ -130,6 +130,14 @@
         color: var(--muted);
         font-weight: 400;
       }
+      /* Warmth, shown because it is what the order is computed from. Pushed
+         right so the group names stay left-aligned and scannable as a column;
+         muted because it explains the order rather than competing with it. */
+      h3.group .gdate {
+        margin-left: auto;
+        color: var(--muted);
+        font-weight: 400;
+      }
       /* Inside a <summary> the heading is a row in a flex line, not a block,
          so its standalone margin would push the caret out of alignment. */
       details.fold > summary h3.group.in-summary {
@@ -808,6 +816,14 @@
                 gh.appendChild(node("span", "badge " + g.status, g.status));
               }
               gh.appendChild(node("span", "count", " (" + rows.length + ")"));
+              // The key the server sorted on. Groups rank by warmth, and an
+              // order the reader cannot see explains nothing — without this
+              // the sequence looks arbitrary even though it is not.
+              if (g.date) {
+                const d = node("span", "gdate", g.date);
+                d.title = "newest entry in this project";
+                gh.appendChild(d);
+              }
 
               const fold = foldNode([gh], entriesNode(rows, showStore));
               // Default: live work open, everything else shut. A remembered
