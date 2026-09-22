@@ -295,3 +295,49 @@ test("staleness composes with any count rather than replacing it", () => {
   const unavailable = html.slice(html.indexOf("work-board unavailable") - 400, html.indexOf("work-board unavailable"));
   assert.match(unavailable, /removeAttribute\("data-count"\)/, "an unavailable board leaves a stale count attribute");
 });
+
+// -------------------------------------------------------------- section folds
+
+test("sections are folds, and every body append targets the section body", () => {
+  // The regression to guard is subtle: leave one append pointing at listView
+  // and that part of the section renders outside its own fold, so collapsing
+  // the section leaves an orphan behind.
+  assert.match(html, /foldNode\(\[h\], sbody\)/, "sections are not built through foldNode");
+  const loop = html.slice(
+    html.indexOf('const sbody = document.createElement("div")'),
+    html.indexOf("// The last tree fetched"),
+  );
+  const strays = [...loop.matchAll(/listView\.appendChild\(([^)]*)\)/g)].map((m) => m[1]);
+  assert.deepEqual(strays, ["sfold"],
+    `only the section fold itself may attach to the column; found: ${strays.join(", ")}`);
+});
+
+test("archive and empty sections default shut; the rest open", () => {
+  // archive is the one section that can never need the reader, and an empty
+  // section has nothing to reveal — its count already says so in the summary.
+  assert.match(
+    html,
+    /section\.entries\.length === 0 \|\| section\.name === "archive"/,
+    "the shut-by-default rule does not cover both empty sections and archive",
+  );
+  assert.match(html, /sfold\.open = ssaved === null \? !shut : ssaved/,
+    "a remembered choice does not override the default");
+});
+
+test("section fold state is namespaced apart from groups and tails", () => {
+  // Three fold levels share one storage namespace; a section called the same
+  // thing as a group must not inherit its state.
+  for (const prefix of ['"hud.section." + section.name', '"hud.fold." + section.name', '"hud.tail." + sectionName']) {
+    assert.ok(html.includes(prefix), `missing distinct key prefix: ${prefix}`);
+  }
+});
+
+test("the section heading's block margin moves to the wrapper", () => {
+  // Inside a <summary> the h2's own margin pushes the caret out of line, and
+  // `:first-child` can no longer match it because the column's first child is
+  // now the <details>.
+  assert.match(html, /details\.section-fold > summary h2\.section \{\s*margin: 0;/,
+    "the heading keeps its block margin inside the summary");
+  assert.match(html, /details\.section-fold:first-child \{/,
+    "the first-child spacing was not moved to the wrapper");
+});

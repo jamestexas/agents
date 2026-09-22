@@ -138,6 +138,19 @@
       h2.section:first-child {
         margin-top: 4px;
       }
+      /* The heading now lives in a <summary>, so its own block margin would
+         push the caret out of line — and `:first-child` can no longer match it,
+         since the first child of the column is the <details>. Both move to the
+         wrapper. */
+      details.section-fold > summary h2.section {
+        margin: 0;
+      }
+      details.section-fold {
+        margin: 22px 0 8px;
+      }
+      details.section-fold:first-child {
+        margin-top: 4px;
+      }
       h2.section .count {
         color: var(--muted);
         font-weight: 400;
@@ -848,13 +861,26 @@
           count.className = "count";
           count.textContent = " (" + section.entries.length + ")";
           h.appendChild(count);
-          listView.appendChild(h);
+
+          // The section body goes into a fold, same primitive as the groups
+          // one level down. Built into a detached div first so every branch
+          // below appends to the same place whether or not it folds.
+          const sbody = document.createElement("div");
+          const sfold = foldNode([h], sbody);
+          sfold.classList.add("section-fold");
+          // Defaults, in priority order: an empty section has nothing to
+          // reveal, and `archive` is the one section that can never need the
+          // reader — a peer heading claims peer importance it does not have.
+          // Everything else opens.
+          const shut = section.entries.length === 0 || section.name === "archive";
+          const skey = "hud.section." + section.name;
+          const ssaved = foldState(skey);
+          sfold.open = ssaved === null ? !shut : ssaved;
+          sfold.addEventListener("toggle", () => setFoldState(skey, sfold.open));
+          listView.appendChild(sfold);
 
           if (!section.entries.length) {
-            const p = document.createElement("div");
-            p.className = "empty";
-            p.textContent = "empty";
-            listView.appendChild(p);
+            sbody.appendChild(node("div", "empty", "empty"));
             continue;
           }
 
@@ -898,12 +924,12 @@
               const saved = foldState(key);
               fold.open = saved === null ? (g.status || "active") === "active" : saved;
               fold.addEventListener("toggle", () => setFoldState(key, fold.open));
-              listView.appendChild(fold);
+              sbody.appendChild(fold);
             }
             const loose = section.entries.filter((e) => !e.group);
-            if (loose.length) listView.appendChild(entriesNode(loose, showStore));
+            if (loose.length) sbody.appendChild(entriesNode(loose, showStore));
           } else {
-            listView.appendChild(entriesNode(section.entries, showStore));
+            sbody.appendChild(entriesNode(section.entries, showStore));
           }
         }
       }
