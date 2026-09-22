@@ -180,8 +180,12 @@ test("every project group is wrapped in a fold, not appended bare", () => {
     /listView\.appendChild\(gh\)/,
     "a group heading is appended directly, so that group cannot collapse",
   );
-  assert.match(html, /foldNode\(\[gh\],\s*entriesNode\(rows, showStore\)\)/,
-    "groups are not built through foldNode");
+  // Asserts the property — the heading goes into a fold — not the exact body
+  // expression. The first version of this test pinned
+  // `foldNode([gh], entriesNode(rows, showStore))` and broke the moment the
+  // body gained a tail fold, which is a test coupled to an implementation
+  // rather than to the behaviour it claims to protect.
+  assert.match(html, /foldNode\(\[gh\],/, "groups are not built through foldNode");
 });
 
 test("the default open state is derived from status, not hardcoded", () => {
@@ -215,4 +219,33 @@ test("the group heading renders the date the server sorted on", () => {
   // without reading server.mjs.
   assert.match(html, /node\("span", "gdate", g\.date\)/, "the group heading omits its warmth date");
   assert.match(html, /h3\.group \.gdate \{/, "the gdate chip has no styling of its own");
+});
+
+test("a group's tail is separated from what can still need the reader", () => {
+  // `done`/`parked` notes and never-parsed `raw/` files are provenance. Left
+  // inline they made the largest group 19 rows to find 6.
+  assert.match(html, /function isTail\(e\)/, "no tail predicate exists");
+  assert.match(html, /e\.listed === true \|\| \(e\.status && e\.status !== "active"\)/,
+    "the tail predicate does not cover both finished and unparsed entries");
+  assert.match(html, /rows\.filter\(\(e\) => !isTail\(e\)\)/, "live entries are not filtered out of the tail");
+  assert.match(html, /rows\.filter\(isTail\)/, "the tail is never collected");
+});
+
+test("the tail fold is closed by default and remembered apart from its group", () => {
+  // Expanding a project is a different intent from digging through its
+  // finished work, so one choice must not imply the other.
+  const fn = html.slice(html.indexOf("function tailFold("), html.indexOf("function renderTree("));
+  assert.match(fn, /"hud\.tail\." \+ sectionName \+ "\/" \+ groupName/,
+    "the tail fold does not have its own namespaced key");
+  assert.match(fn, /saved === null \? false : saved/, "the tail fold does not default closed");
+  // A shut fold still has to say what it is hiding.
+  assert.match(fn, /n \+ " " \+ k/, "the tail summary does not report its composition");
+});
+
+test("the raw/file chip is gone, since .meta already shows a size", () => {
+  // Half the collision the owner reported: `raw` and `done` were pixel-
+  // identical chips. The size in .meta is the same signal, unduplicated.
+  assert.doesNotMatch(html, /e\.raw \? "raw" : "file"/, "the redundant raw/file chip is back");
+  assert.match(html, /e\.listed \? fmtSize\(e\.size\) : e\.date/,
+    "the size fallback that replaces the chip is missing");
 });

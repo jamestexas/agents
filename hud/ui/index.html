@@ -133,6 +133,11 @@
       /* Warmth, shown because it is what the order is computed from. Pushed
          right so the group names stay left-aligned and scannable as a column;
          muted because it explains the order rather than competing with it. */
+      .tail-label {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--muted);
+      }
       h3.group .gdate {
         margin-left: auto;
         color: var(--muted);
@@ -709,12 +714,10 @@
           w.title = "malformed frontmatter — defaults applied; flag for the next lint pass";
           b.appendChild(w);
         }
-        if (e.listed) {
-          const r = document.createElement("span");
-          r.className = "badge";
-          r.textContent = e.raw ? "raw" : "file";
-          b.appendChild(r);
-        }
+        // No raw/file chip: the .meta slot already shows a byte size instead
+        // of a date for exactly these entries, and a size IS the
+        // "never parsed" signal. The chip restated it in the same visual slot
+        // as `done`, which is the collision that prompted this.
         if (e.status && e.status !== "active") {
           const s = document.createElement("span");
           s.className = "badge " + e.status;
@@ -758,6 +761,44 @@
         } catch {
           /* storage unavailable or full: the default stands */
         }
+      }
+
+      /**
+       * The tail of a group: entries that cannot need the reader. `done` and
+       * `parked` are finished work; `listed` entries are files under a `raw/`
+       * directory, never parsed, kept for provenance.
+       */
+      function isTail(e) {
+        return e.listed === true || (e.status && e.status !== "active");
+      }
+
+      /**
+       * One collapsed line standing in for the tail, summarised by composition
+       * so a shut fold still says what it holds. Closed by default and
+       * remembered separately from its parent group: expanding a project is a
+       * different intent from digging through its finished work.
+       */
+      function tailFold(sectionName, groupName, tail, showStore) {
+        const counts = new Map();
+        for (const e of tail) {
+          const k = e.listed ? "raw" : e.status;
+          counts.set(k, (counts.get(k) || 0) + 1);
+        }
+        const label = [...counts.entries()]
+          .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+          .map(([k, n]) => n + " " + k)
+          .join(" · ");
+
+        // Finished work above unparsed files, so expanding it reads in the
+        // same order the label does.
+        const ordered = [...tail].sort((a, b) => Number(a.listed) - Number(b.listed));
+        const summary = node("span", "tail-label", label);
+        const fold = foldNode([summary], entriesNode(ordered, showStore));
+        const key = "hud.tail." + sectionName + "/" + groupName;
+        const saved = foldState(key);
+        fold.open = saved === null ? false : saved;
+        fold.addEventListener("toggle", () => setFoldState(key, fold.open));
+        return fold;
       }
 
       function renderTree(tree) {
@@ -825,7 +866,18 @@
                 gh.appendChild(d);
               }
 
-              const fold = foldNode([gh], entriesNode(rows, showStore));
+              // Split the group: what can still need you, and the tail that
+              // cannot. Finished notes and never-parsed files are provenance —
+              // real, worth keeping, and not worth a row in the primary scan.
+              // The largest group here is 19 rows of which 13 are tail, so the
+              // reader scans 19 lines to find 6.
+              const live = rows.filter((e) => !isTail(e));
+              const tail = rows.filter(isTail);
+              const body = document.createElement("div");
+              if (live.length) body.appendChild(entriesNode(live, showStore));
+              if (tail.length) body.appendChild(tailFold(section.name, g.name, tail, showStore));
+
+              const fold = foldNode([gh], body);
               // Default: live work open, everything else shut. A remembered
               // choice wins over the default — the tree is reread constantly
               // (drop a file, refresh), and re-collapsing on every refresh
