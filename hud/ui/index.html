@@ -56,19 +56,31 @@
         font-size: 13px;
         flex: none;
       }
+      /* Base = the unknown state: no board answer yet, or none available. The
+         quietest of the three, because it is the one that says nothing. The
+         glow lives on the needs-you state instead, where it is earned. */
       .dial {
-        color: var(--accent);
+        color: var(--muted);
         border: 1px solid var(--card);
         border-radius: 999px;
         padding: 3px 10px;
-        text-shadow: 0 0 6px currentColor;
       }
-      .dial[data-state="live"] {
+      /* Nothing waiting: the quiet state, and the only one that should read as
+         all-clear. */
+      .dial[data-count="none"] {
         color: var(--green);
       }
-      /* Snapshot data is legible but visibly not now. */
-      .dial[data-state="stale"] {
-        color: var(--muted);
+      /* Something waiting. This is the page's whole purpose, so it gets the
+         accent and the glow — earned here, unlike on the pre-load state. */
+      .dial[data-count="some"] {
+        color: var(--accent);
+        text-shadow: 0 0 6px currentColor;
+      }
+      /* Freshness without spending colour, matching .panel.stale: a snapshot
+         is legible but visibly not now, whatever the count says. */
+      .dial.stale {
+        border-style: dashed;
+        opacity: 0.6;
       }
       header .spacer {
         flex: 1;
@@ -1449,13 +1461,27 @@
         const dial = el("dial");
         if (!env) {
           dial.textContent = "◉ needs-you: —";
-          dial.removeAttribute("data-state");
+          // No count is not a count of zero. Clear the attribute so the dial
+          // falls to its base treatment, which is deliberately the quietest of
+          // the three: "I don't know" must not look like either answer.
+          dial.removeAttribute("data-count");
+          dial.classList.remove("stale");
           dial.title = "work-board unavailable";
           return;
         }
         const n = boardItems(env.data).filter((i) => i && i.state === "needs_you").length;
         dial.textContent = "◉ needs-you: " + n;
-        dial.setAttribute("data-state", env.stale ? "stale" : "live");
+        // Colour encodes the count, not the freshness. It used to encode
+        // freshness, which meant `needs-you: 0` and `needs-you: 7` rendered in
+        // the same green — the page's only green, which reads all-clear — while
+        // the loudest state on the page was the pre-load "I don't know yet".
+        // The one element whose job is "what needs me" answered "is my data
+        // fresh" in the channel that wins the pre-attentive race.
+        dial.setAttribute("data-count", n > 0 ? "some" : "none");
+        // Freshness moves to the idiom the panels already use for it: not
+        // colour. Dashed and dimmed, so a stale zero cannot read as a
+        // confident zero.
+        dial.classList.toggle("stale", Boolean(env.stale));
         dial.title = env.stale ? "from the snapshot of " + fmtTime(env.cached_at) : "live";
       }
 

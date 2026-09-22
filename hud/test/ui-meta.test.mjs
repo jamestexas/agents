@@ -249,3 +249,49 @@ test("the raw/file chip is gone, since .meta already shows a size", () => {
   assert.match(html, /e\.listed \? fmtSize\(e\.size\) : e\.date/,
     "the size fallback that replaces the chip is missing");
 });
+
+// ------------------------------------------------------------------ the dial
+
+// The dial is the one element whose entire job is the stated goal — "what
+// needs me". It used to encode freshness in colour and the count in text, so
+// `needs-you: 0` and `needs-you: 7` rendered in the same green: the page's
+// only green, which reads all-clear. Every other defect in this UI costs the
+// reader scan time; this one could tell them the wrong thing.
+
+test("dial colour is driven by the count, not by staleness", () => {
+  const fn = html.slice(html.indexOf("function setDial("), html.indexOf("function setDial(") + 1600);
+  assert.match(fn, /data-count", n > 0 \? "some" : "none"/,
+    "the dial does not set its state from the count");
+  assert.doesNotMatch(fn, /data-state", env\.stale/,
+    "staleness is still driving the dial's colour attribute");
+  assert.match(fn, /classList\.toggle\("stale", Boolean\(env\.stale\)\)/,
+    "staleness is not expressed as a composable class");
+});
+
+test("the three dial answers are visually distinct, and unknown is quietest", () => {
+  // "some", "none" and "I don't know" must not pair up. The first version of
+  // this fix left the glow on the base rule, which made the unknown state and
+  // the needs-you state render identically — trading one collision for another.
+  const rule = (sel) => {
+    const i = html.indexOf(sel);
+    assert.ok(i > 0, `no rule for ${sel}`);
+    return html.slice(i, html.indexOf("}", i));
+  };
+  assert.match(rule(".dial {"), /color: var\(--muted\)/, "the unknown state is not the quiet one");
+  assert.doesNotMatch(rule(".dial {"), /text-shadow/, "the unknown state still glows");
+  assert.match(rule('.dial[data-count="none"]'), /var\(--green\)/);
+  assert.match(rule('.dial[data-count="some"]'), /var\(--accent\)/);
+  assert.match(rule('.dial[data-count="some"]'), /text-shadow/, "needs-you does not carry the emphasis");
+});
+
+test("staleness composes with any count rather than replacing it", () => {
+  // A stale zero must not read as a confident zero, so the treatment layers on
+  // top of the colour instead of overwriting it — the same idiom .panel.stale
+  // already uses, so the page has one way of saying "not now".
+  const stale = html.slice(html.indexOf(".dial.stale"), html.indexOf("}", html.indexOf(".dial.stale")));
+  assert.doesNotMatch(stale, /color:/, "the stale treatment overwrites the count colour");
+  assert.match(stale, /dashed/, "the stale treatment does not use the page's existing non-colour idiom");
+  // And an unavailable board clears the count rather than implying zero.
+  const unavailable = html.slice(html.indexOf("work-board unavailable") - 400, html.indexOf("work-board unavailable"));
+  assert.match(unavailable, /removeAttribute\("data-count"\)/, "an unavailable board leaves a stale count attribute");
+});
