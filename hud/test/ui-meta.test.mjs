@@ -166,3 +166,45 @@ test("provenance is conditional, so a single-store tree renders as before", () =
   assert.match(html, /contributing\.size > 1/, "provenance is not gated on multiple stores");
   assert.match(html, /e\.store !== "local"/, "the writable store is badged, which is noise");
 });
+
+// ------------------------------------------------------ collapsible groups
+
+// Project groups render as native <details>. Same constraint as the store
+// badge: no DOM to assert against, so these check the wiring at the source.
+
+test("every project group is wrapped in a fold, not appended bare", () => {
+  // The bare-heading append this replaced is the regression to guard: it would
+  // render identically to the reader while silently losing the disclosure.
+  assert.doesNotMatch(
+    html,
+    /listView\.appendChild\(gh\)/,
+    "a group heading is appended directly, so that group cannot collapse",
+  );
+  assert.match(html, /foldNode\(\[gh\],\s*entriesNode\(rows, showStore\)\)/,
+    "groups are not built through foldNode");
+});
+
+test("the default open state is derived from status, not hardcoded", () => {
+  // `fold.open = true` for everything would bury a finished project's entries
+  // under the live ones, which is the whole reason the fold exists.
+  assert.match(html, /\(g\.status \|\| "active"\) === "active"/,
+    "the default is not derived from group status");
+});
+
+test("fold state is persisted, and storage failure falls back to the default", () => {
+  assert.match(html, /localStorage\.getItem\(key\)/, "fold state is never read back");
+  assert.match(html, /localStorage\.setItem\(key/, "fold state is never written");
+  // A browser with storage disabled must still render. Both accessors are
+  // wrapped, and the read returns null so the status default applies.
+  const reader = html.slice(html.indexOf("function foldState("), html.indexOf("function setFoldState("));
+  assert.match(reader, /try \{/, "foldState does not guard against storage throwing");
+  assert.match(reader, /return null/, "foldState has no null fallback for the caller's default");
+  const writer = html.slice(html.indexOf("function setFoldState("));
+  assert.match(writer.slice(0, 400), /try \{/, "setFoldState does not guard against storage throwing");
+});
+
+test("the fold key namespaces section and group, so names cannot collide", () => {
+  // `projects/hud` and a future `playbooks/hud` are different folds.
+  assert.match(html, /"hud\.fold\." \+ section\.name \+ "\/" \+ g\.name/,
+    "the fold key does not include both section and group");
+});

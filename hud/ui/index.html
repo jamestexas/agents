@@ -130,6 +130,11 @@
         color: var(--muted);
         font-weight: 400;
       }
+      /* Inside a <summary> the heading is a row in a flex line, not a block,
+         so its standalone margin would push the caret out of alignment. */
+      details.fold > summary h3.group.in-summary {
+        margin: 0;
+      }
       h3.group {
         font: 600 12px/1 var(--mono);
         color: var(--fg);
@@ -726,6 +731,27 @@
         return ul;
       }
 
+      // Fold state lives in localStorage, keyed by section/group. It is UI
+      // state, not content: nothing here is written back to the tree, and a
+      // browser with storage disabled just falls back to the defaults rather
+      // than breaking the render.
+      function foldState(key) {
+        try {
+          const v = window.localStorage.getItem(key);
+          return v === null ? null : v === "1";
+        } catch {
+          return null;
+        }
+      }
+
+      function setFoldState(key, open) {
+        try {
+          window.localStorage.setItem(key, open ? "1" : "0");
+        } catch {
+          /* storage unavailable or full: the default stands */
+        }
+      }
+
       function renderTree(tree) {
         listView.textContent = "";
 
@@ -772,19 +798,27 @@
           }
 
           if (section.groups && section.groups.length) {
-            // Server ordered these active-first; render in that order.
+            // Server ordered these active-first; render in that order, each
+            // group a native <details> so a finished project reads as one line
+            // instead of burying the live ones under its entries.
             for (const g of section.groups) {
-              const gh = document.createElement("h3");
-              gh.className = "group";
-              gh.textContent = g.name;
+              const rows = section.entries.filter((e) => e.group === g.name);
+              const gh = node("h3", "group in-summary", g.name);
               if (g.status && g.status !== "active") {
-                const s = document.createElement("span");
-                s.className = "badge " + g.status;
-                s.textContent = g.status;
-                gh.appendChild(s);
+                gh.appendChild(node("span", "badge " + g.status, g.status));
               }
-              listView.appendChild(gh);
-              listView.appendChild(entriesNode(section.entries.filter((e) => e.group === g.name), showStore));
+              gh.appendChild(node("span", "count", " (" + rows.length + ")"));
+
+              const fold = foldNode([gh], entriesNode(rows, showStore));
+              // Default: live work open, everything else shut. A remembered
+              // choice wins over the default — the tree is reread constantly
+              // (drop a file, refresh), and re-collapsing on every refresh
+              // would make the disclosure worse than no disclosure.
+              const key = "hud.fold." + section.name + "/" + g.name;
+              const saved = foldState(key);
+              fold.open = saved === null ? (g.status || "active") === "active" : saved;
+              fold.addEventListener("toggle", () => setFoldState(key, fold.open));
+              listView.appendChild(fold);
             }
             const loose = section.entries.filter((e) => !e.group);
             if (loose.length) listView.appendChild(entriesNode(loose, showStore));
