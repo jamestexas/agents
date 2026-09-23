@@ -103,15 +103,14 @@ test("a snapshot says NOT LIVE and names the source", () => {
   ]);
   assert.equal(bar.hidden, false);
   assert.equal(bar.className, "stale");
-  assert.match(bar.textContent, /NOT LIVE/);
-  assert.match(bar.textContent, /board/);
+  assert.match(bar.textContent, /^STALE\s+board/);
   assert.doesNotMatch(bar.textContent, /digest/);
 });
 
 test("a configured source answering nothing says NOT CONNECTED", () => {
   const bar = harness([["board", "absent"]]);
   assert.equal(bar.className, "absent");
-  assert.match(bar.textContent, /NOT CONNECTED/);
+  assert.match(bar.textContent, /^ABSENT\s+board/);
 });
 
 test("worst state wins, and only the worst sources are named", () => {
@@ -134,9 +133,8 @@ test("example data outranks staleness and says so unmistakably", () => {
     ["digest", "absent"],
   ]);
   assert.equal(bar.className, "example");
-  assert.match(bar.textContent, /EXAMPLE DATA/);
-  assert.match(bar.textContent, /Nothing here is real/);
-  assert.match(bar.title, /tickStatus/);
+  assert.match(bar.textContent, /^EXAMPLE\s+board/);
+  assert.match(bar.title, /sample data/);
 });
 
 test("the banner clears when sources recover", () => {
@@ -220,13 +218,29 @@ test("degradations alone are enough, without a status field", () => {
   assert.equal(health()({ degradations: [{ source: "lectio" }] }).state, "degraded");
 });
 
-test("the degraded banner says an empty panel is not an empty inbox", () => {
-  const bar = harness([["board", { state: "degraded", why: "github, weather" }]]);
+test("the degraded line is a diagnostic, not a sentence", () => {
+  const bar = harness([
+    ["board", { state: "degraded", why: "github: graphql 401 · weather: WEATHER_API_KEY is not set" }],
+  ]);
   assert.equal(bar.className, "degraded");
-  assert.match(bar.textContent, /INCOMPLETE/);
-  assert.match(bar.textContent, /github, weather/);
-  // The whole point: distinguish could-not-look from nothing-to-do.
-  assert.match(bar.textContent, /could-not-look/);
+  assert.match(bar.textContent, /^DEGRADED\s+board/);
+  // The actual errors survive to the line -- "github" alone is a notice,
+  // "github: graphql 401" is something you can act on.
+  assert.match(bar.textContent, /graphql 401/);
+  assert.match(bar.textContent, /WEATHER_API_KEY is not set/);
+  // The explanation belongs on the tooltip, not in the reader's way.
+  assert.doesNotMatch(bar.textContent, /could-not-look/);
+  assert.match(bar.title, /could-not-look/);
+});
+
+test("the line stays scannable: state first, then source", () => {
+  // Grepping a screenshot or a copy-paste should work, so the state token
+  // leads and is uppercase for every state.
+  for (const st of ["absent", "stale", "example"]) {
+    const bar = harness([["board", { state: st, why: "" }]]);
+    assert.match(bar.textContent, new RegExp("^" + st.toUpperCase() + "\\s+board"));
+    assert.ok(bar.title && bar.title.length > 20, st + " should explain itself on hover");
+  }
 });
 
 test("example still outranks degraded", () => {

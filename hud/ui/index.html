@@ -462,22 +462,28 @@
         letter-spacing: 0.04em;
         border-bottom: 1px solid;
       }
+      /* Neutral on purpose. A snapshot is old but TRUE, so it is the mildest
+         of the four and must not compete with the warning below it for
+         attention -- the same reasoning that keeps .panel.stale dimmed rather
+         than coloured. */
       #connstate.stale {
-        color: #8a6d1f;
-        background: #fdf6e3;
-        border-color: #e6d9a8;
+        color: #555;
+        background: #f2f2f0;
+        border-color: #dcdcd6;
       }
       #connstate.absent {
         color: #8a3f1f;
         background: #fdeee3;
         border-color: #e6c3a8;
       }
-      /* Answered, but collecting from broken upstreams. Distinct from stale
-         because the data is current and incomplete rather than old and whole. */
+      /* Answered, but collecting from broken upstreams: current and
+         incomplete rather than old and whole. Yellow because this is a
+         warning in the ordinary sense -- something needs fixing, and it is
+         not catastrophic. */
       #connstate.degraded {
-        color: #6b4a8a;
-        background: #f6f0fb;
-        border-color: #d9c8e8;
+        color: #7a5c00;
+        background: #fdf3cf;
+        border-color: #e8d48a;
       }
       /* Example payloads get the loudest treatment: stale real data is old but
          true, whereas example data is false now and would stay false however
@@ -1573,13 +1579,21 @@
       function payloadHealth(d) {
         if (!d || typeof d !== "object") return null;
         const status = d.tickStatus || d.tick_status;
-        const degradations = d.degradations || [];
-        const failing = Array.isArray(degradations)
-          ? degradations.map((x) => (x && (x.source || x.name)) || "?").filter(Boolean)
-          : [];
+        const degradations = Array.isArray(d.degradations) ? d.degradations : [];
+        // Keep the source's own error text. "github" tells you something is
+        // wrong; "github: graphql 401" tells you it is an expired token, which
+        // is the difference between a notice and a diagnostic.
+        const failing = degradations
+          .map((x) => {
+            if (!x) return "";
+            const src = x.source || x.name || "?";
+            const err = x.error || x.reason || x.message || "";
+            return err ? src + ": " + err : src;
+          })
+          .filter(Boolean);
         if (status === "example") return { state: "example", why: "" };
         if (failing.length || status === "degraded") {
-          return { state: "degraded", why: failing.join(", ") };
+          return { state: "degraded", why: failing.join(" · ") };
         }
         return null;
       }
@@ -1612,24 +1626,22 @@
         }
         bar.hidden = false;
         const which = named.join(", ");
-        // The source named its own broken upstreams; quote them rather than
-        // paraphrasing, so the reader knows where to go.
-        const because = whys.length ? " Failing: " + whys.join("; ") + "." : "";
-        const say = {
-          example: "SHOWING EXAMPLE DATA — " + which + " is serving a sample payload, not your work. Nothing here is real.",
-          absent: "NOT CONNECTED — " + which + " is configured but nothing is answering. No data below is current.",
+        // One scannable line: STATE, the source, then the source's own error
+        // text verbatim. The explanation of what the state MEANS belongs on
+        // the tooltip -- a reader who already knows it should not have to read
+        // past it to reach the part that says which token expired.
+        const detail = whys.length ? " — " + whys.join(" · ") : "";
+        bar.textContent = worst.toUpperCase() + "  " + which + detail;
+        bar.title = {
+          example:
+            "This payload identifies itself as sample data (tickStatus / tick_status: example). Nothing shown is your work.",
+          absent:
+            "Configured, but nothing answered. No data below is current; 'hud status' shows the endpoint it tried.",
           degraded:
-            "INCOMPLETE — " + which + " answered, but some of its own sources are down." +
-            because + " An empty panel below means could-not-look, not nothing-to-do.",
-          stale: "NOT LIVE — " + which + " is being served from a snapshot. Times shown are when they happened, not how long ago.",
-        };
-        bar.textContent = say[worst];
-        bar.title =
-          worst === "example"
-            ? "The payload identifies itself as example data (tickStatus / tick_status: example)."
-            : worst === "degraded"
-              ? "The payload reported its own degradations; the panel is showing only what could be collected."
-              : "Per-panel 'as of' stamps show each snapshot's age.";
+            "The source answered and reported its own failures. The panel below shows only what could be collected, so an empty panel means could-not-look, not nothing-to-do.",
+          stale:
+            "Served from a snapshot because the source is unreachable. Per-panel 'as of' stamps show each one's age, and relative times are suppressed.",
+        }[worst];
       }
       // paintConnState:end
 
