@@ -472,6 +472,13 @@
         background: #fdeee3;
         border-color: #e6c3a8;
       }
+      /* Answered, but collecting from broken upstreams. Distinct from stale
+         because the data is current and incomplete rather than old and whole. */
+      #connstate.degraded {
+        color: #6b4a8a;
+        background: #f6f0fb;
+        border-color: #d9c8e8;
+      }
       /* Example payloads get the loudest treatment: stale real data is old but
          true, whereas example data is false now and would stay false however
          fresh it became. */
@@ -1543,25 +1550,58 @@
          (absent from this map entirely) stays distinguishable from
          "configured and answering nothing" -- the same distinction the
          degradation ladder draws on the server. */
-      const CONN_RANK = { example: 3, absent: 2, stale: 1, live: 0 };
+      /* `degraded` sits between absent and stale deliberately. An absent
+         source gives you nothing, which is obvious. A degraded one answers
+         normally while some of its own upstreams are broken, so it renders an
+         empty panel that reads "no work" when it means "could not look" --
+         less severe than nothing, more dangerous than old. */
+      const CONN_RANK = { example: 4, absent: 3, degraded: 2, stale: 1, live: 0 };
       const SOURCE_STATE = new Map();
 
-      function noteSource(name, state) {
-        SOURCE_STATE.set(name, state);
+      /* `note` carries the source's own words about why -- the names of its
+         failing upstreams -- so the banner can attribute rather than assert. */
+      function noteSource(name, state, why) {
+        SOURCE_STATE.set(name, { state, why: why || "" });
         paintConnState();
       }
+
+      /* A payload that reports on its own health. Both spellings are accepted
+         because the board changed from camelCase to snake_case: a reader that
+         knows only the current one goes quiet against a snapshot written by
+         the older shape, which is the failure this whole banner exists to
+         prevent. */
+      function payloadHealth(d) {
+        if (!d || typeof d !== "object") return null;
+        const status = d.tickStatus || d.tick_status;
+        const degradations = d.degradations || [];
+        const failing = Array.isArray(degradations)
+          ? degradations.map((x) => (x && (x.source || x.name)) || "?").filter(Boolean)
+          : [];
+        if (status === "example") return { state: "example", why: "" };
+        if (failing.length || status === "degraded") {
+          return { state: "degraded", why: failing.join(", ") };
+        }
+        return null;
+      }
+      // payloadHealth:end
 
       function paintConnState() {
         const bar = el("connstate");
         if (!bar) return;
         let worst = "live";
         const named = [];
-        for (const [name, state] of SOURCE_STATE) {
+        const whys = [];
+        for (const [name, rec] of SOURCE_STATE) {
+          const state = rec && rec.state;
           if (CONN_RANK[state] > CONN_RANK[worst]) {
             worst = state;
             named.length = 0;
+            whys.length = 0;
           }
-          if (state === worst && state !== "live") named.push(name);
+          if (state === worst && state !== "live") {
+            named.push(name);
+            if (rec.why) whys.push(rec.why);
+          }
         }
         bar.className = worst;
         if (worst === "live") {
@@ -1572,16 +1612,24 @@
         }
         bar.hidden = false;
         const which = named.join(", ");
+        // The source named its own broken upstreams; quote them rather than
+        // paraphrasing, so the reader knows where to go.
+        const because = whys.length ? " Failing: " + whys.join("; ") + "." : "";
         const say = {
           example: "SHOWING EXAMPLE DATA — " + which + " is serving a sample payload, not your work. Nothing here is real.",
           absent: "NOT CONNECTED — " + which + " is configured but nothing is answering. No data below is current.",
+          degraded:
+            "INCOMPLETE — " + which + " answered, but some of its own sources are down." +
+            because + " An empty panel below means could-not-look, not nothing-to-do.",
           stale: "NOT LIVE — " + which + " is being served from a snapshot. Times shown are when they happened, not how long ago.",
         };
         bar.textContent = say[worst];
         bar.title =
           worst === "example"
-            ? "The payload identifies itself as example data (tickStatus: example)."
-            : "Per-panel 'as of' stamps show each snapshot's age.";
+            ? "The payload identifies itself as example data (tickStatus / tick_status: example)."
+            : worst === "degraded"
+              ? "The payload reported its own degradations; the panel is showing only what could be collected."
+              : "Per-panel 'as of' stamps show each snapshot's age.";
       }
       // paintConnState:end
 
@@ -2020,11 +2068,12 @@
             } else noteSource(name, "absent");
             return null;
           }
-          // A payload that says it is a sample outranks staleness: old real
-          // data is true about the past, example data is true about nothing.
-          const d = body.data;
-          const sample = d && typeof d === "object" && d.tickStatus === "example";
-          noteSource(name, sample ? "example" : body.stale ? "stale" : "live");
+          // What the payload says about itself outranks how old it is: old
+          // real data is true about the past, whereas a sample is true about
+          // nothing and a degraded collection is quietly incomplete.
+          const health = payloadHealth(body.data);
+          if (health) noteSource(name, health.state, health.why);
+          else noteSource(name, body.stale ? "stale" : "live");
           return body;
         } catch {
           // The HUD server itself is gone. Every panel is about to vanish, so

@@ -41,8 +41,11 @@ const CONN_RANK = (() => {
 })();
 
 test("harness sanity: the ranking came from the page, and orders as documented", () => {
+  // degraded sits between absent and stale: less severe than nothing at all,
+  // more dangerous than old-but-whole, because it renders as emptiness.
   assert.ok(CONN_RANK.example > CONN_RANK.absent);
-  assert.ok(CONN_RANK.absent > CONN_RANK.stale);
+  assert.ok(CONN_RANK.absent > CONN_RANK.degraded);
+  assert.ok(CONN_RANK.degraded > CONN_RANK.stale);
   assert.ok(CONN_RANK.stale > CONN_RANK.live);
 });
 
@@ -57,7 +60,7 @@ function harness(entries) {
       this.title = "";
     },
   };
-  const state = new Map(entries);
+  const state = new Map(entries.map(([n, v]) => [n, typeof v === 'string' ? { state: v, why: '' } : v]));
   const src = extractFunction(html, "paintConnState");
   const paint = new Function(
     "el",
@@ -178,4 +181,58 @@ test("a snapshot never renders a relative time", () => {
 test("an unparseable timestamp stays empty either way", () => {
   assert.equal(agoWith(false)("not-a-date"), "");
   assert.equal(agoWith(true)("not-a-date"), "");
+});
+
+// --- degraded: answered, but collecting from broken upstreams ----------------
+
+/** Build payloadHealth, which reads a payload's own self-report. */
+function health() {
+  const src = extractFunction(html, "payloadHealth");
+  return new Function(`${src}\nreturn payloadHealth;`)();
+}
+
+test("a healthy payload reports nothing to raise", () => {
+  assert.equal(health()({ items: [1, 2], degradations: [] }), null);
+});
+
+test("example is detected in BOTH spellings", () => {
+  // The board moved from camelCase to snake_case. A reader that knows only
+  // one spelling goes quiet against a payload written in the other, which is
+  // the exact silence this banner exists to break.
+  assert.equal(health()({ tickStatus: "example" }).state, "example");
+  assert.equal(health()({ tick_status: "example" }).state, "example");
+});
+
+test("a payload naming its broken upstreams is degraded, and they are named", () => {
+  const h = health()({
+    tick_status: "degraded",
+    degradations: [{ source: "github" }, { source: "weather" }],
+    items: [],
+  });
+  assert.equal(h.state, "degraded");
+  assert.match(h.why, /github/);
+  assert.match(h.why, /weather/);
+});
+
+test("degradations alone are enough, without a status field", () => {
+  // Trusting only the status word would miss a payload that lists failures
+  // and forgets to label itself.
+  assert.equal(health()({ degradations: [{ source: "lectio" }] }).state, "degraded");
+});
+
+test("the degraded banner says an empty panel is not an empty inbox", () => {
+  const bar = harness([["board", { state: "degraded", why: "github, weather" }]]);
+  assert.equal(bar.className, "degraded");
+  assert.match(bar.textContent, /INCOMPLETE/);
+  assert.match(bar.textContent, /github, weather/);
+  // The whole point: distinguish could-not-look from nothing-to-do.
+  assert.match(bar.textContent, /could-not-look/);
+});
+
+test("example still outranks degraded", () => {
+  const bar = harness([
+    ["board", { state: "degraded", why: "github" }],
+    ["digest", { state: "example", why: "" }],
+  ]);
+  assert.equal(bar.className, "example");
 });
