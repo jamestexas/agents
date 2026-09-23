@@ -123,6 +123,19 @@ test("decompose is total: a clean null, never a confidently wrong answer", () =>
     const got = decomposePath(weird);
     assert.equal(got, null, `${JSON.stringify(weird)} decomposed to ${JSON.stringify(got)}`);
   }
+
+  // Extra components AFTER the leaf, which is the direction that produces a
+  // confidently wrong answer rather than a miss: a prefix-only match would
+  // read `…/2026-04-07-x.md/trailing` as the note it is not. Found by mutating
+  // the length check from `!==` to `<`, which nothing else caught.
+  for (const kind of KIND_NAMES) {
+    const rel = composePath(kind, varsFor(kind));
+    for (const tail of ["extra", "a/b", "2026-04-07-y.md"]) {
+      const over = `${rel}/${tail}`;
+      const got = decomposePath(over);
+      assert.equal(got, null, `${over} decomposed to ${JSON.stringify(got)} — a prefix is not a match`);
+    }
+  }
   // Every non-null answer recomposes to exactly the path it came from. That is
   // the property that makes "not null" trustworthy rather than merely present.
   for (const kind of KIND_NAMES) {

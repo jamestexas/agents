@@ -894,6 +894,24 @@ cmd_status() {
 
 cmd_open() {
     load_config
+    # Say what is being opened, and whether anything is there to open. Handing
+    # the URL to the OS is silent by construction: if the tab already exists
+    # the browser just focuses it, and if the server is down you get a dead
+    # page either way. Both look identical to "the command did nothing", which
+    # is how a running HUD gets mistaken for a stopped one.
+    local code
+    code="$(http_code "$URL")"
+    if [[ "$code" == "200" ]]; then
+        printf 'opening %s\n' "$URL"
+    else
+        # curl reports an unreachable host as 000, which means "no reply at
+        # all" rather than a status. Saying so beats printing a code that
+        # looks like one.
+        local why="HTTP $code"
+        [[ -z "$code" || "$code" == "000" ]] && why="no reply"
+        printf 'opening %s — but nothing is answering there yet (%s).\n' "$URL" "$why"
+        printf "  'hud start' to serve it, 'hud status' for why.\n"
+    fi
     if command -v open >/dev/null 2>&1; then
         open "$URL"
     elif command -v xdg-open >/dev/null 2>&1; then
