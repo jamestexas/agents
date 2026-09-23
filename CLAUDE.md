@@ -97,6 +97,41 @@ When committing agent definitions:
 - Test agents thoroughly before committing
 - Update README.md when adding new agents
 
+### Stage `.beads/beads.jsonl` before you commit — or use `scripts/safe-commit.sh`
+
+This one destroys uncommitted work silently, and it has already done so once.
+
+`.beads/beads.jsonl` is tracked on purpose (`.beads/.gitignore` un-ignores it
+as a shared artifact), and the rsry pre-commit hook **rewrites it on every
+commit**. The pre-commit framework, separately, stashes unstaged changes while
+hooks run and restores them afterwards. When beads.jsonl is unstaged — which
+any bead created since the last commit causes — it lands in that stash, the
+hook then rewrites it on disk, and the restore cannot apply. pre-commit rolls
+back, and **every file in that stash loses its changes**, not just
+beads.jsonl. The commit fails and the tree looks like the work never happened.
+
+The tell is easy to miss: files you edited quietly disappear from
+`git status`. If that happens, the changes are still in the patch pre-commit
+wrote under `~/.cache/pre-commit/` — recover with
+`git apply --exclude='.beads/*' <patch>`, then regenerate anything derived
+(for `hud/`, `node hud/hud-docgen.mjs --write`).
+
+There is a second, quieter reason this bites. A **global** gitignore
+(`~/.gitignore_global`) excludes the whole `.beads/` directory — correct for
+every other repo, since bead databases are machine-local runtime state. This
+repo's `.beads/.gitignore` tries to bring the one shared artifact back with
+`!beads.jsonl`, and that cannot work: git never descends into an excluded
+directory, so a negation inside it is never read. The file is tracked, so it
+commits and appears in `git status`, but `git add .beads/beads.jsonl` refuses
+it without `-f`. Anyone reaching for the obvious fix will think they staged it
+and find they did not.
+
+A staged file is never stashed, so staging beads.jsonl first is sufficient.
+Either stage it yourself, stage everything, or commit through
+`scripts/safe-commit.sh`, which stages it and passes all arguments to
+`git commit` unchanged. The real fix belongs upstream — a hook should stage
+the artifact it generates — so treat this as a guard, not a solution.
+
 ## Agent Architecture
 
 Each agent file has two parts:
