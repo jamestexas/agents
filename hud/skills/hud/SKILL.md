@@ -33,13 +33,15 @@ below). If it doesn't exist, proceed on the conventions in this file.
 
 ## 2. Figure out what's being asked for
 
-| Intent | Target |
-|---|---|
-| capture a note | `$HUD_ROOT/projects/<project>/notes/YYYY-MM-DD-<slug>.md` (or `$HUD_ROOT/inbox/YYYY-MM-DD-<slug>.md` if `<project>` is unclear) |
-| capture a playbook | `$HUD_ROOT/playbooks/<slug>.md` |
-| update project context | `$HUD_ROOT/projects/<project>/CONTEXT.md` |
-| add a peer | `$HUD_ROOT/peers/<handle>.md` |
-| `lint` argument | run the lint workflow (§7), no file writes without approval |
+| Intent | Kind | Target |
+|---|---|---|
+| capture a note | `note` | `$HUD_ROOT/projects/<project>/notes/YYYY-MM-DD-<slug>.md` (or `$HUD_ROOT/inbox/YYYY-MM-DD-<slug>.md` if `<project>` is unclear) |
+| capture an unfiled note | `inbox` | `$HUD_ROOT/inbox/YYYY-MM-DD-<slug>.md` |
+| capture a playbook | `playbook` | `$HUD_ROOT/playbooks/<slug>.md` |
+| update project context | `context` | `$HUD_ROOT/projects/<project>/CONTEXT.md` |
+| add a peer | `peer` | `$HUD_ROOT/peers/<handle>.md` |
+| drop raw material in | `raw` | `$HUD_ROOT/projects/<project>/raw/YYYY-MM-DD-<slug>.<ext>` |
+| `lint` argument | — | run the lint workflow (§8), no file writes without approval |
 
 Infer `<project>` from the current working directory's repo name, the
 conversation's stated project, or an existing `$HUD_ROOT/projects/<x>/`
@@ -50,10 +52,45 @@ than a note that's unsorted; `inbox/` is designed for exactly this.
 `<slug>` is a short kebab-case summary of the title, e.g. a note titled
 "debugging the flaky retry test" becomes `2026-09-10-debugging-flaky-retry-test.md`.
 
+## 2a. Write it with `hud new`, not by hand
+
+Everything in §2 above — and the date prefix, the slug, the frontmatter keys
+legal for each kind, and the two bookkeeping appends in §7 — is derived for
+you by one call:
+
+```bash
+hud new note --project widget-service --title "debugging the flaky retry test"
+hud new inbox --title "a thought with no home"
+hud new playbook --title "Rotating the signing key" --set applies_to=widget-service
+hud new context --project widget-service
+hud new peer --handle octo-cat
+hud new raw --project widget-service --title "session transcript" --ext txt --body-file -
+```
+
+Add `--set KEY=VALUE` (repeatable) for the optional frontmatter in §3–§6,
+`--summary` for the `index.md` line, `--body`/`--body-file` for the content
+(`-` reads stdin), `--date` to backdate, `--dry-run` to see the whole plan
+without writing, and `--json` for one machine-readable document — emitted for
+refusals as well as successes.
+
+**Prefer it over writing the files yourself.** Not for convenience: it
+*refuses* the mistakes this file can only warn about. A frontmatter key that is
+not legal for the kind is refused rather than written; a project it cannot
+resolve routes a note to `inbox/` rather than guessing at one; a destination
+that already exists is refused rather than overwritten. A refusal is the only
+non-zero exit, and nothing is written when one happens.
+
+`hud new` is the *mechanism*; §3–§6 below remain the *contract* it implements,
+and are what you need when you are reading an existing entry, editing one in
+place, or writing into a tree whose `HUD.md` (§1) overrides something here.
+
 ## 3. Capture a note
 
-Write `$HUD_ROOT/projects/<project>/notes/YYYY-MM-DD-<slug>.md` (or the
-`inbox/` fallback) with frontmatter:
+`hud new note --project <project> --title "<title>"` — or the `inbox/`
+fallback, which it takes itself when no project resolves. It writes
+`$HUD_ROOT/projects/<project>/notes/YYYY-MM-DD-<slug>.md` with this
+frontmatter, deriving `title`, `date` and `type`; `tags`/`repos`/`tickets`
+come from `--set`:
 
 ```yaml
 ---
@@ -73,7 +110,8 @@ not a transcript.
 
 ## 4. Capture a playbook
 
-Write `$HUD_ROOT/playbooks/<slug>.md`:
+`hud new playbook --title "<title>"` writes `$HUD_ROOT/playbooks/<slug>.md`,
+deriving `title`, `type` and `last_verified`:
 
 ```yaml
 ---
@@ -90,9 +128,10 @@ next time; if it's a one-off, it's a note, not a playbook.
 
 ## 5. Update project context
 
-Edit `$HUD_ROOT/projects/<project>/CONTEXT.md`. If it doesn't exist yet,
-create it from this minimal template rather than inventing a different
-shape:
+Edit `$HUD_ROOT/projects/<project>/CONTEXT.md` in place. If it doesn't exist
+yet, `hud new context --project <project>` creates it from exactly the
+template below rather than a shape you invented — and refuses if the file is
+already there, because updating the brief is an edit, not a second file.
 
 ```yaml
 ---
@@ -124,7 +163,8 @@ log. (Notes are the log; CONTEXT.md is the summary.)
 
 ## 6. Add a peer
 
-Write `$HUD_ROOT/peers/<handle>.md`:
+`hud new peer --handle <handle>` writes `$HUD_ROOT/peers/<handle>.md`,
+deriving `gh` from the handle:
 
 ```yaml
 ---
@@ -148,6 +188,19 @@ Every write in §3–§6 is followed by exactly two more edits, no exceptions:
 These two files are the bookkeeping that makes the HUD navigable without
 re-reading the whole tree; skipping them is how the HUD rots into the
 scattered-files problem it replaced.
+
+**`hud new` (§2a) makes both appends for you**, which is most of why it is
+worth using: two follow-up edits after every single write is exactly the kind
+of discipline that gets dropped when the write itself felt done. `--summary`
+supplies the one-line summary; without it the catalog line still names the
+kind, which is true but not worth much to read back. The two files are treated
+differently on purpose — `index.md` is a catalog, so a path already listed is
+left alone rather than listed twice, while `log.md` is append-only history and
+always records the write.
+
+You still make both appends by hand when you edited a file in place (a
+`CONTEXT.md` update, §5) or wrote one some other way — the rule is about every
+write, not about every invocation of the verb.
 
 ## THE RULE
 

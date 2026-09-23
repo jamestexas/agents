@@ -47,6 +47,110 @@ not what keeps it loopback-only.
   a dirty worktree, local commits absent from the remote, or a diverged branch.
   It fast-forwards or it does nothing — see
   [Pulling read-only stores](#pulling-read-only-stores).
+- **`hud new`** refuses a frontmatter key that is not legal for the kind, a
+  destination that already exists, and a tree that has not been scaffolded —
+  and refuses to *guess* a project, filing the note under `inbox/` instead.
+  See [Writing into the tree](#writing-into-the-tree).
+
+## Writing into the tree
+
+`hud new <kind>` is the only verb here that authors content, and it exists
+because the authoring contract used to be prose. `skills/hud/SKILL.md` §2–§7
+spelt out six file shapes, the directory each lives in, a date prefix, a kebab
+slug, the frontmatter keys legal for each, and two bookkeeping appends owed
+after every write — all of it stated, none of it checked. A convention that has
+to be remembered is one that gets forgotten silently, and the failure mode is
+not an error message: it is a note filed where nobody will look for it again.
+
+So the intent is the argument and the rest is derived:
+
+```bash
+hud new note --project widget-service --title "debugging the flaky retry test"
+hud new playbook --title "Rotating the signing key" --set applies_to=widget-service
+hud new peer --handle octo-cat
+hud new context --project widget-service
+hud new raw --project widget-service --title "session transcript" --ext txt --body-file -
+hud new inbox --title "a thought with no home"
+```
+
+The first of those writes
+`projects/widget-service/notes/2026-04-07-debugging-flaky-retry-test.md` with
+`title`, `date` and `type` already in it, and appends the `index.md` and
+`log.md` lines. The dropped article in the slug is not a liberty: it is
+SKILL.md §2's own worked example.
+
+| kind | destination | date prefix |
+| --- | --- | --- |
+| `note` | `projects/<project>/notes/<date>-<slug>.md` | yes |
+| `inbox` | `inbox/<date>-<slug>.md` | yes |
+| `raw` | `projects/<project>/raw/<date>-<slug>.<ext>` | yes |
+| `playbook` | `playbooks/<slug>.md` | no |
+| `context` | `projects/<project>/CONTEXT.md` | no |
+| `peer` | `peers/<handle>.md` | no |
+
+One outcome per invocation, from a closed set:
+
+| | Means |
+| --- | --- |
+| `created` | the file was written and both bookkeeping lines appended |
+| `planned` | `--dry-run`: the whole plan, and none of it done |
+| `refused` | it could have written and should not. **The only non-zero exit.** |
+
+There is deliberately no "nothing to do" outcome. Being asked to create a file
+that already exists is a refusal here rather than a no-op, because the body
+that came with the request would otherwise be silently dropped — and that
+refusal is also what makes the bookkeeping idempotent: a repeat write adds no
+second catalog line and no second log line, because it adds nothing.
+
+**It writes the tree directly, and there is no write route.** The server is
+watch-only by construction: its content routes are GET-only and tested to stay
+that way, so this verb reaches the filesystem rather than the HTTP API. Only
+`HUD_ROOT` is ever written, never a `[read.<name>]` store — the same
+one-writable-store split that lets [`sync`](#pulling-read-only-stores) push
+without knowing read stores exist.
+
+### What it refuses, and why each refusal beats the alternative
+
+- **A frontmatter key that is not legal for the kind.** `gh` is a real key —
+  on a peer. On a note it is a field the UI will never read, so writing it
+  would leave a dead value in the tree that only a lint pass would ever find.
+  The legal set per kind is not invented here: the note/inbox keys and `status`
+  are `HUD.md`'s global spec, `applies_to`/`last_verified` are SKILL.md §4,
+  `links` is `HUD.md`'s `CONTEXT.md` line, `gh` is SKILL.md §6, and `raw` has
+  none at all because an immutable drop is an artifact, not an entry.
+- **A key the verb derives.** `type` comes from the destination directory and
+  `title`/`date` from `--title`/`--date`; `--set` on any of them is refused
+  rather than honoured, because a `type:` that disagrees with the directory
+  renders a lie the tree walker cannot see past.
+- **A project it cannot resolve — except for a note.** `--project` is taken as
+  given, directories and all, because the caller named it. An *inferred* one
+  (the repo you are standing in) must already exist under `projects/`:
+  inference that creates directories is guessing with consequences. When
+  inference comes up empty a note goes to `inbox/`, which is SKILL.md §2's
+  rule that an unsorted note beats a misfiled one. A `context` or a `raw` drop
+  refuses instead, because neither has an unfiled form — a `CONTEXT.md` belongs
+  to a project by definition.
+- **A tree that is not there.** `HUD_ROOT` missing, or missing its `index.md`
+  and `log.md`, is `hud init`'s business. A write verb that scaffolded one
+  would put notes in a tree nobody configured, at a path that was very likely
+  a typo.
+- **A flag that means nothing for the kind.** `hud new playbook --project x`
+  is refused rather than ignored, because a caller whose `--project` was
+  silently dropped believes the file is filed under it and nothing in the
+  output says otherwise.
+
+`--dry-run` prints the plan — destination, every frontmatter key, and both
+bookkeeping lines — and writes nothing, the same standard `init --dry-run` is
+held to. `--json` emits one document (`hud-new/v1`) and does so for refusals
+too, including a refusal caused by the arguments themselves: an agent that
+asked for JSON and got an English sentence on stderr would have to parse prose
+to learn that it failed, which is the one thing the flag exists to avoid. As
+with `status --json`, that path needs `jq`; the human default does not.
+
+The two appends differ on purpose. `index.md` is a **catalog** — one line per
+path — so the append is skipped when that path is already listed, and the
+report says `kept` rather than printing nothing. `log.md` is **append-only
+history**, so it records the write regardless.
 
 ## Two installs, two verbs
 

@@ -28,6 +28,23 @@
 #                never creates a git remote — it prints that command instead.
 #                --dry-run prints the whole plan and writes nothing at all.
 #                Key-by-key reference: docs/SOURCES.md.
+#   new <kind> [--title T] [--project P] [--handle H] [--slug S] [--date D]
+#       [--set KEY=VALUE]... [--body TEXT | --body-file PATH] [--ext EXT]
+#       [--summary TEXT] [--dry-run] [--json]
+#                write one entry into the CONTENT tree — the only verb here
+#                that authors content. State the intent and it derives the
+#                rest: which of the six shapes the kind is, the directory that
+#                shape lives in, the YYYY-MM-DD prefix, the kebab slug from the
+#                title, and the frontmatter keys legal for that kind — then
+#                makes the two bookkeeping appends (index.md, log.md) that
+#                every write owes the tree. Kinds: note, inbox, playbook,
+#                context, peer, raw. A frontmatter key not legal for the kind
+#                is REFUSED rather than written, and a note whose project
+#                cannot be resolved is filed under inbox/ rather than guessed
+#                at. It writes $HUD_ROOT directly: the server is watch-only and
+#                has no write route. --dry-run prints the whole plan and writes
+#                nothing; --json emits one document (schema hud-new/v1) for
+#                success and for refusal alike. Per-kind reference: docs/CLI.md.
 #   start        start the HUD — the launchd service if one is installed,
 #                otherwise `node server.mjs` backgrounded. Idempotent. If a
 #                process this script did not start holds the port, it refuses
@@ -2057,6 +2074,615 @@ cmd_init() {
     init_closing
 }
 
+# ------------------------------------------------------------------- new
+#
+# The authoring verb, and the only one here that writes content rather than
+# machinery. What it replaces is a convention: skills/hud/SKILL.md §2–§7 spelt
+# out six file shapes, the directory each lives in, the date prefix, the kebab
+# slug, the frontmatter keys legal for each, and two bookkeeping appends owed
+# after every write — all of it prose, none of it checked. A convention that
+# has to be remembered is one that gets forgotten silently, and the failure
+# mode is not an error: it is a note filed somewhere nobody will look for it.
+#
+# So the intent is the argument and everything else is derived. `hud new note
+# --title "flaky retry test"` decides the destination, the prefix, the slug and
+# the frontmatter, and refuses rather than guessing when it cannot.
+#
+# It writes the tree DIRECTLY, and deliberately. The server is watch-only by
+# construction — its content routes are GET-only and tested to stay that way —
+# so there is no write endpoint to post to, and this verb does not add one.
+# Only $HUD_ROOT is written, never a `[read.<name>]` store: the same one-
+# writable-store split that lets `sync` push without knowing read stores exist.
+#
+# Outcomes come from a closed set, the same discipline `pull` states:
+#
+#   created    the file was written and both bookkeeping lines appended
+#   planned    --dry-run: the whole plan, and none of it done
+#   refused    it could have written and should not. The only non-zero exit.
+#
+# There is no "nothing to do" outcome, and that is a decision rather than a
+# gap: being asked to create a file that already exists is a refusal here, not
+# a no-op, because the body that came with the request would otherwise be
+# silently dropped.
+
+# The six shapes, in one table, because they are one decision and stating them
+# twice is how the verb and SKILL.md come apart:
+#
+#   kind      destination                                  date prefix
+#   note      projects/<project>/notes/<date>-<slug>.md     yes
+#   inbox     inbox/<date>-<slug>.md                        yes
+#   raw       projects/<project>/raw/<date>-<slug>.<ext>    yes
+#   playbook  playbooks/<slug>.md                           no
+#   context   projects/<project>/CONTEXT.md                 no
+#   peer      peers/<handle>.md                             no
+NEW_KINDS="note inbox playbook context peer raw"
+
+# Frontmatter keys `--set` may carry, per kind, each traceable to a line of the
+# contract rather than invented here: the note/inbox set and `status` are
+# HUD.md's global spec, `applies_to`/`last_verified` are SKILL.md §4, `links`
+# is HUD.md's CONTEXT.md line, `gh` is SKILL.md §6. `raw` is empty because a
+# raw drop is an immutable artifact — a transcript, an export, a patch — and
+# not an entry with a schema.
+new_legal_keys() {
+    case "$1" in
+        note | inbox) printf 'status tags repos tickets' ;;
+        playbook) printf 'status tags repos tickets applies_to last_verified' ;;
+        context) printf 'status repos tickets links' ;;
+        peer) printf 'gh repos' ;;
+        raw) printf '' ;;
+    esac
+}
+
+# Keys this verb DERIVES for a kind, so `--set` on them is refused instead of
+# silently overridden. A `type:` that disagrees with the directory renders a
+# lie the tree walker cannot see past, and a `title:`/`date:` that disagrees
+# with the filename makes the slug and the prefix a fiction. `type` is on the
+# list for every kind, including the ones that do not write it, because it is
+# inferred from the destination everywhere (server.mjs `inferType`).
+new_fixed_keys() {
+    case "$1" in
+        note | inbox) printf 'title date type' ;;
+        playbook | context) printf 'title type' ;;
+        *) printf 'type' ;;
+    esac
+}
+
+# Keys the schema treats as arrays (HUD.md). A bare value becomes a
+# one-element list rather than a scalar, because `tags: retry` and
+# `tags: [retry]` render differently and only one of them is what was meant.
+NEW_ARRAY_KEYS="tags repos tickets applies_to links"
+
+NEW_DRY="" NEW_JSON="" NEW_KIND="" NEW_TITLE="" NEW_HAVE_TITLE=""
+NEW_PROJECT="" NEW_HANDLE=""
+NEW_SLUG_ARG="" NEW_DATE="" NEW_EXT="" NEW_SUMMARY=""
+NEW_BODY="" NEW_HAVE_BODY="" NEW_BODY_FILE=""
+NEW_REL="" NEW_ROUTED="" NEW_RESOLVED_PROJECT="" NEW_SLUG=""
+NEW_INDEX_ACTION="" NEW_LOG_ACTION="" NEW_INDEX_LINE="" NEW_LOG_LINE=""
+NEW_SET_RAW=()
+FM_KEYS=() FM_VALS=()
+
+# Lowercase, and only [a-z0-9-] survives. Used for every path component this
+# verb builds, which is also the containment argument: a project, slug or
+# handle that has been through here cannot name `..` or an absolute path.
+new_kebab() {
+    local s
+    s="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '-' | tr -s '-')"
+    s="${s#-}"
+    printf '%s' "${s%-}"
+}
+
+# A title to a slug, which is `new_kebab` plus two things a filename wants.
+# Articles are dropped, because SKILL.md §2's own example does: "debugging the
+# flaky retry test" is `debugging-flaky-retry-test`. And the result is bounded
+# at a token boundary — a slug truncated mid-word reads as a typo, and a
+# 300-character filename is its own problem.
+new_slug() {
+    local text tok out="" width=60
+    text="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' ' ')"
+    for tok in $text; do
+        case "$tok" in a | an | the) continue ;; esac
+        (( ${#out} + ${#tok} + 1 > width + 1 )) && break
+        out="${out:+$out-}$tok"
+    done
+    # A title that is nothing but articles ("the the") still has to produce a
+    # slug: dropping them is a nicety, not a rule worth failing over.
+    if [[ -z "$out" ]]; then
+        for tok in $text; do
+            (( ${#out} + ${#tok} + 1 > width + 1 )) && break
+            out="${out:+$out-}$tok"
+        done
+    fi
+    printf '%s' "$out"
+}
+
+# The project for a note, when the caller did not name one. SKILL.md §2: the
+# repo you are standing in, matched against projects that already exist. An
+# inferred project must ALREADY be a directory — inference that creates one is
+# guessing with consequences, and the caller gets inbox/ instead.
+new_project_infer() {
+    local base=""
+    if command -v git >/dev/null 2>&1; then
+        base="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    fi
+    [[ -n "$base" ]] || base="$PWD"
+    base="$(new_kebab "$(basename -- "$base")")"
+    [[ -n "$base" ]] || return 1
+    [[ -d "$HUD_ROOT_R/projects/$base" ]] || return 1
+    printf '%s' "$base"
+}
+
+# Set or replace one frontmatter key, keeping insertion order: derived keys
+# first, then whatever `--set` carried, in the order it was given.
+fm_set() {
+    local k="$1" v="$2" i
+    for i in ${FM_KEYS[@]+"${!FM_KEYS[@]}"}; do
+        if [[ "${FM_KEYS[$i]}" == "$k" ]]; then
+            FM_VALS[$i]="$v"
+            return 0
+        fi
+    done
+    FM_KEYS+=("$k")
+    FM_VALS+=("$v")
+}
+
+# Normalize a value for an array-typed key. `[a, b]` passes through tidied; a
+# bare value becomes `[a]`; an empty one becomes `[]`.
+new_fm_list() {
+    local v="$1" inner out="" item IFS=','
+    if [[ "$v" == \[*\] ]]; then inner="${v:1:${#v}-2}"; else inner="$v"; fi
+    for item in $inner; do
+        item="${item#"${item%%[![:space:]]*}"}"
+        item="${item%"${item##*[![:space:]]}"}"
+        [[ -n "$item" ]] || continue
+        out="${out:+$out, }$item"
+    done
+    printf '[%s]' "$out"
+}
+
+# The machine-readable document, for success and refusal alike — one emitter,
+# so "no" is not a second code path that can drift from "yes". jq is required
+# only here, exactly as it is for `status --json`; the human default keeps
+# working on a box without it.
+new_emit_json() {  # outcome, reason
+    command -v jq >/dev/null 2>&1 || die "new --json needs jq on PATH"
+    local outcome="$1" reason="${2:-}" fm='{}' i
+
+    for i in ${FM_KEYS[@]+"${!FM_KEYS[@]}"}; do
+        fm="$(jq --arg k "${FM_KEYS[$i]}" --arg v "${FM_VALS[$i]}" '. + {($k): $v}' <<<"$fm")"
+    done
+
+    # An absolute path only exists once both halves do; "the path is null"
+    # and "the path is the root" are different claims to a consumer.
+    local abs=null
+    if [[ -n "$NEW_REL" && -n "${HUD_ROOT_R:-}" ]]; then
+        abs="$(jq -n --arg p "$HUD_ROOT_R/$NEW_REL" '$p')"
+    fi
+    local routed=false dry=false
+    [[ -z "$NEW_ROUTED" ]] || routed=true
+    [[ -z "$NEW_DRY" ]] || dry=true
+
+    jq -n \
+        --arg outcome "$outcome" \
+        --argjson dry_run "$dry" \
+        --arg kind "$NEW_KIND" \
+        --arg root "${HUD_ROOT_R:-}" \
+        --arg project "$NEW_RESOLVED_PROJECT" \
+        --arg path "$NEW_REL" \
+        --argjson absolute "$abs" \
+        --arg slug "$NEW_SLUG" \
+        --arg date "$NEW_DATE" \
+        --arg title "$NEW_TITLE" \
+        --argjson routed_to_inbox "$routed" \
+        --argjson frontmatter "$fm" \
+        --arg index_action "$NEW_INDEX_ACTION" \
+        --arg index_line "$NEW_INDEX_LINE" \
+        --arg log_action "$NEW_LOG_ACTION" \
+        --arg log_line "$NEW_LOG_LINE" \
+        --arg reason "$reason" \
+        '{schema: "hud-new/v1",
+          outcome: $outcome,
+          dry_run: $dry_run,
+          kind: (if $kind == "" then null else $kind end),
+          root: (if $root == "" then null else $root end),
+          project: (if $project == "" then null else $project end),
+          path: (if $path == "" then null else $path end),
+          absolute: $absolute,
+          slug: (if $slug == "" then null else $slug end),
+          date: (if $date == "" then null else $date end),
+          title: (if $title == "" then null else $title end),
+          routed_to_inbox: $routed_to_inbox,
+          frontmatter: $frontmatter,
+          index: (if $index_action == ""
+                  then null
+                  else {file: "index.md", action: $index_action, line: $index_line} end),
+          log: (if $log_action == ""
+                then null
+                else {file: "log.md", action: $log_action, line: $log_line} end),
+          reason: (if $reason == "" then null else $reason end)}'
+}
+
+# Every refusal exits through here, including a malformed invocation. That is
+# on purpose: an agent that asked for --json and got a bare English sentence on
+# stderr has to parse prose to find out it failed, which is the one thing the
+# flag exists to avoid.
+new_refuse() {
+    if [[ -n "$NEW_JSON" ]]; then
+        new_emit_json refused "$1"
+    else
+        printf 'hud new: %s\n' "$1" >&2
+        printf 'Nothing was written.\n' >&2
+    fi
+    exit 1
+}
+
+# The body, when the caller supplied none. `context` is the load-bearing one:
+# SKILL.md §5 says create CONTEXT.md from this shape "rather than inventing a
+# different one", which only holds if the shape is somewhere a writer will
+# actually get it.
+new_body_template() {
+    case "$NEW_KIND" in
+        context)
+            cat <<'EOF'
+## Goal
+
+<what this project is trying to achieve>
+
+## State
+
+<where things stand right now>
+
+## Key paths
+
+<files/dirs worth knowing about>
+
+## Decisions
+
+<decisions made and why, so they aren't re-litigated>
+EOF
+            ;;
+        *) printf '# %s\n' "$NEW_TITLE" ;;
+    esac
+}
+
+new_render() {  # body
+    local i
+    if (( ${#FM_KEYS[@]} > 0 )); then
+        printf -- '---\n'
+        for i in "${!FM_KEYS[@]}"; do
+            printf '%s: %s\n' "${FM_KEYS[$i]}" "${FM_VALS[$i]}"
+        done
+        printf -- '---\n\n'
+    fi
+    printf '%s\n' "$1"
+}
+
+# Append one line, making sure the file ends in a newline first. index.md and
+# log.md are hand-edited too, and a file whose last line lost its newline would
+# otherwise get this one glued onto the end of it.
+new_append() {  # file, line
+    local f="$1"
+    if [[ -s "$f" && -n "$(tail -c1 -- "$f")" ]]; then printf '\n' >>"$f"; fi
+    printf '%s\n' "$2" >>"$f"
+}
+
+# The plan, printed identically whether or not it is about to be carried out —
+# a dry run that showed a different report would not be a preview of anything.
+new_report() {
+    printf 'hud new %s\n' "$NEW_KIND"
+    [[ -z "$NEW_DRY" ]] || printf '  (--dry-run — the whole plan, and none of it done)\n'
+    printf '  %-11s %s\n' root "$HUD_ROOT_R"
+    [[ -z "$NEW_RESOLVED_PROJECT" ]] || printf '  %-11s %s\n' project "$NEW_RESOLVED_PROJECT"
+    [[ -z "$NEW_ROUTED" ]] || printf '  %-11s %s\n' routed \
+        'no project resolved — filed under inbox/ rather than guessed at'
+    printf '  %-11s %s\n' dest "$NEW_REL"
+    if (( ${#FM_KEYS[@]} > 0 )); then
+        printf '  frontmatter\n'
+        local i
+        for i in "${!FM_KEYS[@]}"; do
+            printf '    %-13s %s\n' "${FM_KEYS[$i]}" "${FM_VALS[$i]}"
+        done
+    else
+        printf '  %-11s %s\n' frontmatter 'none — a raw drop carries no schema'
+    fi
+    printf '  %-11s %-7s %s\n' index "$NEW_INDEX_ACTION" "$NEW_INDEX_LINE"
+    printf '  %-11s %-7s %s\n' log "$NEW_LOG_ACTION" "$NEW_LOG_LINE"
+}
+
+cmd_new() {
+    # --json is read before anything else can fail, so that a refusal caused by
+    # the arguments themselves is still a document.
+    local a
+    for a in "$@"; do [[ "$a" == "--json" ]] && NEW_JSON=yes; done
+
+    [[ $# -gt 0 ]] || new_refuse "which kind? one of: ${NEW_KINDS// /, }"
+    case "$1" in
+        -h | --help) usage 0 ;;
+        -*) new_refuse "the kind comes first: hud new <${NEW_KINDS// /|}> [options]" ;;
+    esac
+    NEW_KIND="$1"
+    shift
+
+    case " $NEW_KINDS " in
+        *" $NEW_KIND "*) ;;
+        *) new_refuse "unknown kind $NEW_KIND — one of: ${NEW_KINDS// /, }" ;;
+    esac
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --title) [[ $# -ge 2 ]] || new_refuse '--title needs a value'
+                     NEW_TITLE="$2"; NEW_HAVE_TITLE=yes; shift 2 ;;
+            --title=*) NEW_TITLE="${1#--title=}"; NEW_HAVE_TITLE=yes; shift ;;
+            --project) [[ $# -ge 2 ]] || new_refuse '--project needs a value'
+                       NEW_PROJECT="$2"; shift 2 ;;
+            --project=*) NEW_PROJECT="${1#--project=}"; shift ;;
+            --handle) [[ $# -ge 2 ]] || new_refuse '--handle needs a value'
+                      NEW_HANDLE="$2"; shift 2 ;;
+            --handle=*) NEW_HANDLE="${1#--handle=}"; shift ;;
+            --slug) [[ $# -ge 2 ]] || new_refuse '--slug needs a value'
+                    NEW_SLUG_ARG="$2"; shift 2 ;;
+            --slug=*) NEW_SLUG_ARG="${1#--slug=}"; shift ;;
+            --date) [[ $# -ge 2 ]] || new_refuse '--date needs a value'
+                    NEW_DATE="$2"; shift 2 ;;
+            --date=*) NEW_DATE="${1#--date=}"; shift ;;
+            --ext) [[ $# -ge 2 ]] || new_refuse '--ext needs a value'
+                   NEW_EXT="$2"; shift 2 ;;
+            --ext=*) NEW_EXT="${1#--ext=}"; shift ;;
+            --summary) [[ $# -ge 2 ]] || new_refuse '--summary needs a value'
+                       NEW_SUMMARY="$2"; shift 2 ;;
+            --summary=*) NEW_SUMMARY="${1#--summary=}"; shift ;;
+            --body) [[ $# -ge 2 ]] || new_refuse '--body needs a value'
+                    NEW_BODY="$2"; NEW_HAVE_BODY=yes; shift 2 ;;
+            --body=*) NEW_BODY="${1#--body=}"; NEW_HAVE_BODY=yes; shift ;;
+            --body-file) [[ $# -ge 2 ]] || new_refuse '--body-file needs a path'
+                         NEW_BODY_FILE="$2"; shift 2 ;;
+            --body-file=*) NEW_BODY_FILE="${1#--body-file=}"; shift ;;
+            --set) [[ $# -ge 2 ]] || new_refuse '--set needs KEY=VALUE'
+                   NEW_SET_RAW+=("$2"); shift 2 ;;
+            --set=*) NEW_SET_RAW+=("${1#--set=}"); shift ;;
+            -n | --dry-run) NEW_DRY=yes; shift ;;
+            --json) shift ;;
+            -h | --help) usage 0 ;;
+            *) new_refuse "unknown option $1" ;;
+        esac
+    done
+
+    [[ -z "$NEW_HAVE_BODY" || -z "$NEW_BODY_FILE" ]] \
+        || new_refuse '--body and --body-file are two answers to the same question — pass one'
+    [[ -z "$NEW_HAVE_TITLE" || -n "$NEW_TITLE" ]] \
+        || new_refuse '--title was given an empty value'
+
+    # Flags that mean nothing for this kind are refused, not ignored. A caller
+    # who passed --project and had it dropped believes the note is filed under
+    # that project, and nothing in the output would tell them otherwise.
+    case "$NEW_KIND" in
+        note | context | raw) ;;
+        *) [[ -z "$NEW_PROJECT" ]] || new_refuse "kind $NEW_KIND takes no --project" ;;
+    esac
+    [[ "$NEW_KIND" == peer || -z "$NEW_HANDLE" ]] \
+        || new_refuse "kind $NEW_KIND takes no --handle — did you mean --title?"
+    [[ "$NEW_KIND" == raw || -z "$NEW_EXT" ]] \
+        || new_refuse "kind $NEW_KIND takes no --ext — only a raw drop is not markdown"
+
+    load_config
+    # SKILL.md §0: a tree that does not exist is `hud init`'s business. A write
+    # verb that scaffolded one would put notes in a tree nobody configured, in
+    # a directory that was very likely a typo.
+    [[ -d "$HUD_ROOT_R" ]] \
+        || new_refuse "$HUD_ROOT_R does not exist — run 'hud init' first"
+    local f
+    for f in index.md log.md; do
+        [[ -f "$HUD_ROOT_R/$f" ]] || new_refuse \
+            "$HUD_ROOT_R/$f is missing — run 'hud init' first; the bookkeeping files are not optional"
+    done
+
+    NEW_DATE="${NEW_DATE:-$(date -u '+%Y-%m-%d')}"
+    [[ "$NEW_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] \
+        || new_refuse "--date wants YYYY-MM-DD, got $NEW_DATE"
+
+    if [[ "$NEW_KIND" == raw ]]; then
+        NEW_EXT="${NEW_EXT:-md}"
+        [[ "$NEW_EXT" =~ ^[a-z0-9]{1,8}$ ]] \
+            || new_refuse "--ext wants a short lowercase extension, got $NEW_EXT"
+    fi
+
+    # The filename stem, per kind.
+    case "$NEW_KIND" in
+        peer)
+            [[ -n "$NEW_HANDLE" ]] || new_refuse 'kind peer needs --handle'
+            [[ -z "$NEW_SLUG_ARG" ]] \
+                || new_refuse 'kind peer takes no --slug — the file is named for the handle'
+            NEW_SLUG="$(new_kebab "$NEW_HANDLE")"
+            [[ -n "$NEW_SLUG" ]] || new_refuse "--handle $NEW_HANDLE has no usable characters"
+            [[ -n "$NEW_TITLE" ]] || NEW_TITLE="$NEW_HANDLE"
+            ;;
+        context)
+            [[ -z "$NEW_SLUG_ARG" ]] \
+                || new_refuse 'kind context takes no --slug — the file is always CONTEXT.md'
+            ;;
+        *)
+            if [[ -n "$NEW_SLUG_ARG" ]]; then
+                NEW_SLUG="$(new_kebab "$NEW_SLUG_ARG")"
+            elif [[ -n "$NEW_TITLE" ]]; then
+                NEW_SLUG="$(new_slug "$NEW_TITLE")"
+            else
+                new_refuse "kind $NEW_KIND needs --title (the slug is derived from it), or --slug"
+            fi
+            [[ -n "$NEW_SLUG" ]] \
+                || new_refuse 'nothing kebab-cased out of that title — pass --slug'
+            [[ -n "$NEW_TITLE" ]] || NEW_TITLE="$NEW_SLUG"
+            ;;
+    esac
+
+    case "$NEW_KIND" in
+        note | context | raw)
+            if [[ -n "$NEW_PROJECT" ]]; then
+                # An EXPLICIT project is taken as given, directories and all:
+                # the caller named it, so it is not a guess.
+                NEW_RESOLVED_PROJECT="$(new_kebab "$NEW_PROJECT")"
+                [[ -n "$NEW_RESOLVED_PROJECT" ]] \
+                    || new_refuse "--project $NEW_PROJECT has no usable characters"
+            else
+                NEW_RESOLVED_PROJECT="$(new_project_infer || true)"
+            fi
+            ;;
+    esac
+
+    # SKILL.md §2, and the one place this verb is allowed to change the
+    # destination out from under the request: a note in the wrong project is
+    # worse than a note that is unsorted, so an unresolved project routes to
+    # inbox/ rather than being guessed at. `context` and `raw` have no unfiled
+    # form — a CONTEXT.md belongs to a project by definition — so they refuse.
+    case "$NEW_KIND" in
+        note) [[ -n "$NEW_RESOLVED_PROJECT" ]] || NEW_ROUTED=yes ;;
+        context | raw)
+            [[ -n "$NEW_RESOLVED_PROJECT" ]] || new_refuse \
+                "no project resolved for kind $NEW_KIND — pass --project (a note would route to inbox/ instead, but a $NEW_KIND has no unfiled form)" ;;
+    esac
+
+    # A CONTEXT.md carries no `title:` (SKILL.md §5), but index.md still needs
+    # link text for it, and the project name is the only honest default.
+    [[ -n "$NEW_TITLE" || "$NEW_KIND" != context ]] || NEW_TITLE="$NEW_RESOLVED_PROJECT"
+
+    case "$NEW_KIND" in
+        note) if [[ -n "$NEW_ROUTED" ]]; then
+                  NEW_REL="inbox/$NEW_DATE-$NEW_SLUG.md"
+              else
+                  NEW_REL="projects/$NEW_RESOLVED_PROJECT/notes/$NEW_DATE-$NEW_SLUG.md"
+              fi ;;
+        inbox) NEW_REL="inbox/$NEW_DATE-$NEW_SLUG.md" ;;
+        raw) NEW_REL="projects/$NEW_RESOLVED_PROJECT/raw/$NEW_DATE-$NEW_SLUG.$NEW_EXT" ;;
+        playbook) NEW_REL="playbooks/$NEW_SLUG.md" ;;
+        context) NEW_REL="projects/$NEW_RESOLVED_PROJECT/CONTEXT.md" ;;
+        peer) NEW_REL="peers/$NEW_SLUG.md" ;;
+    esac
+
+    # Containment is by construction: every component above came through
+    # new_kebab, which leaves only [a-z0-9-], so none of them can name `..` or
+    # an absolute path. This assertion is here so that a future edit to the
+    # normalizer cannot quietly make an escape reachable.
+    case "$NEW_REL" in
+        /* | *..*) new_refuse "refusing to write outside the tree: $NEW_REL" ;;
+    esac
+
+    # Derived frontmatter first, in the order SKILL.md §3–§6 writes it.
+    case "$NEW_KIND" in
+        note | inbox)
+            fm_set title "$NEW_TITLE"
+            fm_set date "$NEW_DATE"
+            fm_set type note ;;
+        playbook)
+            fm_set title "$NEW_TITLE"
+            fm_set type playbook
+            fm_set last_verified "$NEW_DATE" ;;
+        context)
+            # SKILL.md §5's template carries no `title:`, so one is written only
+            # when the caller actually gave one — otherwise the server's default
+            # (first heading) applies, and nothing here invents a title.
+            [[ -z "$NEW_HAVE_TITLE" ]] || fm_set title "$NEW_TITLE"
+            fm_set status active ;;
+        peer) fm_set gh "$NEW_SLUG" ;;
+        raw) ;;
+    esac
+
+    local legal fixed pair key value
+    legal="$(new_legal_keys "$NEW_KIND")"
+    fixed="$(new_fixed_keys "$NEW_KIND")"
+    for pair in ${NEW_SET_RAW[@]+"${NEW_SET_RAW[@]}"}; do
+        [[ "$pair" == *=* ]] || new_refuse "--set wants KEY=VALUE, got $pair"
+        key="${pair%%=*}"
+        value="${pair#*=}"
+        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] \
+            || new_refuse "--set: $key is not a frontmatter key name"
+        [[ "$value" != *$'\n'* ]] \
+            || new_refuse "--set $key: a frontmatter value cannot contain a newline"
+        if [[ "$NEW_KIND" == raw ]]; then
+            new_refuse "kind raw carries no frontmatter — it is an immutable drop, so --set $key has nowhere to go"
+        fi
+        case " $fixed " in
+            *" $key "*)
+                case "$key" in
+                    type) new_refuse 'type is derived from the destination directory, not --set' ;;
+                    title) new_refuse 'title is derived from --title, not --set' ;;
+                    date) new_refuse 'date is derived from --date, not --set' ;;
+                esac ;;
+        esac
+        case " $legal " in
+            *" $key "*) ;;
+            *) new_refuse "$key is not a legal frontmatter key for kind $NEW_KIND (legal: ${legal// /, })" ;;
+        esac
+        case " $NEW_ARRAY_KEYS " in
+            *" $key "*) value="$(new_fm_list "$value")" ;;
+        esac
+        fm_set "$key" "$value"
+    done
+
+    local body=""
+    if [[ -n "$NEW_BODY_FILE" ]]; then
+        if [[ "$NEW_BODY_FILE" == - ]]; then
+            body="$(cat)"
+        else
+            [[ -f "$NEW_BODY_FILE" ]] || new_refuse "--body-file $NEW_BODY_FILE does not exist"
+            body="$(cat -- "$NEW_BODY_FILE")"
+        fi
+    elif [[ -n "$NEW_HAVE_BODY" ]]; then
+        body="$NEW_BODY"
+    else
+        [[ "$NEW_KIND" != raw ]] || new_refuse \
+            'kind raw needs --body or --body-file: the drop IS the content, and there is no template for one'
+        body="$(new_body_template)"
+    fi
+
+    # The two appends SKILL.md §7 demands after every write. index.md is a
+    # catalog — one line per path — so the append is guarded by whether that
+    # path is already listed; log.md is append-only history, so a second ingest
+    # of a path that was deleted and recreated is a second line, by design.
+    NEW_INDEX_LINE="- [$NEW_TITLE]($NEW_REL) — ${NEW_SUMMARY:-$NEW_KIND}"
+    NEW_LOG_LINE="- $NEW_DATE: added $NEW_KIND $NEW_REL"
+    if grep -Fq -- "]($NEW_REL)" "$HUD_ROOT_R/index.md" 2>/dev/null; then
+        NEW_INDEX_ACTION=kept
+    else
+        NEW_INDEX_ACTION=append
+    fi
+    NEW_LOG_ACTION=append
+
+    # Refuse before touching anything, and refuse having done nothing. The body
+    # that came with this request is the reason an existing destination is not
+    # a no-op: overwriting would lose the file, and skipping would lose the
+    # body, so neither is this verb's call to make.
+    if [[ -e "$HUD_ROOT_R/$NEW_REL" ]]; then
+        case "$NEW_KIND" in
+            context) new_refuse "$NEW_REL already exists — CONTEXT.md is the single current brief for a project, so edit it in place rather than recreating it" ;;
+            peer) new_refuse "$NEW_REL already exists — one file per person, so edit that one rather than adding a second" ;;
+        esac
+        new_refuse "$NEW_REL already exists — nothing was written. Pass --slug or --date for a different name, or edit that file."
+    fi
+
+    [[ -n "$NEW_JSON" ]] || new_report
+    if [[ -n "$NEW_DRY" ]]; then
+        if [[ -n "$NEW_JSON" ]]; then
+            new_emit_json planned
+        else
+            printf '\n--dry-run: nothing was written.\n'
+        fi
+        return 0
+    fi
+
+    mkdir -p -- "$(dirname -- "$HUD_ROOT_R/$NEW_REL")"
+    # Rendered to a temp file and moved into place, so a render that dies
+    # half-way leaves no file rather than a truncated entry — the same posture
+    # `install_file` takes, and for the same reason.
+    new_render "$body" >"$HUD_ROOT_R/$NEW_REL.hud-new.tmp"
+    mv -f -- "$HUD_ROOT_R/$NEW_REL.hud-new.tmp" "$HUD_ROOT_R/$NEW_REL"
+    [[ "$NEW_INDEX_ACTION" == kept ]] || new_append "$HUD_ROOT_R/index.md" "$NEW_INDEX_LINE"
+    new_append "$HUD_ROOT_R/log.md" "$NEW_LOG_LINE"
+
+    if [[ -n "$NEW_JSON" ]]; then
+        new_emit_json created
+    else
+        printf '\ncreated %s\n' "$NEW_REL"
+    fi
+}
+
 # --------------------------------------------------------------- dispatch
 
 [[ $# -gt 0 ]] || usage 1
@@ -2065,6 +2691,7 @@ shift
 
 case "$command" in
     init) cmd_init "$@" ;;
+    new) cmd_new "$@" ;;
     start) cmd_start "$@" ;;
     stop) cmd_stop "$@" ;;
     restart) cmd_restart "$@" ;;
