@@ -144,7 +144,40 @@ One machine writes to exactly one store and may read from several. The writable
 store is `HUD_ROOT` and **cannot be named here** — that keeps one fact in one
 place, and it is why there is no `[store]` table. `hud sync` stages, commits and
 pushes only the writable store, so a mounted store cannot be pushed to the
-wrong remote: sync has no knowledge that other roots exist.
+wrong remote: sync has no knowledge that other roots exist. `hud pull` is the
+mirror image: it fast-forwards the mounted stores and never reads `HUD_ROOT`.
+
+### What a store has to look like
+
+A store is a directory with section directories in it. Nothing else is
+required, and there is no registration file — which is why `hud init --root
+<path>` is the whole of creating one: it writes `HUD.md`, `index.md`, `log.md`,
+a `.gitignore`, the `_hud` symlink, a `hud.toml`, and the five section
+directories, then `git init`s the tree. **A local repository with no remote is
+a valid store.** `init` deliberately does not create a remote; it prints the
+`gh repo create` command instead, because that is outward-facing and not a
+scaffold command's decision. A store with no remote is `skipped` by `hud pull`
+("no upstream for `<branch>`") and read normally by everything else.
+
+Four things about that shape are worth stating, because a mounted store puts
+them in front of the union and the answer is the same in every case — they are
+not content:
+
+- **A mounted store's own `hud.toml` is inert.** Config is read from `HUD_ROOT`
+  and nowhere else, so mounting a store does not import the stores *it* mounts.
+  A tree whose contents depended on a config file the machine never read would
+  be unexplainable from that machine.
+- **Top-level files are not entries.** `HUD.md`, `index.md`, `log.md` and
+  `hud.toml` sit above every section, and the walk only descends into section
+  directories.
+- **`_hud` is skipped by name**, so the machinery checkout a store links to
+  never floods the tree. (Symlinks are also neither followed nor listed
+  anywhere in the walk.)
+- **A `.gitkeep`-only section adds the section and no entries.** An empty
+  directory cannot survive a clone, so `init` leaves a dot-prefixed keepfile in
+  each; the walk skips dotfiles, so the keepfile never renders. The section
+  still appears, because sections are the union of top-level directories — that
+  is why `peers` can be present with nothing under it.
 
 What the union does:
 
@@ -163,12 +196,37 @@ What the union does:
 
 A store that is absent, unreadable, not a directory, or pointed at the writable
 root is **ignored with a warning**. That is deliberate — quietly dropping it
-renders a tree that looks complete and is not.
+renders a tree that looks complete and is not. `hud status` prints each
+rejection as an `! ignored` row and `hud status --json` as a `stores` entry with
+`status: "ignored"` and the reason, so a machine with no mounts is
+distinguishable from one whose mounts all failed. The rest of the tree is
+unaffected: a bad mount costs you that mount, not the sections the good stores
+contributed.
 
-**What this does not do.** Mounting a private store puts its data on this
-machine. Only declining to clone it prevents that. The guarantees here are
-"never writes across stores" and "never pushes a store it does not own"; the
-config makes the boundary legible rather than enforcing it.
+### The limits, stated rather than worked around
+
+**A read-only store cannot be written by the machine that mounts it — so
+`hud new` cannot target it.** Authoring verbs write to `HUD_ROOT`, which is the
+one store this machine owns, and `[read.<name>]` has no writable variant by
+design: write-1:1 is what makes "which machine last touched this note" a
+question with an answer. The consequence is real and has no flag — to add a
+note to the store mounted as `work`, you author it on the machine that owns
+that store. There is no local workaround, and inventing one (a `writable = true`
+key, a `--store` flag on `hud new`) would trade the invariant for the
+convenience.
+
+**A shadowed entry is reported but not reachable.** `/api/md` resolves in the
+same writable-first order as the tree, so the single path a collision leaves you
+with serves the winner. `shadowed` tells you a losing copy exists, which store
+it came from, and which store beat it — and that is the whole of what it can
+tell you. Reading it means opening the file in that store's root directly. A
+store selector on `/api/md` would make every mounted path addressable by a
+client-supplied root name, which is a containment surface rather than a feature.
+
+**Mounting a private store puts its data on this machine.** Only declining to
+clone it prevents that. The guarantees here are "never writes across stores" and
+"never pushes a store it does not own"; the config makes the boundary legible
+rather than enforcing it.
 
 ## `[serve]`
 

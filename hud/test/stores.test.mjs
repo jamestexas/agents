@@ -305,9 +305,135 @@ test("an array or array-of-tables in the config warns rather than being accepted
   assert.deepEqual(readStores(root).stores, []);
 });
 
+test("a read store pointed at a file rather than a directory is ignored with a warning", (t) => {
+  const writeRoot = tree(t, "wfile", { "inbox/a.md": note("a"), "notes.md": "# not a store\n" });
+  withReadStores(writeRoot, { afile: path.join(writeRoot, "notes.md") });
+
+  // statSync succeeds here, so this is a distinct branch from the absent case:
+  // without the isDirectory() check the walk would fail per-section instead of
+  // being reported once, and the tree would come back quietly short.
+  const { stores, warns } = readStores(writeRoot);
+  assert.equal(stores.length, 0, "a file was accepted as a store root");
+  assert.ok(
+    warns.some((w) => w.includes("afile") && w.includes("not a directory")),
+    `no warning said the store was not a directory; got ${JSON.stringify(warns)}`,
+  );
+  assert.ok(entryAt(buildTree(writeRoot), "inbox", "inbox/a.md"), "the writable tree shrank");
+});
+
 test("no read stores configured behaves exactly as a single-store tree", (t) => {
   const writeRoot = tree(t, "wsingle", { "projects/only/CONTEXT.md": note("only") });
   const out = buildTree(writeRoot);
   assert.deepEqual(out.shadowed, []);
   assert.equal(entryAt(out, "projects", "projects/only/CONTEXT.md").store, WRITABLE_STORE);
+});
+
+// ------------------------------------------------- the shape a store arrives in
+//
+// A real mounted store is not a bare section tree: `hud init` gives every store
+// `HUD.md`, `index.md`, `log.md`, its own `hud.toml`, an `_hud` symlink to the
+// machinery, and section directories that may hold nothing but a `.gitkeep`.
+// Every case below is something that shape puts in front of the union, so these
+// are regression tests for a store that looks like the ones people actually
+// mount rather than like a fixture.
+
+test("a mounted store's own hud.toml is inert: no transitive mounts, no entry", (t) => {
+  const thirdRoot = tree(t, "third", { "projects/unreachable/CONTEXT.md": note("third root") });
+  const readRoot = tree(t, "rshape", {
+    "projects/mounted/CONTEXT.md": note("mounted"),
+    // Everything `hud init` puts at the top level of a store it creates.
+    "HUD.md": "# contract\n",
+    "index.md": "# index\n",
+    "log.md": "# log\n",
+    // The store's own config, declaring a mount of its own.
+    "hud.toml": `ticket_url_template = "https://example.invalid/{id}"\n\n[read.nested]\npath = "${thirdRoot}"\n`,
+  });
+  const writeRoot = tree(t, "wshape", { "projects/own/CONTEXT.md": note("own") });
+  withReadStores(writeRoot, { other: readRoot });
+
+  // Config is read from HUD_ROOT and nowhere else. If the chain recursed,
+  // mounting one store would silently import whatever *it* mounts — a tree
+  // whose contents depend on a file the machine that mounted it never read.
+  assert.deepEqual(readStores(writeRoot).stores.map((s) => s.name), ["other"]);
+
+  const out = buildTree(writeRoot);
+  assert.ok(entryAt(out, "projects", "projects/mounted/CONTEXT.md"), "mounted entry missing");
+  assert.equal(
+    entryAt(out, "projects", "projects/unreachable/CONTEXT.md"),
+    undefined,
+    "a store mounted by a mounted store's config leaked into the tree",
+  );
+
+  // And the top-level files are content of the store, not entries of it: the
+  // walk only ever descends into section directories.
+  const all = out.sections.flatMap((s) => s.entries).map((e) => e.path);
+  for (const rel of ["HUD.md", "index.md", "log.md", "hud.toml"]) {
+    assert.ok(!all.includes(rel), `${rel} from a mounted store rendered as an entry`);
+  }
+});
+
+test("a section holding only a keepfile adds the section, never an entry", (t) => {
+  const readRoot = tree(t, "rkeep", {
+    // What `hud init` leaves behind: an empty directory cannot survive a clone,
+    // so each section gets a dot-prefixed keepfile. The claim being pinned is
+    // that the walker's dotfile skip is what makes that safe.
+    "peers/.gitkeep": "",
+    "inbox/.gitkeep": "",
+    "playbooks/real.md": note("real"),
+  });
+  const writeRoot = tree(t, "wkeep", { "projects/own/CONTEXT.md": note("own") });
+  withReadStores(writeRoot, { other: readRoot });
+
+  const out = buildTree(writeRoot);
+  const all = out.sections.flatMap((s) => s.entries).map((e) => e.path);
+  assert.ok(!all.some((p) => p.endsWith(".gitkeep")), `a keepfile rendered as an entry: ${all}`);
+  assert.ok(entryAt(out, "playbooks", "playbooks/real.md"), "a real entry beside keepfiles missing");
+
+  // The section still appears, because sections are the union of top-level
+  // directories. An empty section is the honest projection of an empty
+  // directory, and it is why `peers` can be present with nothing under it.
+  const peers = out.sections.find((s) => s.name === "peers");
+  assert.ok(peers, "a keepfile-only section did not appear at all");
+  assert.deepEqual(peers.entries, []);
+});
+
+test("the _hud machinery link in a mounted store is skipped, not walked", (t) => {
+  const machinery = tree(t, "mach", { "docs/SOURCES.md": "# not content\n" });
+  const readRoot = tree(t, "rlink", { "projects/mounted/CONTEXT.md": note("mounted") });
+  // `_hud` points at a checkout of the machinery, which on a real store is a
+  // git repository full of markdown. Walking it would flood the tree.
+  fs.symlinkSync(machinery, path.join(readRoot, "_hud"));
+  const writeRoot = tree(t, "wlink", {});
+  withReadStores(writeRoot, { other: readRoot });
+
+  const out = buildTree(writeRoot);
+  assert.ok(!out.sections.some((s) => s.name === "_hud"), "_hud became a section");
+  const all = out.sections.flatMap((s) => s.entries).map((e) => e.path);
+  assert.ok(!all.some((p) => p.includes("SOURCES.md")), `machinery leaked into the tree: ${all}`);
+  assert.ok(entryAt(out, "projects", "projects/mounted/CONTEXT.md"), "mounted entry missing");
+});
+
+test("a shadowed entry is reported but its bytes are unreachable by path", async (t) => {
+  const rel = "projects/shared/CONTEXT.md";
+  const readRoot = tree(t, "rshadow", { [rel]: note("the shadowed copy") });
+  const writeRoot = tree(t, "wshadow", { [rel]: note("the served copy") });
+  withReadStores(writeRoot, { other: readRoot });
+
+  const out = buildTree(writeRoot);
+  assert.equal(out.shadowed.length, 1);
+
+  const server = createServer({ root: writeRoot, uiDir: UI_DIR });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  t.after(() => new Promise((r) => server.close(r)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  // `/api/md` resolves in the same writable-first order, so the one path the
+  // collision leaves you with serves the winner. There is no second path and
+  // no store selector: `shadowed` tells you a copy exists and is the whole of
+  // what it can tell you. Documented in docs/SOURCES.md rather than fixed here
+  // — adding a store parameter would make every mounted path addressable by a
+  // client-supplied root name, which is a containment surface, not a feature.
+  const res = await fetch(`${base}/api/md?path=${rel}`, { cache: "no-store" });
+  assert.equal(res.status, 200);
+  assert.match(await res.text(), /the served copy/, "the shadowed copy was served");
 });
