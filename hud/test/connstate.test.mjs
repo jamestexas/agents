@@ -212,6 +212,31 @@ test("a payload naming its broken upstreams is degraded, and they are named", ()
   assert.match(h.why, /weather/);
 });
 
+test("the source's own error text survives into the summary", () => {
+  // Without this, payloadHealth can be reduced to emitting bare source names
+  // and every other case still passes -- the errors are fed in pre-formatted
+  // elsewhere, so only a test that runs the real joiner pins them.
+  const h = health()({
+    tick_status: "degraded",
+    degradations: [
+      { source: "github", error: "github graphql 401" },
+      { source: "weather", error: "WEATHER_API_KEY is not set" },
+    ],
+  });
+  assert.match(h.why, /github: github graphql 401/);
+  assert.match(h.why, /weather: WEATHER_API_KEY is not set/);
+});
+
+test("a degradation with no error text degrades to just the source name", () => {
+  const h = health()({ degradations: [{ source: "lectio" }] });
+  assert.equal(h.why, "lectio");
+});
+
+test("alternative error keys are read, not just `error`", () => {
+  const h = health()({ degradations: [{ source: "a", reason: "boom" }] });
+  assert.match(h.why, /a: boom/);
+});
+
 test("degradations alone are enough, without a status field", () => {
   // Trusting only the status word would miss a payload that lists failures
   // and forgets to label itself.
