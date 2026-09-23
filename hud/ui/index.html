@@ -449,6 +449,37 @@
         opacity: 0.6;
         border-style: dashed;
       }
+      /* One line across the top when the page is NOT showing live data.
+         Per-panel staleness is deliberately quiet — dashed and dimmed — which
+         is right for one panel and wrong for the whole page: a reader who
+         glances at a number should not have to audit six panels to learn that
+         none of them came from a live source. Severity is worst-wins and the
+         vocabulary is closed, so "everything is live" is the only state that
+         renders nothing. */
+      #connstate {
+        padding: 6px 10px;
+        font: 600 11px/1.4 var(--mono);
+        letter-spacing: 0.04em;
+        border-bottom: 1px solid;
+      }
+      #connstate.stale {
+        color: #8a6d1f;
+        background: #fdf6e3;
+        border-color: #e6d9a8;
+      }
+      #connstate.absent {
+        color: #8a3f1f;
+        background: #fdeee3;
+        border-color: #e6c3a8;
+      }
+      /* Example payloads get the loudest treatment: stale real data is old but
+         true, whereas example data is false now and would stay false however
+         fresh it became. */
+      #connstate.example {
+        color: #fff;
+        background: #a3321a;
+        border-color: #a3321a;
+      }
       .panel > h2 {
         font: 600 11px/1 var(--mono);
         letter-spacing: 0.12em;
@@ -636,6 +667,10 @@
       <button id="refresh" title="reload the tree and every dynamic panel">&#8635;</button>
       <span id="generated">generated &mdash;</span>
     </header>
+
+    <!-- Filled by paintConnState(); hidden whenever every configured source is
+         live, so its presence always means something. -->
+    <div id="connstate" hidden></div>
 
     <main>
       <div id="left">
@@ -1472,15 +1507,26 @@
         return sameDay ? d.toLocaleTimeString() : d.toLocaleString();
       }
 
+      /* True only while renderPanel is building a panel from a snapshot.
+         build() is synchronous, so this cannot interleave across panels. */
+      let RENDER_STALE = false;
+
+      /* A relative time is a claim about now. Computing one from a snapshot
+         turns an old fact into a false one -- a board captured days ago
+         renders its stand-up as "in 30m", which is not stale, it is wrong.
+         When the source is not live, state the instant instead and let the
+         panel's "as of" stamp supply the age. */
       function ago(iso) {
         const then = Date.parse(iso);
         if (isNaN(then)) return "";
+        if (RENDER_STALE) return fmtTime(iso);
         const mins = Math.round((Date.now() - then) / 60000);
         if (mins < 1) return "just now";
         if (mins < 60) return mins + "m ago";
         if (mins < 60 * 24) return Math.round(mins / 60) + "h ago";
         return Math.round(mins / 1440) + "d ago";
       }
+      // ago:end
 
       function rowsNode(items, build) {
         const ul = node("ul", "rows");
@@ -1492,6 +1538,53 @@
        * Fill one panel from its envelope, or hide it when there is nothing to
        * show. `build` returns a node, or null for "connected but empty".
        */
+      /* What each configured source is actually giving us right now. The
+         vocabulary is closed and ordered worst-first, so "not configured"
+         (absent from this map entirely) stays distinguishable from
+         "configured and answering nothing" -- the same distinction the
+         degradation ladder draws on the server. */
+      const CONN_RANK = { example: 3, absent: 2, stale: 1, live: 0 };
+      const SOURCE_STATE = new Map();
+
+      function noteSource(name, state) {
+        SOURCE_STATE.set(name, state);
+        paintConnState();
+      }
+
+      function paintConnState() {
+        const bar = el("connstate");
+        if (!bar) return;
+        let worst = "live";
+        const named = [];
+        for (const [name, state] of SOURCE_STATE) {
+          if (CONN_RANK[state] > CONN_RANK[worst]) {
+            worst = state;
+            named.length = 0;
+          }
+          if (state === worst && state !== "live") named.push(name);
+        }
+        bar.className = worst;
+        if (worst === "live") {
+          bar.hidden = true;
+          bar.textContent = "";
+          bar.removeAttribute("title");
+          return;
+        }
+        bar.hidden = false;
+        const which = named.join(", ");
+        const say = {
+          example: "SHOWING EXAMPLE DATA — " + which + " is serving a sample payload, not your work. Nothing here is real.",
+          absent: "NOT CONNECTED — " + which + " is configured but nothing is answering. No data below is current.",
+          stale: "NOT LIVE — " + which + " is being served from a snapshot. Times shown are when they happened, not how long ago.",
+        };
+        bar.textContent = say[worst];
+        bar.title =
+          worst === "example"
+            ? "The payload identifies itself as example data (tickStatus: example)."
+            : "Per-panel 'as of' stamps show each snapshot's age.";
+      }
+      // paintConnState:end
+
       function renderPanel(id, env, build) {
         const wrap = el("wrap-" + id);
         const body = el("panel-" + id);
@@ -1506,7 +1599,13 @@
         wrap.classList.toggle("stale", !!env.stale);
         stamp.textContent = env.stale ? "as of " + fmtTime(env.cached_at) : "";
         stamp.title = env.stale && env.error ? env.error : "";
-        const built = build(env);
+        RENDER_STALE = !!env.stale;
+        let built;
+        try {
+          built = build(env);
+        } finally {
+          RENDER_STALE = false;
+        }
         body.appendChild(built || node("div", "empty", "nothing to show"));
       }
 
@@ -1911,10 +2010,26 @@
         try {
           const res = await fetch("/api/dyn/" + name, { cache: "no-store" });
           const body = await res.json().catch(() => null);
-          if (!res.ok || !body || body.data === undefined) return null;
+          if (!res.ok || !body || body.data === undefined) {
+            // 404 is "no such panel" -- an unconfigured source is not a fault
+            // and must not raise the banner. Anything else is configured and
+            // failing to answer, which is.
+            if (res.status === 404) {
+              SOURCE_STATE.delete(name);
+              paintConnState();
+            } else noteSource(name, "absent");
+            return null;
+          }
+          // A payload that says it is a sample outranks staleness: old real
+          // data is true about the past, example data is true about nothing.
+          const d = body.data;
+          const sample = d && typeof d === "object" && d.tickStatus === "example";
+          noteSource(name, sample ? "example" : body.stale ? "stale" : "live");
           return body;
         } catch {
-          return null; // the HUD server itself is gone; hide rather than shout
+          // The HUD server itself is gone. Every panel is about to vanish, so
+          // the banner would be shouting into an empty page.
+          return null;
         }
       }
 

@@ -96,18 +96,94 @@ found this written down nowhere except the code and the skill's frontmatter
 templates, which is a plausible reason `status: done` drifted onto notes that
 have no `status` field at all.
 
-**Sections** are top-level directories. `KNOWN_SECTIONS` in `server.mjs` fixes
-the order of the five the HUD knows; any other directory becomes a section too,
-appended alphabetically. Each carries a one-sentence description from
-`SECTION_ABOUT`, rendered under the heading and on its tooltip; a section the
-map has never seen gets a fallback rather than nothing.
+That is now structurally impossible rather than merely noticed. The tables
+below are **generated** from [`hud-contract.mjs`](../hud-contract.mjs) by
+[`hud-docgen.mjs`](../hud-docgen.mjs), and `hud docgen --check` — which the
+unit suite runs — fails when they stop matching it.
+
+**Sections.** `KNOWN_SECTIONS` fixes the order of the five the HUD knows; each
+carries a one-sentence description, rendered under the heading and on its
+tooltip.
+
+<!-- @generated-begin: sections-table -->
+| section | what it is |
+| --- | --- |
+| `projects` | Live work — one directory per project, its CONTEXT.md the brief, notes beneath it. |
+| `playbooks` | Procedures worth not re-deriving: how a thing is done, written down once. |
+| `peers` | One file per colleague, naming the GitHub handle whose PRs light up the peers panel. |
+| `inbox` | Unfiled capture — notes taken before there was a project to put them in. |
+| `archive` | Finished or parked work, kept for reference. Nothing here needs you. |
+
+Sections are an **open set**: the five above fix the left-column order, and any
+other top-level directory becomes a section too, appended alphabetically with a
+fallback sentence. Kinds are the opposite — closed, and there are exactly 6.
+<!-- @generated-end: sections-table -->
 
 **Groups** exist only inside `projects`: the subdirectory *is* the group, and
 its `CONTEXT.md` is the brief. Groups rank active-first, then by warmth — the
 newest date any entry in the group carries — then by name. The heading shows
 that date, because an order the reader cannot see explains nothing.
 
-**Entry facts, and which are badged:**
+**Containers.** Two subdirectory names inside a project mean something, and
+they are asymmetric in opposite directions — which is exactly the sort of fact
+that had no home before this file had a generated one.
+
+<!-- @generated-begin: containers-table -->
+| directory | within | known to the reader? | matched at | what it means |
+| --- | --- | --- | --- | --- |
+| `notes/` | `projects` | **no — never heard of it** | exactly its declared depth | Where dated project entries go. Writer-side only: `projects/p/notes/x.md` and `projects/p/x.md` are the same entry to the reader. |
+| `raw/` | `projects` | yes, and renders differently | any depth | Immutable drops — transcripts, exports, patches. Listed and never opened; the meta slot shows a size instead of a date. |
+
+Those two columns are not the same claim. `notes/` means nothing to the
+reader because the reader has **never heard of it** — the name appears
+nowhere in `server.mjs`, so an entry inside it and one beside it are
+indistinguishable. `raw/` is the opposite: the reader knows it, matches it
+at any depth, and changes how its entries display. One is an accident and
+one is a decision, and a table that called both "inert" would hide that.
+
+A path deeper than its kind's declared shape is currently **absorb**ed — and that is the known-wrong answer: the
+intermediate directories vanish into the group, so the tree looks like you did
+nothing. It is named here rather than left implicit so that changing it is a
+declaration edit.
+<!-- @generated-end: containers-table -->
+
+**The frontmatter vocabulary.** The third column is the distinction that caused
+the drift this section was written to record: it is what the reader
+*substitutes when the key is absent*, which is not the same as a value the file
+carries.
+
+<!-- @generated-begin: fields-table -->
+| key | type | reader assumes when absent | what it is |
+| --- | --- | --- | --- |
+| `title` | scalar | — | The entry's name. The reader falls back to the first heading, then the filename. |
+| `date` | date | — | The day the entry is about. The reader falls back to the filename prefix, then mtime. |
+| `type` | scalar | — | What kind of entry this is. The reader infers it from the path when absent. |
+| `status` | scalar | `active` | Lifecycle. On a project brief it drives group rank and fold state; elsewhere it means what the author meant. |
+| `tags` | list | — | Free-form labels. |
+| `repos` | list | — | owner/name — lights up the PR panels for this entry. |
+| `tickets` | list | — | Ticket ids, rendered as links through hud.toml's ticket_url_template. |
+| `gh` | scalar | — | A GitHub handle. Drives the peers panel's PR lookup. |
+| `applies_to` | list | — | What a playbook is for — repos, or situations. |
+| `last_verified` | date | — | When a playbook was last known to still work. |
+| `links` | list | — | Related material. |
+<!-- @generated-end: fields-table -->
+
+**Which kind actually writes which key** — read against the column above, this
+is what makes "`status` defaults to `active`" a statement about the reader
+rather than a claim about the file:
+
+<!-- @generated-begin: frontmatter-table -->
+| kind | written for you | `--set` may add | refused |
+| --- | --- | --- | --- |
+| `note` | `title`, `date`, `type` | `status`, `tags`, `repos`, `tickets` | `title`, `date`, `type` (derived) |
+| `inbox` | `title`, `date`, `type` | `status`, `tags`, `repos`, `tickets` | `title`, `date`, `type` (derived) |
+| `playbook` | `title`, `type`, `last_verified` | `status`, `tags`, `repos`, `tickets`, `applies_to`, `last_verified` | `title`, `type` (derived) |
+| `context` | `title` (if given), `status` | `status`, `repos`, `tickets`, `links` | `title`, `type` (derived) |
+| `peer` | `gh` | `gh`, `repos` | `type` (derived) |
+| `raw` | — | — (nothing) | everything |
+<!-- @generated-end: frontmatter-table -->
+
+**How the facts are shown:**
 
 | Fact | Source | Shown as |
 | --- | --- | --- |
@@ -115,15 +191,23 @@ that date, because an order the reader cannot see explains nothing.
 | `date` | frontmatter, else filename prefix, else mtime | the meta slot |
 | `size` | the file | the meta slot, *instead of* a date, for `raw/` entries |
 | `type` | frontmatter, else inferred from the path | **not badged in the tree** — it sorts briefs first |
-| `status` | frontmatter, defaulting to `active` | a chip when not `active` |
+| `status` | frontmatter, else the reader's `active` | a chip when not `active` |
 | `store` | which store served it | a chip when not the writable one |
 | `warn` | malformed frontmatter | a chip |
 
 Two things worth knowing about `status`. It means **project lifecycle** on a
-`CONTEXT.md`, where it drives group rank and the default fold state — and on a
-note it means only what the author intended by typing it, because the note
-template defines no `status` field. And `active` is never badged, so an entry
-with no chip is the common case rather than a missing value.
+`CONTEXT.md`, which is the one kind that writes it — there it drives group rank
+and the default fold state. On a note it means only what the author intended by
+typing it, because no note template emits one. And `active` is never badged, so
+an entry with no chip is the common case rather than a missing value.
+
+**What the HUD does not detect.** Frontmatter damage earns a `warn` chip.
+*Path* damage earns nothing — and the path carries at least as much contract as
+the frontmatter does, since it decides an entry's type, section, group and
+date. Moving a file between directories silently re-types it; renaming it
+silently changes its date and breaks its permalink. An entry whose declared
+`type` disagrees with its path-inferred `type` is the detectable case, and it
+is the missing chip.
 
 Entries that cannot need the reader — finished work and `raw/` files — fold
 behind one summary line per group. That is why there is no `raw` chip: the

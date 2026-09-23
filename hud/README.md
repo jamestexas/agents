@@ -65,6 +65,8 @@ is the fastest way to see what this HUD is wired to and what it is not.
 | Command | Does |
 | --- | --- |
 | `hud init [--root DIR] [--yes] [--dry-run]` | Scaffolds a new content tree and its `hud.toml`, configuring only the sources it can actually detect and commenting out the rest with a reason. Adds what is missing to an existing tree, never overwrites `hud.toml`, never creates a git remote. See [docs/SOURCES.md](docs/SOURCES.md). |
+| `hud new <kind> [...]` | Writes one entry into the **content tree** — the only verb that authors content. Derives the destination, the date prefix, the slug and the legal frontmatter from the kind, then makes both bookkeeping appends. Refuses an illegal key, an existing destination, or a project it cannot resolve. `--dry-run`, `--json`. See [Writing into the tree](docs/CLI.md#writing-into-the-tree). |
+| `hud docgen [--check\|--write]` | Regenerates the prose that describes the tree from `hud-contract.mjs`, or fails on drift. The unit suite runs `--check`. |
 | `hud start` | Starts the launchd service if one is installed, otherwise `node server.mjs` backgrounded; idempotent. |
 | `hud stop` | Boots the service out; the plist stays, so `hud start` brings it back. |
 | `hud restart` | `stop`, then `start`. |

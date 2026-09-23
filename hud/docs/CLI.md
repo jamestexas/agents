@@ -76,25 +76,46 @@ hud new inbox --title "a thought with no home"
 The first of those writes
 `projects/widget-service/notes/2026-04-07-debugging-flaky-retry-test.md` with
 `title`, `date` and `type` already in it, and appends the `index.md` and
-`log.md` lines. The dropped article in the slug is not a liberty: it is
-SKILL.md §2's own worked example.
+`log.md` lines.
 
+<!-- @generated-begin: kinds-table -->
 | kind | destination | date prefix |
 | --- | --- | --- |
 | `note` | `projects/<project>/notes/<date>-<slug>.md` | yes |
 | `inbox` | `inbox/<date>-<slug>.md` | yes |
-| `raw` | `projects/<project>/raw/<date>-<slug>.<ext>` | yes |
 | `playbook` | `playbooks/<slug>.md` | no |
 | `context` | `projects/<project>/CONTEXT.md` | no |
 | `peer` | `peers/<handle>.md` | no |
+| `raw` | `projects/<project>/raw/<date>-<slug>.<ext>` | yes |
+<!-- @generated-end: kinds-table -->
+
+<!-- @generated-begin: slug-rule -->
+A slug is the title, lowercased, reduced to `a-z0-9-`, with `a`, `an`, `the` dropped and the result bounded at 60 characters on a word boundary. The dropped article is not a liberty — it is what SKILL.md's own worked example does.
+<!-- @generated-end: slug-rule -->
+
+What each kind writes into the file, what it will accept on top, and what it
+refuses because the verb owns it:
+
+<!-- @generated-begin: frontmatter-table -->
+| kind | written for you | `--set` may add | refused |
+| --- | --- | --- | --- |
+| `note` | `title`, `date`, `type` | `status`, `tags`, `repos`, `tickets` | `title`, `date`, `type` (derived) |
+| `inbox` | `title`, `date`, `type` | `status`, `tags`, `repos`, `tickets` | `title`, `date`, `type` (derived) |
+| `playbook` | `title`, `type`, `last_verified` | `status`, `tags`, `repos`, `tickets`, `applies_to`, `last_verified` | `title`, `type` (derived) |
+| `context` | `title` (if given), `status` | `status`, `repos`, `tickets`, `links` | `title`, `type` (derived) |
+| `peer` | `gh` | `gh`, `repos` | `type` (derived) |
+| `raw` | — | — (nothing) | everything |
+<!-- @generated-end: frontmatter-table -->
 
 One outcome per invocation, from a closed set:
 
-| | Means |
+<!-- @generated-begin: outcomes-table -->
+|  | Means |
 | --- | --- |
 | `created` | the file was written and both bookkeeping lines appended |
 | `planned` | `--dry-run`: the whole plan, and none of it done |
 | `refused` | it could have written and should not. **The only non-zero exit.** |
+<!-- @generated-end: outcomes-table -->
 
 There is deliberately no "nothing to do" outcome. Being asked to create a file
 that already exists is a refusal here rather than a no-op, because the body
@@ -114,10 +135,9 @@ without knowing read stores exist.
 - **A frontmatter key that is not legal for the kind.** `gh` is a real key —
   on a peer. On a note it is a field the UI will never read, so writing it
   would leave a dead value in the tree that only a lint pass would ever find.
-  The legal set per kind is not invented here: the note/inbox keys and `status`
-  are `HUD.md`'s global spec, `applies_to`/`last_verified` are SKILL.md §4,
-  `links` is `HUD.md`'s `CONTEXT.md` line, `gh` is SKILL.md §6, and `raw` has
-  none at all because an immutable drop is an artifact, not an entry.
+  The legal set per kind is the table above, generated from
+  [`hud-contract.mjs`](../hud-contract.mjs) — including `raw`, which has none
+  at all because an immutable drop is an artifact, not an entry.
 - **A key the verb derives.** `type` comes from the destination directory and
   `title`/`date` from `--title`/`--date`; `--set` on any of them is refused
   rather than honoured, because a `type:` that disagrees with the directory
@@ -144,13 +164,48 @@ bookkeeping lines — and writes nothing, the same standard `init --dry-run` is
 held to. `--json` emits one document (`hud-new/v1`) and does so for refusals
 too, including a refusal caused by the arguments themselves: an agent that
 asked for JSON and got an English sentence on stderr would have to parse prose
-to learn that it failed, which is the one thing the flag exists to avoid. As
-with `status --json`, that path needs `jq`; the human default does not.
+to learn that it failed, which is the one thing the flag exists to avoid.
+Unlike `status --json`, it needs no `jq`: the verb is a Node module, so the
+machine-readable form of an agent-first write path is not the one that breaks
+on a box without it.
 
-The two appends differ on purpose. `index.md` is a **catalog** — one line per
-path — so the append is skipped when that path is already listed, and the
-report says `kept` rather than printing nothing. `log.md` is **append-only
-history**, so it records the write regardless.
+The two appends differ on purpose:
+
+<!-- @generated-begin: bookkeeping-table -->
+| file | semantics | line |
+| --- | --- | --- |
+| `index.md` | catalog | `- [{title}]({path}) — {summary}` |
+| `log.md` | append-only | `- {date}: added {kind} {path}` |
+
+A link plus a one-line summary. One line per path; a path already listed is kept, not listed twice. Append-only history of what happened. A second ingest of the same path is a second line, by design.
+<!-- @generated-end: bookkeeping-table -->
+
+### How frontmatter is written, and what a reader must tolerate
+
+<!-- @generated-begin: serialization-rules -->
+- **Dates are normalized on READ**, not on write: `YYYY-MM-DD` and `ISO-8601 timestamp` are both accepted and both become `YYYY-MM-DD`. A writer-side convention would depend on a per-machine setting that is not committed; a reader that accepts both depends on nothing.
+- **Empty collections are omitted**, never emitted as `[]`. YAML has no block spelling of an empty sequence, so `[]` is the one form with a second representation to drift into — and a key whose value you do not know is a key you were told not to write.
+- Lists are **block sequences**, indent is **2 spaces**, scalars are quoted only where bare would be misread, and there are **no comments** inside the block.
+- **Key order is not significant** and neither is formatting. Read keys and values; anything that depends on their arrangement is depending on something no serializer preserves.
+<!-- @generated-end: serialization-rules -->
+
+### One declaration, two directions
+
+The verb is a thin dispatch to [`hud-new.mjs`](../hud-new.mjs), and none of the
+rules above live in it. They live in [`hud-contract.mjs`](../hud-contract.mjs),
+which declares each kind's destination as an invertible **segment grammar**
+rather than a path template — because a template is write-only, and the read
+path has to run it backwards. `inferType` derives an entry's type purely from
+its position, the top-level directory *is* the section, a subdirectory of
+`projects/` *is* the group, and a filename prefix *is* the date. Write composes
+a path from intent; read decomposes meaning out of one. If those two can
+disagree, an entry can be written as one type and read back as another with
+nothing detecting it — so they are generated from one declaration.
+
+Every table in this section, in SKILL.md, in SOURCES.md, and the whole of the
+`HUD.md` that `hud init` scaffolds into a tree, is rendered from that file by
+[`hud-docgen.mjs`](../hud-docgen.mjs). `hud docgen --check` fails on drift and
+the unit suite runs it, so a table here cannot quietly stop being true.
 
 ## Two installs, two verbs
 

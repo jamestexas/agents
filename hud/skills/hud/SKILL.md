@@ -33,15 +33,23 @@ below). If it doesn't exist, proceed on the conventions in this file.
 
 ## 2. Figure out what's being asked for
 
+The table below is **generated** from `_hud/hud-contract.mjs`, the one file
+that declares what an entry is. Don't hand-edit it — `hud docgen --check`
+fails when it drifts, and the unit suite runs that check.
+
+<!-- @generated-begin: intent-table -->
 | Intent | Kind | Target |
-|---|---|---|
-| capture a note | `note` | `$HUD_ROOT/projects/<project>/notes/YYYY-MM-DD-<slug>.md` (or `$HUD_ROOT/inbox/YYYY-MM-DD-<slug>.md` if `<project>` is unclear) |
-| capture an unfiled note | `inbox` | `$HUD_ROOT/inbox/YYYY-MM-DD-<slug>.md` |
+| --- | --- | --- |
+| capture a note | `note` | `$HUD_ROOT/projects/<project>/notes/<date>-<slug>.md` |
+| capture an unfiled note | `inbox` | `$HUD_ROOT/inbox/<date>-<slug>.md` |
 | capture a playbook | `playbook` | `$HUD_ROOT/playbooks/<slug>.md` |
-| update project context | `context` | `$HUD_ROOT/projects/<project>/CONTEXT.md` |
+| create a project brief | `context` | `$HUD_ROOT/projects/<project>/CONTEXT.md` |
 | add a peer | `peer` | `$HUD_ROOT/peers/<handle>.md` |
-| drop raw material in | `raw` | `$HUD_ROOT/projects/<project>/raw/YYYY-MM-DD-<slug>.<ext>` |
-| `lint` argument | — | run the lint workflow (§8), no file writes without approval |
+| drop raw material in | `raw` | `$HUD_ROOT/projects/<project>/raw/<date>-<slug>.<ext>` |
+<!-- @generated-end: intent-table -->
+
+Invoked with `lint`, run the lint workflow (§8) instead — no file writes
+without approval.
 
 Infer `<project>` from the current working directory's repo name, the
 conversation's stated project, or an existing `$HUD_ROOT/projects/<x>/`
@@ -49,8 +57,9 @@ directory that matches. If none of those resolve it confidently, don't
 guess — file under `inbox/` instead. A note in the wrong project is worse
 than a note that's unsorted; `inbox/` is designed for exactly this.
 
-`<slug>` is a short kebab-case summary of the title, e.g. a note titled
-"debugging the flaky retry test" becomes `2026-09-10-debugging-flaky-retry-test.md`.
+<!-- @generated-begin: slug-rule -->
+A slug is the title, lowercased, reduced to `a-z0-9-`, with `a`, `an`, `the` dropped and the result bounded at 60 characters on a word boundary. The dropped article is not a liberty — it is what SKILL.md's own worked example does.
+<!-- @generated-end: slug-rule -->
 
 ## 2a. Write it with `hud new`, not by hand
 
@@ -80,110 +89,131 @@ resolve routes a note to `inbox/` rather than guessing at one; a destination
 that already exists is refused rather than overwritten. A refusal is the only
 non-zero exit, and nothing is written when one happens.
 
-`hud new` is the *mechanism*; §3–§6 below remain the *contract* it implements,
-and are what you need when you are reading an existing entry, editing one in
-place, or writing into a tree whose `HUD.md` (§1) overrides something here.
+`hud new` is the *mechanism*; §3 below is the *contract* it implements, and is
+what you need when you are reading an existing entry, editing one in place, or
+writing into a tree whose `HUD.md` (§1) overrides something here.
 
-## 3. Capture a note
+## 3. The frontmatter contract
 
-`hud new note --project <project> --title "<title>"` — or the `inbox/`
-fallback, which it takes itself when no project resolves. It writes
-`$HUD_ROOT/projects/<project>/notes/YYYY-MM-DD-<slug>.md` with this
-frontmatter, deriving `title`, `date` and `type`; `tags`/`repos`/`tickets`
-come from `--set`:
+Every field is optional; a bare markdown file is a valid entry. These tables
+are **generated** — the schema is declared in `_hud/hud-contract.mjs` and
+nothing here is a second copy of it.
 
-```yaml
----
-title: <short title>
-date: YYYY-MM-DD
-type: note
-tags: []       # optional
-repos: []      # optional, owner/name — lights up PR panels for this entry
-tickets: []    # optional, e.g. ABC-123
----
-```
+<!-- @generated-begin: fields-table -->
+| key | type | reader assumes when absent | what it is |
+| --- | --- | --- | --- |
+| `title` | scalar | — | The entry's name. The reader falls back to the first heading, then the filename. |
+| `date` | date | — | The day the entry is about. The reader falls back to the filename prefix, then mtime. |
+| `type` | scalar | — | What kind of entry this is. The reader infers it from the path when absent. |
+| `status` | scalar | `active` | Lifecycle. On a project brief it drives group rank and fold state; elsewhere it means what the author meant. |
+| `tags` | list | — | Free-form labels. |
+| `repos` | list | — | owner/name — lights up the PR panels for this entry. |
+| `tickets` | list | — | Ticket ids, rendered as links through hud.toml's ticket_url_template. |
+| `gh` | scalar | — | A GitHub handle. Drives the peers panel's PR lookup. |
+| `applies_to` | list | — | What a playbook is for — repos, or situations. |
+| `last_verified` | date | — | When a playbook was last known to still work. |
+| `links` | list | — | Related material. |
+<!-- @generated-end: fields-table -->
 
-Every field past `title`/`date`/`type` is optional by schema — include
-`tags`/`repos`/`tickets` only when you actually know them. Body is
-free-form markdown; write what you'd want to read back in three months,
-not a transcript.
+The third column is what the **reader substitutes when the key is absent** —
+not a value the file carries. An entry with no `status` reads as `active` and
+says nothing. What each kind actually writes:
 
-## 4. Capture a playbook
+<!-- @generated-begin: frontmatter-table -->
+| kind | written for you | `--set` may add | refused |
+| --- | --- | --- | --- |
+| `note` | `title`, `date`, `type` | `status`, `tags`, `repos`, `tickets` | `title`, `date`, `type` (derived) |
+| `inbox` | `title`, `date`, `type` | `status`, `tags`, `repos`, `tickets` | `title`, `date`, `type` (derived) |
+| `playbook` | `title`, `type`, `last_verified` | `status`, `tags`, `repos`, `tickets`, `applies_to`, `last_verified` | `title`, `type` (derived) |
+| `context` | `title` (if given), `status` | `status`, `repos`, `tickets`, `links` | `title`, `type` (derived) |
+| `peer` | `gh` | `gh`, `repos` | `type` (derived) |
+| `raw` | — | — (nothing) | everything |
+<!-- @generated-end: frontmatter-table -->
 
-`hud new playbook --title "<title>"` writes `$HUD_ROOT/playbooks/<slug>.md`,
-deriving `title`, `type` and `last_verified`:
+<!-- @generated-begin: serialization-rules -->
+- **Dates are normalized on READ**, not on write: `YYYY-MM-DD` and `ISO-8601 timestamp` are both accepted and both become `YYYY-MM-DD`. A writer-side convention would depend on a per-machine setting that is not committed; a reader that accepts both depends on nothing.
+- **Empty collections are omitted**, never emitted as `[]`. YAML has no block spelling of an empty sequence, so `[]` is the one form with a second representation to drift into — and a key whose value you do not know is a key you were told not to write.
+- Lists are **block sequences**, indent is **2 spaces**, scalars are quoted only where bare would be misread, and there are **no comments** inside the block.
+- **Key order is not significant** and neither is formatting. Read keys and values; anything that depends on their arrangement is depending on something no serializer preserves.
+<!-- @generated-end: serialization-rules -->
 
-```yaml
----
-title: <short title>
-type: playbook
-applies_to: []       # e.g. repos or situations this playbook is for
-last_verified: YYYY-MM-DD
----
-```
+## 4. What goes in the body
 
-Body: the reusable process itself — steps, gotchas, verification. A
-playbook earns its place by being something you'd otherwise re-derive
-next time; if it's a one-off, it's a note, not a playbook.
+The frontmatter is derived; the body is the part only you can write.
+
+- **note** — what you'd want to read back in three months, not a transcript.
+- **playbook** — the reusable process: steps, gotchas, verification. A playbook
+  earns its place by being something you'd otherwise re-derive next time; if
+  it's a one-off, it's a note.
+- **peer** — how it goes working with this person. Context, not a log of every
+  interaction.
+- **raw** — nothing of yours. It *is* the artifact: a transcript, an export, a
+  patch. Read it, never rewrite it.
 
 ## 5. Update project context
 
-Edit `$HUD_ROOT/projects/<project>/CONTEXT.md` in place. If it doesn't exist
-yet, `hud new context --project <project>` creates it from exactly the
-template below rather than a shape you invented — and refuses if the file is
-already there, because updating the brief is an edit, not a second file.
-
-```yaml
----
-status: active
-repos: []
-tickets: []
----
-
-## Goal
-
-<what this project is trying to achieve>
-
-## State
-
-<where things stand right now>
-
-## Key paths
-
-<files/dirs worth knowing about>
-
-## Decisions
-
-<decisions made and why, so they aren't re-litigated>
-```
+Edit `$HUD_ROOT/projects/<project>/CONTEXT.md` **in place**. If it doesn't
+exist yet, `hud new context --project <project>` creates it with the Goal /
+State / Key paths / Decisions skeleton rather than a shape you invented — and
+refuses if the file is already there, because updating the brief is an edit,
+not a second file.
 
 Edit the relevant section in place — don't append a duplicate "## State"
 block; keep the file as the single current brief for the project, not a
 log. (Notes are the log; CONTEXT.md is the summary.)
 
-## 6. Add a peer
+## 6. Sections, groups and containers
 
-`hud new peer --handle <handle>` writes `$HUD_ROOT/peers/<handle>.md`,
-deriving `gh` from the handle:
+<!-- @generated-begin: sections-table -->
+| section | what it is |
+| --- | --- |
+| `projects` | Live work — one directory per project, its CONTEXT.md the brief, notes beneath it. |
+| `playbooks` | Procedures worth not re-deriving: how a thing is done, written down once. |
+| `peers` | One file per colleague, naming the GitHub handle whose PRs light up the peers panel. |
+| `inbox` | Unfiled capture — notes taken before there was a project to put them in. |
+| `archive` | Finished or parked work, kept for reference. Nothing here needs you. |
 
-```yaml
----
-gh: <handle>       # drives the dynamic peer panel — required for the panel to light up
-repos: []          # optional
----
-```
+Sections are an **open set**: the five above fix the left-column order, and any
+other top-level directory becomes a section too, appended alphabetically with a
+fallback sentence. Kinds are the opposite — closed, and there are exactly 6.
+<!-- @generated-end: sections-table -->
 
-Body: free-form notes about working with this person — context, not a
-transcript of every interaction.
+<!-- @generated-begin: containers-table -->
+| directory | within | known to the reader? | matched at | what it means |
+| --- | --- | --- | --- | --- |
+| `notes/` | `projects` | **no — never heard of it** | exactly its declared depth | Where dated project entries go. Writer-side only: `projects/p/notes/x.md` and `projects/p/x.md` are the same entry to the reader. |
+| `raw/` | `projects` | yes, and renders differently | any depth | Immutable drops — transcripts, exports, patches. Listed and never opened; the meta slot shows a size instead of a date. |
+
+Those two columns are not the same claim. `notes/` means nothing to the
+reader because the reader has **never heard of it** — the name appears
+nowhere in `server.mjs`, so an entry inside it and one beside it are
+indistinguishable. `raw/` is the opposite: the reader knows it, matches it
+at any depth, and changes how its entries display. One is an accident and
+one is a decision, and a table that called both "inert" would hide that.
+
+A path deeper than its kind's declared shape is currently **absorb**ed — and that is the known-wrong answer: the
+intermediate directories vanish into the group, so the tree looks like you did
+nothing. It is named here rather than left implicit so that changing it is a
+declaration edit.
+<!-- @generated-end: containers-table -->
+
+One asymmetry worth carrying: the HUD renders a `warn` chip for frontmatter it
+cannot read, and **nothing at all** for a path that has moved. The path decides
+an entry's type, section, group and date, so relocating a file silently
+re-types it and renaming one silently changes its date.
 
 ## 7. After any write: update the catalog
 
-Every write in §3–§6 is followed by exactly two more edits, no exceptions:
+Every write above is followed by exactly two more edits, no exceptions:
 
-1. Append one line to `$HUD_ROOT/index.md` — a link plus a one-line
-   summary of what was just written.
-2. Append one dated line to `$HUD_ROOT/log.md` — what happened (e.g.
-   `2026-09-10: added note projects/<project>/notes/2026-09-10-foo.md`).
+<!-- @generated-begin: bookkeeping-table -->
+| file | semantics | line |
+| --- | --- | --- |
+| `index.md` | catalog | `- [{title}]({path}) — {summary}` |
+| `log.md` | append-only | `- {date}: added {kind} {path}` |
+
+A link plus a one-line summary. One line per path; a path already listed is kept, not listed twice. Append-only history of what happened. A second ingest of the same path is a second line, by design.
+<!-- @generated-end: bookkeeping-table -->
 
 These two files are the bookkeeping that makes the HUD navigable without
 re-reading the whole tree; skipping them is how the HUD rots into the

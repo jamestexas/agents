@@ -45,28 +45,27 @@ export function defaultRoot() {
   return process.env.HUD_ROOT || path.join(os.homedir(), "hud");
 }
 
-/** Left-column order. Any other top-level directory is appended alphabetically. */
-export const KNOWN_SECTIONS = ["projects", "playbooks", "peers", "inbox", "archive"];
+/**
+ * Left-column order. Any other top-level directory is appended alphabetically.
+ *
+ * Declared in hud-contract.mjs and re-exported here rather than defined twice.
+ * The section vocabulary is half of what an entry MEANS, and the write path
+ * and the doc generator need the same list — the same reason hud-index.mjs
+ * takes `buildTree` from this file instead of re-parsing: one contract, so the
+ * halves cannot disagree. The name stays `KNOWN_SECTIONS` because every
+ * existing importer knows it by that name.
+ */
+export { SECTIONS as KNOWN_SECTIONS, SECTION_ABOUT } from "./hud-contract.mjs";
+import { SECTIONS as KNOWN_SECTIONS, SECTION_ABOUT } from "./hud-contract.mjs";
 
 /**
- * One sentence per section, answering "what is this" for a reader who did not
- * design the tree.
+ * The sentence for a section, including one the map has never seen.
  *
- * Server-owned rather than written into the UI so the description, the section
- * order and the entry model cannot drift apart — and so `hud.toml`'s reference
- * doc has one place to point at. A section is a top-level directory, so a
- * reader can always create one this map does not know; `aboutSection` falls
- * back rather than leaving it unannotated.
+ * The fallback is the OPEN half of the vocabulary and is why it lives in code
+ * rather than in the declaration: a section is any top-level directory, so the
+ * declared list is an ordering and a set of descriptions, never the whole set.
+ * A reader who saw only a table would reasonably conclude otherwise.
  */
-export const SECTION_ABOUT = {
-  projects: "Live work — one directory per project, its CONTEXT.md the brief, notes beneath it.",
-  playbooks: "Procedures worth not re-deriving: how a thing is done, written down once.",
-  peers: "One file per colleague, naming the GitHub handle whose PRs light up the peers panel.",
-  inbox: "Unfiled capture — notes taken before there was a project to put them in.",
-  archive: "Finished or parked work, kept for reference. Nothing here needs you.",
-};
-
-/** The sentence for a section, including one the map has never seen. */
 export function aboutSection(name) {
   return (
     SECTION_ABOUT[name] ||
