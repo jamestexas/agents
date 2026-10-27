@@ -631,28 +631,41 @@ If the fix spans multiple hunks in the same file, link the most relevant one. If
 
 **Step 3: If you cannot determine the line range, fall back to file-level link** (`#L1` omitted), but this should be rare. Never fall back to a bare commit hash.
 
-**Response templates:**
+**Response templates.** Three shapes, not six. Every reply to a review thread
+is one of exactly three things — *the code changed*, *the code is not
+changing*, or *you asked something and here is the answer* — and a reply that
+fits none of them is a reply you have not finished thinking about. Near-identical
+templates that differ only in how much prose follows invite picking by feel; one
+shape per outcome holds under load. Optional lines stay optional: drop the
+explanation when the diff is self-evident.
 
-**Simple fix:**
-```
-Fixed — see [{path}#L{line}](https://github.com/{owner}/{repo}/blob/{sha}/{path}#L{line})
-```
-
-**With explanation:**
+**1 — Changed.** One location or many; the explanation line is optional.
 ```
 Fixed — [{path}#L{start}-L{end}](https://github.com/{owner}/{repo}/blob/{sha}/{path}#L{start}-L{end})
 
-[Brief explanation of what was changed and why]
+[Optional: one line on what changed and why, when the diff alone doesn't say it]
 ```
-
-**Multiple locations:**
 ```
 Fixed in {sha_short}:
 - [{path1}#L{line}](permalink1) — [what changed here]
 - [{path2}#L{line}](permalink2) — [what changed here]
 ```
 
-**Design question:**
+**2 — Not changing.** Covers a deliberate decline and a pre-existing issue; the
+only difference is whether a ticket carries it forward, so say which.
+```
+Keeping as-is — [reasoning].
+
+Current code: [{path}#L{line}](permalink)
+[Evidence or reference supporting the decision]
+```
+```
+This is pre-existing behavior — see [{path}#L{line}](permalink). Filed {ticket} to address separately.
+[Why fixing it here would expand scope beyond this PR]
+```
+
+**3 — Answering.** A design question or a clarification, where the deliverable
+is reasoning rather than a diff.
 ```
 [Thoughtful explanation with context]
 
@@ -662,19 +675,13 @@ Technical rationale: [...]
 Trade-offs considered: [...]
 ```
 
-**Intentional non-change:**
-```
-Keeping as-is — [reasoning].
-
-Current code: [{path}#L{line}](permalink)
-[Evidence or reference supporting the decision]
-```
-
-**Pre-existing issue acknowledged:**
-```
-This is pre-existing behavior — see [{path}#L{line}](permalink). Filed {ticket} to address separately.
-[Why fixing it here would expand scope beyond this PR]
-```
+**Refusal condition — a template is a gate, not a mould.** If you cannot build
+the permalink for shapes 1 or 2, **the reply is not posted**. Fall back to the
+file-level link per Step 3; if even the file is uncertain, you have not located
+the fix you are claiming to have made, and saying "fixed" is an assertion you
+cannot back. Surface it as unresolved instead and say what you could not find.
+A reply whose evidence link is wrong is worse than no reply: it spends the
+author's trust and costs them a round trip to discover the claim was empty.
 
 ### S.8 Present and post
 

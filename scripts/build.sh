@@ -343,6 +343,24 @@ expand_file() {
             }
             return out
         }
+        # The end marker is matched first: inside a block it is the real
+        # terminator, and the fence tracker below must not reach it first.
+        /^<!-- @include-end .* -->$/ {
+            in_block = 0
+            print
+            next
+        }
+        # Stale content inside a block is dropped wholesale, fenced code
+        # included. This rule MUST precede the fence tracker. With the tracker
+        # first, a fragment carrying a ``` block had that block matched by
+        # /^```/ and printed outside the skip path, so it was re-emitted after
+        # the fresh replacement: `expand` stopped being idempotent and
+        # `check-includes` reported drift on a file expanded seconds earlier.
+        # Latent until the first fragment with a code block existed. Skipping
+        # without toggling in_fence is correct — the replacement is printed,
+        # never parsed, so fence state either side of the block is untouched.
+        in_block { next }
+
         # Track fenced code blocks so directives inside examples are ignored.
         /^```/ {
             in_fence = !in_fence
@@ -363,12 +381,7 @@ expand_file() {
             in_block = 1
             next
         }
-        /^<!-- @include-end .* -->$/ {
-            in_block = 0
-            print
-            next
-        }
-        !in_block { print }
+        { print }
     ' "$file" > "$tmp" || awk_status=$?
     # A failed read must not be mistaken for drift. Without this the missing
     # fragment surfaces as "@include block out of date", which sends the reader
