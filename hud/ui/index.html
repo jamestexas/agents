@@ -514,11 +514,22 @@
         font-weight: 400;
         color: var(--muted);
       }
+      /* A body scrolls inside its panel rather than pushing the next panel
+         off the column: the heading stays put and the aside stays a stack of
+         panels, not one long one. The three that grow without bound get more
+         of the viewport than the inventories. */
       .panel > .body {
         padding: 11px;
         color: var(--muted);
         font-family: var(--mono);
         font-size: 12px;
+        max-height: 30vh;
+        overflow: auto;
+      }
+      #wrap-digest > .body,
+      #wrap-sessions > .body,
+      #wrap-reviews > .body {
+        max-height: 38vh;
       }
 
       /* One row per board item / peer / digest line. Everything is a link out:
@@ -663,10 +674,12 @@
       }
 
       /* ---- reviews panel: one run per row, running rows lead ---- */
-      /* Ten columns in a 340px aside: the table scrolls sideways rather than
-         wrapping, so a row stays a row. */
+      /* Fourteen columns in a 340px aside: the table scrolls sideways rather
+         than wrapping, so a row stays a row. The panel body is the scroller
+         on both axes, so the sideways bar is always at the panel's foot. */
       .reviews {
-        overflow-x: auto;
+        width: max-content;
+        min-width: 100%;
       }
       .reviews table {
         border-collapse: collapse;
@@ -734,6 +747,25 @@
       .reviews .findings.hot {
         color: var(--hot);
       }
+      /* Who is waiting on whom. A thread waiting on the reader is the one
+         cell in the row that asks for action, so it is the one that is lit. */
+      .reviews .threads.awaiting {
+        color: var(--hot);
+        font-weight: 600;
+      }
+      .reviews .mine .behind {
+        color: var(--yellow);
+        margin-left: 3px;
+      }
+      .reviews .rs-approved {
+        color: var(--green);
+      }
+      .reviews .rs-changes_requested {
+        color: var(--hot);
+      }
+      .reviews .rs-commented {
+        color: var(--yellow);
+      }
       .reviews a.notelink {
         color: var(--cyan);
       }
@@ -776,9 +808,15 @@
       </div>
 
       <!-- One panel per dynamic source, each hidden until its route answers
-           with something to show. A new source needs a block here plus a
-           `renderPanel(id, env, build)` call in the script below. -->
+           with something to show. Document order is display order: reviews
+           lead because a run in flight is what the reader checks on. A new
+           source needs a block here plus a `renderPanel(id, env, build)` call
+           in the script below. -->
       <aside>
+        <div class="panel" id="wrap-reviews" data-source="reviews" hidden>
+          <h2>Reviews<span class="stamp" id="stamp-reviews"></span></h2>
+          <div class="body" id="panel-reviews"></div>
+        </div>
         <div class="panel" id="wrap-board" data-source="board" hidden>
           <h2>My PRs<span class="stamp" id="stamp-board"></span></h2>
           <div class="body" id="panel-board"></div>
@@ -790,10 +828,6 @@
         <div class="panel" id="wrap-digest" data-source="digest" hidden>
           <h2>Recent activity<span class="stamp" id="stamp-digest"></span></h2>
           <div class="body" id="panel-digest"></div>
-        </div>
-        <div class="panel" id="wrap-reviews" data-source="reviews" hidden>
-          <h2>Reviews<span class="stamp" id="stamp-reviews"></span></h2>
-          <div class="body" id="panel-reviews"></div>
         </div>
         <div class="panel" id="wrap-sessions" data-source="sessions" hidden>
           <h2>Sessions<span class="stamp" id="stamp-sessions"></span></h2>
@@ -2083,7 +2117,7 @@
         if (r.unreadable) {
           tr.className = "unreadable";
           cell(tr, "unreadable", "warn", r.error || "");
-          cell(tr, r.path, "path").colSpan = 9;
+          cell(tr, r.path, "path").colSpan = REVIEW_COLUMNS.length - 1;
           return tr;
         }
         if (r.running) tr.className = "running";
@@ -2103,6 +2137,7 @@
           (r.running ? "running for " : "took ") + fmtElapsed(r.elapsed_s),
         );
         cell(tr, r.verdict, "verdict v-" + String(r.verdict || "none").toLowerCase());
+        reviewStateCells(tr, r.review_state);
         cell(tr, gatesNode(r.gates), "gates");
         const p = r.probes && typeof r.probes === "object" ? r.probes : null;
         cell(
@@ -2134,17 +2169,82 @@
         return tr;
       }
 
+      /** Short for a review state: APPROVED → A, COMMENTED → C, CHANGES_REQUESTED → R. */
+      const STATE_LETTER = { APPROVED: "A", COMMENTED: "C", CHANGES_REQUESTED: "R" };
+
+      /** "login STATE" per reviewer, one per line, for a tooltip. */
+      function reviewerList(list) {
+        return list
+          .map((h) => {
+            const found = typeof h.findings === "number" ? " · " + h.findings + " findings" : "";
+            return h.login + (h.state ? " " + h.state : "") + found;
+          })
+          .join("\n");
+      }
+
+      /**
+       * The four who-waits-on-whom cells: mine, humans, bots, threads. Without
+       * the block every one is a dash; the state file predates it, and a dash
+       * says "not recorded" where a zero would say "nobody".
+       */
+      function reviewStateCells(tr, rs) {
+        if (!rs || typeof rs !== "object") {
+          for (const k of ["mine", "humans", "bots", "threads"]) cell(tr, undefined, k);
+          return;
+        }
+        const mine = rs.mine && typeof rs.mine === "object" ? rs.mine : null;
+        if (mine && mine.state) {
+          const span = node("span", "rs-" + mine.state.toLowerCase(), mine.state.toLowerCase());
+          if (mine.head_matches === false) {
+            const mark = node("span", "behind", "†");
+            mark.title = "my review predates the current head";
+            span.appendChild(mark);
+          }
+          cell(tr, span, "mine", mine.at ? "reviewed " + fmtTime(mine.at) : "");
+        } else {
+          cell(tr, undefined, "mine", mine && mine.at ? fmtTime(mine.at) : "");
+        }
+        const humans = Array.isArray(rs.humans) ? rs.humans : null;
+        if (humans) {
+          const count = { A: 0, C: 0, R: 0 };
+          for (const h of humans) if (STATE_LETTER[h.state]) count[STATE_LETTER[h.state]]++;
+          cell(tr, "A" + count.A + " C" + count.C + " R" + count.R, "humans", reviewerList(humans));
+        } else cell(tr, undefined, "humans");
+        const bots = Array.isArray(rs.bots) ? rs.bots : null;
+        if (bots) {
+          const found = bots.filter((b) => typeof b.findings === "number");
+          const sum = found.reduce((acc, b) => acc + b.findings, 0);
+          cell(tr, bots.length + (found.length ? " · " + sum + "f" : ""), "bots", reviewerList(bots));
+        } else cell(tr, undefined, "bots");
+        const th = rs.threads && typeof rs.threads === "object" ? rs.threads : null;
+        if (th) {
+          const n = (k) => (typeof th[k] === "number" ? th[k] : DASH);
+          cell(
+            tr,
+            n("unresolved") + " · me " + n("awaiting_me") + " · author " + n("awaiting_author"),
+            "threads" + (th.awaiting_me > 0 ? " awaiting" : ""),
+            "threads: " + n("total") + " total, " + n("unresolved") + " unresolved, " +
+              n("awaiting_me") + " awaiting me, " + n("awaiting_author") + " awaiting the author",
+          );
+        } else cell(tr, undefined, "threads");
+      }
+
+      /** [column id, heading, tooltip]; the id is the class every cell in that column carries. */
       const REVIEW_COLUMNS = [
-        ["PR", "the pull request, linked"],
-        ["project", "the project directory the run wrote into"],
-        ["mode", "default, light, deep, or engage"],
-        ["phase", "where the run is; while it runs, with its elapsed time"],
-        ["verdict", "APPROVE, REQUEST_CHANGES, or COMMENT once settled"],
-        ["gates", "ledger · triage · blocking"],
-        ["unavail", "probes that could not run"],
-        ["B/N/Q/O", "findings: blocking / non-blocking / question / observation"],
-        ["note", "the run's note, in the tree"],
-        ["posted", "the review as posted, linked"],
+        ["pr", "PR", "the pull request, linked"],
+        ["project", "project", "the project directory the run wrote into"],
+        ["mode", "mode", "default, light, deep, or engage"],
+        ["phase", "phase", "where the run is; while it runs, with its elapsed time"],
+        ["verdict", "verdict", "APPROVE, REQUEST_CHANGES, or COMMENT once settled"],
+        ["mine", "mine", "my own review of this PR; † marks one that predates the current head"],
+        ["humans", "humans", "human reviews: approved / commented / changes requested"],
+        ["bots", "bots", "bot reviews, and the findings they reported"],
+        ["threads", "threads", "unresolved review threads · awaiting me · awaiting the author"],
+        ["gates", "gates", "ledger · triage · blocking"],
+        ["unavail", "unavail", "probes that could not run"],
+        ["findings", "B/N/Q/O", "findings: blocking / non-blocking / question / observation"],
+        ["note", "note", "the run's note, in the tree"],
+        ["posted", "posted", "the review as posted, linked"],
       ];
 
       function buildReviews(env) {
@@ -2153,8 +2253,9 @@
         const wrap = node("div", "reviews");
         const table = document.createElement("table");
         const head = document.createElement("tr");
-        for (const [label, title] of REVIEW_COLUMNS) {
+        for (const [id, label, title] of REVIEW_COLUMNS) {
           const th = node("th", null, label);
+          th.dataset.col = id;
           th.title = title;
           head.appendChild(th);
         }

@@ -1686,6 +1686,58 @@ const REVIEW_FIELDS = [
   "posted",
 ];
 
+/**
+ * `review_state` — who has reviewed and who is waited on — is the one block
+ * the panel reads below the top level, so it is copied field by field too.
+ * A value that is not the shape named here is dropped, not passed along:
+ * this is the only place the page's trust in the file is decided.
+ */
+const REVIEW_STATES = new Set(["APPROVED", "COMMENTED", "CHANGES_REQUESTED"]);
+const THREAD_COUNTS = ["total", "unresolved", "awaiting_me", "awaiting_author"];
+
+const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+const strOrNull = (v) => (typeof v === "string" ? v : null);
+const intOrNull = (v) => (Number.isInteger(v) ? v : null);
+
+/** One reviewer entry: a string `login` and `state`, an ISO `at`; bots add `findings`. */
+function reviewer(v, withFindings) {
+  if (!isObject(v) || typeof v.login !== "string" || v.login === "") return null;
+  const out = { login: v.login, state: strOrNull(v.state), at: strOrNull(v.at) };
+  if (withFindings) out.findings = intOrNull(v.findings);
+  return out;
+}
+
+function reviewers(v, withFindings) {
+  if (!Array.isArray(v)) return undefined;
+  return v.map((e) => reviewer(e, withFindings)).filter(Boolean);
+}
+
+/** The block the panel may see, or undefined when the file carries none worth showing. */
+function sanitizeReviewState(v) {
+  if (!isObject(v)) return undefined;
+  const out = {};
+  if (v.authorship === "own" || v.authorship === "peer") out.authorship = v.authorship;
+  if (isObject(v.mine)) {
+    out.mine = {
+      state: REVIEW_STATES.has(v.mine.state) ? v.mine.state : null,
+      at: strOrNull(v.mine.at),
+      head_matches: typeof v.mine.head_matches === "boolean" ? v.mine.head_matches : null,
+    };
+  }
+  const humans = reviewers(v.humans, false);
+  if (humans) out.humans = humans;
+  const bots = reviewers(v.bots, true);
+  if (bots) out.bots = bots;
+  if (isObject(v.threads)) {
+    out.threads = {};
+    for (const k of THREAD_COUNTS) {
+      const n = intOrNull(v.threads[k]);
+      if (n !== null) out.threads[k] = n;
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 /** `https://github.com/<repo>/pull/<pr>`, or null when either half is not what it claims. */
@@ -1746,6 +1798,8 @@ function readReviewState(root, rel, project, now) {
   }
   const item = { ...base };
   for (const k of REVIEW_FIELDS) if (state[k] !== undefined) item[k] = state[k];
+  const rs = sanitizeReviewState(state.review_state);
+  if (rs) item.review_state = rs;
   // The contract spells a run that has not finished as `ended: null`.
   item.running = item.ended == null;
   item.elapsed_s = elapsedSeconds(item.started, item.ended, now);

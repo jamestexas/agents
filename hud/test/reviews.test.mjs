@@ -113,6 +113,31 @@ const finished = {
     state: "APPROVED",
     at: "2026-10-27T10:31:00.000Z",
   },
+  review_state: {
+    authorship: "peer",
+    mine: { state: "APPROVED", at: "2026-10-27T10:31:00.000Z", head_matches: false, extra: EXTRA_CANARY },
+    humans: [
+      { login: "reviewer-one", state: "APPROVED", at: "2026-10-27T09:00:00.000Z", extra: EXTRA_CANARY },
+      { login: "reviewer-two", state: "COMMENTED", at: "2026-10-27T09:30:00.000Z" },
+      "not an object",
+      { state: "APPROVED", at: "2026-10-27T09:40:00.000Z" },
+    ],
+    bots: [{ login: "bot-one", state: "COMMENTED", findings: 3, at: "2026-10-27T09:10:00.000Z" }],
+    threads: { total: 4, unresolved: 2, awaiting_me: 1, awaiting_author: 1, extra: EXTRA_CANARY },
+    extra: EXTRA_CANARY,
+  },
+};
+
+/** What the server serves of the block above: every named field, nothing else. */
+const REVIEW_STATE_SERVED = {
+  authorship: "peer",
+  mine: { state: "APPROVED", at: "2026-10-27T10:31:00.000Z", head_matches: false },
+  humans: [
+    { login: "reviewer-one", state: "APPROVED", at: "2026-10-27T09:00:00.000Z" },
+    { login: "reviewer-two", state: "COMMENTED", at: "2026-10-27T09:30:00.000Z" },
+  ],
+  bots: [{ login: "bot-one", state: "COMMENTED", at: "2026-10-27T09:10:00.000Z", findings: 3 }],
+  threads: { total: 4, unresolved: 2, awaiting_me: 1, awaiting_author: 1 },
 };
 
 /**
@@ -211,6 +236,12 @@ test("api reviews serves runs running-first with the derived fields", async (t) 
   assert.equal(done.note_url, "/n/projects/example-two/notes/PR-7-finished");
   assert.deepEqual(done.posted, finished.posted);
   assert.equal(done.verdict, "APPROVE");
+  // `review_state` is passed through whole, field by field: an unknown key at
+  // any depth, and a reviewer entry that is not an object with a login, are
+  // dropped on the way.
+  assert.deepEqual(done.review_state, REVIEW_STATE_SERVED);
+  // A state file without the block serves no block — not an empty one.
+  assert.equal(run.review_state, undefined);
 
   // The unreadable file is a row that says so, with the path, and nothing
   // pretending to be state.
@@ -353,6 +384,43 @@ test("derived links are refused when the state cannot back them", (t) => {
   assert.equal(four.elapsed_s, null);
 });
 
+test("review_state is kept only in the shape the panel reads", (t) => {
+  const at = { started: "2026-10-27T10:00:00.000Z", ended: "2026-10-27T10:00:05.000Z" };
+  const root = fixture(t, "hud-reviews-state-", {
+    // Not an object at all: dropped.
+    "projects/p/raw/PR-1/state.json": JSON.stringify({ ...at, review_state: ["APPROVED"] }),
+    // Every field the wrong type: each one is nulled or dropped, and a block
+    // left with nothing in it is no block.
+    "projects/p/raw/PR-2/state.json": JSON.stringify({
+      ...at,
+      review_state: { authorship: "theirs", humans: "none", bots: 3, threads: "two", mine: "APPROVED" },
+    }),
+    // Mixed: a state outside the vocabulary, a non-integer count, a bot with
+    // no findings number.
+    "projects/p/raw/PR-3/state.json": JSON.stringify({
+      ...at,
+      review_state: {
+        authorship: "own",
+        mine: { state: "DISMISSED", at: null, head_matches: "yes" },
+        humans: [],
+        bots: [{ login: "bot-two", state: "COMMENTED", findings: "many", at: "2026-10-27T09:10:00.000Z" }],
+        threads: { total: 1, unresolved: 0.5, awaiting_me: 0, awaiting_author: "1" },
+      },
+    }),
+  });
+  const byPath = new Map(listReviews(root).items.map((i) => [i.path, i]));
+
+  assert.equal(byPath.get("projects/p/raw/PR-1/state.json").review_state, undefined);
+  assert.equal(byPath.get("projects/p/raw/PR-2/state.json").review_state, undefined);
+  assert.deepEqual(byPath.get("projects/p/raw/PR-3/state.json").review_state, {
+    authorship: "own",
+    mine: { state: null, at: null, head_matches: null },
+    humans: [],
+    bots: [{ login: "bot-two", state: "COMMENTED", at: "2026-10-27T09:10:00.000Z", findings: null }],
+    threads: { total: 1, awaiting_me: 0 },
+  });
+});
+
 test("the glob subset matches within a segment only", () => {
   const ok = parseReviewsGlob("projects/*/raw/PR-*/state.json");
   assert.equal(ok.error, undefined);
@@ -388,6 +456,37 @@ test("reviews panel is wired and only links", () => {
   }
   assert.match(html, /<h2>Reviews<span/, "the panel is titled Reviews");
 
+  // Reviews is the first panel in the aside: a run in flight is what the
+  // reader checks on, so it sits above the board and the activity feed.
+  const aside = html.slice(html.indexOf("<aside>"), html.indexOf("</aside>"));
+  const firstPanel = aside.indexOf('class="panel"');
+  assert.ok(firstPanel !== -1, "the aside holds panels");
+  assert.equal(
+    aside.slice(firstPanel, aside.indexOf(">", firstPanel)).includes('id="wrap-reviews"'),
+    true,
+    "reviews is the first panel in the aside",
+  );
+  for (const id of ["wrap-board", "wrap-digest", "wrap-sessions", "wrap-loadout", "wrap-peers"]) {
+    assert.ok(aside.indexOf(`id="${id}"`) > aside.indexOf('id="wrap-reviews"'), `${id} comes after reviews`);
+  }
+
+  // Panel bodies scroll inside the panel rather than growing the column; the
+  // heading is outside the body, so it stays visible while the body scrolls.
+  const bodyAt = html.indexOf(".panel > .body {");
+  const bodyRule = html.slice(bodyAt, html.indexOf("}", bodyAt));
+  assert.match(bodyRule, /max-height:\s*\d+vh/, "every panel body has a viewport-relative cap");
+  assert.match(bodyRule, /overflow:\s*auto/, "and scrolls within it");
+  assert.match(
+    html,
+    /#wrap-reviews > \.body \{\s*max-height:\s*\d+vh/,
+    "the reviews body is sized separately",
+  );
+  assert.match(
+    html,
+    /<h2>Reviews<span[^]*?<div class="body" id="panel-reviews">/,
+    "the heading sits outside the scrolling body",
+  );
+
   // Definition, ⟳, first paint. Fewer means a path that never renders it.
   assert.equal(
     (html.match(/loadReviews/g) || []).length,
@@ -401,6 +500,16 @@ test("reviews panel is wired and only links", () => {
   const block = html.slice(start, end);
 
   assert.match(block, /function buildReviews\b/, "the block still builds the panel");
+  // The four who-waits-on-whom columns are declared, by id, after verdict.
+  const columnsAt = block.indexOf("const REVIEW_COLUMNS");
+  const columns = block.slice(columnsAt, block.indexOf("];", columnsAt));
+  const ids = [...columns.matchAll(/\["([a-z]+)",/g)].map((m) => m[1]);
+  const verdictAt = ids.indexOf("verdict");
+  assert.ok(verdictAt !== -1, "verdict is a column");
+  assert.deepEqual(ids.slice(verdictAt + 1, verdictAt + 5), ["mine", "humans", "bots", "threads"]);
+  assert.match(block, /function reviewStateCells\b/, "the block renders the review_state block");
+  assert.match(block, /head_matches === false/, "a review behind the head is marked");
+  assert.match(block, /awaiting_me > 0/, "a thread waiting on the reader is highlighted");
   assert.match(block, /\.running\b/, "running rows are distinguished");
   assert.match(block, /unreadable/, "unreadable rows are rendered");
   assert.ok(!/fetch\s*\(/.test(block), "the panel makes no request of its own");

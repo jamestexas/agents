@@ -109,6 +109,17 @@ file's fields plus four the server derives: `project`, `elapsed_s` (now minus
 note's path, `.md` dropped — the same rule a tree click applies). Running
 rows sort first, then newest `started` first.
 
+A state file may also carry a `review_state` block — who has reviewed the PR
+and who is waited on — and it is the one nested object the server copies
+field by field rather than whole: `authorship` (`own` or `peer`), `mine`
+(`state`, `at`, `head_matches`), `humans` and `bots` (arrays of `{login,
+state, at}`, bots adding an integer `findings`), and `threads` (`total`,
+`unresolved`, `awaiting_me`, `awaiting_author`). A field of the wrong shape
+is dropped, an entry without a string `login` is dropped, and a key the list
+does not name never reaches the page. The panel renders it as four columns
+after `verdict` — mine, humans, bots, threads — each `—` when the file has no
+block.
+
 A file the glob names that is **not a JSON object** is still a row:
 `unreadable: true`, the path, and the parse error. A run whose state cannot
 be read is a fact about the tree, not an absence from it, and the panel says
