@@ -91,3 +91,10 @@ test('a findings.json that is not JSON is reported as such', () => {
   assert.match(r.stdout, /blocking: work\/findings\.json is not JSON/);
   assert.doesNotMatch(r.stderr, /SyntaxError/);
 });
+
+test('an escaped pipe inside a cell is not a column break in either table', () => {
+  const r = run('escaped-pipe');
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /ledger: 3 asked, 3 decided\+unresolved — ok/);
+  assert.match(r.stdout, /triage: 2 in, 2 out — ok/);
+});

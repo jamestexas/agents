@@ -127,13 +127,22 @@ match `owners.json`/`packs.json`. Each reader gets `prompts/reader.md` with
 `{{ROWS}}` = its rows verbatim and `{{READER}}` = a short id. Readers run
 concurrently and write `work/decisions/<id>.md` and `work/claims/<id>.jsonl`.
 
-Afterwards, merge: fill each ledger row's **Decision** from the decisions
-files (a row answered twice keeps both, flagged `conflict`), concatenate
-claims into `work/claims.jsonl`, and collect into `work/candidates.md`, in
-row order, every `→ candidate:` line whose text after the colon is not
-empty, `none`, or `n/a` (case-insensitive). A settled-clean row carries no
-clause, so those three are reader slips, not candidates; refute and triage
-count only what is in `work/candidates.md`.
+Afterwards, merge by script, never by hand:
+
+```bash
+node $SKILL/scripts/merge-decisions.mjs <run>
+```
+
+It fills each ledger row's **Decision** from `work/decisions/*.md` (a row
+answered twice keeps both, prefixed `conflict:`; a row nobody answered
+stays empty so gate 1 names it), keeps the phase-2 ledger as
+`work/ledger.phase2.bak`, concatenates claims into `work/claims.jsonl`, and
+collects into `work/candidates.md`, in row order, every `→ candidate:`
+clause whose text is not empty, `none`, or `n/a` (case-insensitive). A
+settled-clean row carries no clause, so those three are reader slips, not
+candidates; refute and triage count only what is in `work/candidates.md`.
+Read its three count lines; resolve a `conflict:` row yourself from the two
+cited files before phase 4, and rewrite that cell.
 
 ## Phase 4 — Refute (one sub-agent, fresh)
 

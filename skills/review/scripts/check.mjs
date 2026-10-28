@@ -14,6 +14,7 @@
 //                finding to a Question)
 import fs from 'node:fs';
 import path from 'node:path';
+import { splitCells } from './cells.mjs';
 
 const run = process.argv[2];
 if (!run) { console.error('usage: check.mjs <run-dir>'); process.exit(2); }
@@ -22,7 +23,7 @@ const read = (f) => fs.existsSync(work(f)) ? fs.readFileSync(work(f), 'utf8') : 
 const tryJSON = (text) => { try { return JSON.parse(text); } catch { return undefined; } };
 
 const isRow = (l) => /^\|\s*\d+\s*\|/.test(l);
-const cells = (l) => l.split('|').slice(1, -1).map((c) => c.trim());
+const cells = splitCells; // `\|` inside a cell is a pipe, not a column break
 // Every numbered table row in a document.
 const tableRows = (md) => md.split('\n').filter(isRow).map(cells);
 // Numbered rows of the first table after the line matching `header`: skip to
