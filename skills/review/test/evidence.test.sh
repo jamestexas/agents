@@ -70,13 +70,22 @@ jq -e '.kind == "path" and .base == "main" and .head == "feature"' "$out/evidenc
 for f in owners.json packs.json manifest.sha256; do [ -f "$out/evidence/$f" ] || { echo "missing $f: run aborted early"; exit 1; }; done
 jq -e '.matched | map(.name) | index("docs-only") | not' "$out/evidence/packs.json" >/dev/null || { echo "docs-only must not match a mixed change"; exit 1; }
 [ "$(st multi/two)" = RAN ]          || { echo "multi-line probe: got $(st multi/two)"; exit 1; }
-grep -q '^one$' "$out/evidence/probes/multi/two.out" && grep -q '^two$' "$out/evidence/probes/multi/two.out" || { echo "multi-line probe must run both lines"; exit 1; }
+{ grep -q '^one$' "$out/evidence/probes/multi/two.out" && grep -q '^two$' "$out/evidence/probes/multi/two.out"; } || { echo "multi-line probe must run both lines"; exit 1; }
 jq -e '[.probes[]|select(.name|startswith("multi/"))]|length == 1' "$m" >/dev/null || { echo "block scalar must be one probe, not one per line"; exit 1; }
 jq -e '.matched | map(.name) | index("bare")' "$out/evidence/packs.json" >/dev/null || { echo "bare pack should match"; exit 1; }
 # the manifest hash must be stable across runs of the same target
 out2="$tmp/run2"
 HUD_ROOT="$hud" PATH="$bin" bash "$HERE/../scripts/review-evidence.sh" --path "$repo" --base main --head feature --out "$out2" 2>/dev/null
 cmp -s "$out/evidence/manifest.sha256" "$out2/evidence/manifest.sha256" || { echo "manifest.sha256 differs across identical runs: $(cat "$out/evidence/manifest.sha256") vs $(cat "$out2/evidence/manifest.sha256")"; exit 1; }
+# an UNAVAILABLE probe carries the reason a reader needs, not just the status
+reason() { jq -r --arg n "$1" '.probes[] | select(.name==$n) | .reason' "$m"; }
+[[ "$(reason core/pr-context)" == *"no PR in path mode"* ]]  || { echo "pr-context reason: got '$(reason core/pr-context)'"; exit 1; }
+[[ "$(reason go-graph/build)" == *"missing binary: go"* ]]  || { echo "go-graph/build reason: got '$(reason go-graph/build)'"; exit 1; }
+# packs.json records which glob hit which file
+jq -e '.matched[] | select(.name=="go-graph") | .by[0] | (.glob|length>0) and (.file|length>0)' "$out/evidence/packs.json" >/dev/null || { echo "go-graph .by[0] must carry glob and file"; exit 1; }
+# manifest.sha256 is recomputable from the manifest minus timestamps
+want="$(jq -S 'del(.probes[].started, .probes[].ended)' "$m" | shasum -a 256 | cut -d' ' -f1)"
+[ "$(cat "$out/evidence/manifest.sha256")" = "$want" ] || { echo "manifest.sha256 does not match a recompute"; exit 1; }
 # every probe has exactly one status from the allowed set
 jq -e '[.probes[].status] | all(. == "RAN" or . == "FAILED" or . == "UNAVAILABLE")' "$m" >/dev/null || { echo "bad status"; exit 1; }
 # replay line present
@@ -88,3 +97,7 @@ cd "$repo"
 PATH="$bin" bash "$HERE/../scripts/review-evidence.sh" --path . --base main --head feature --out rel/run 2>/dev/null
 jq -e '(.repo_dir|startswith("/")) and (.worktree|startswith("/"))' "$repo/rel/run/evidence/target.json" >/dev/null || { echo "relative args must resolve to absolute paths: $(jq -c . "$repo/rel/run/evidence/target.json")"; exit 1; }
 [ "$(jq -r '.probes[]|select(.name=="go-graph/build")|.status' "$repo/rel/run/evidence/manifest.json")" = UNAVAILABLE ] || { echo "relative run: go-graph/build must be UNAVAILABLE"; exit 1; }
+
+# --cleanup on a path-mode run must leave the user's repo alone
+bash "$HERE/../scripts/review-evidence.sh" --cleanup "$out" 2>/dev/null
+[ -d "$repo/.git" ] && [ -f "$repo/mod/a/a.go" ] || { echo "cleanup in path mode must not touch the repo dir"; exit 1; }
