@@ -2,6 +2,12 @@
 # Copy to $HUD_ROOT/review-packs.yaml (per person) or
 # <repo>/.claude/review-packs.yaml (per repo) and fill the env vars in your
 # shell profile. Nothing here names an organization.
+#
+# Trust boundary: a repo-level file is read from the reviewer's trusted
+# checkout at the BASE ref (`git show "$BASE:.claude/review-packs.yaml"`),
+# never from the PR worktree. The PR author controls the worktree and these
+# probes run with the reviewer's credentials (gh, gcloud), so a pack taken
+# from the PR would run the author's commands as the reviewer.
 packs:
   deploy:
     question: "Is the PR's base commit included in the latest successful staging and production deploys?"

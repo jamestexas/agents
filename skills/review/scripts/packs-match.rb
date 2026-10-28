@@ -14,7 +14,8 @@ packs = {}
 ARGV.each do |f|
   doc = YAML.safe_load(File.read(f)) || {}
   (doc['packs'] || {}).each do |name, body|
-    packs[name] = (body || {}).merge('name' => name, 'source' => f)
+    abort "#{f}: pack #{name} is not a map" unless body.is_a?(Hash)
+    packs[name] = body.merge('name' => name, 'source' => f)
   end
 end
 files = $stdin.read.split("\n").map(&:strip).reject(&:empty?)
