@@ -28,6 +28,16 @@ jq -e '.matched[] | select(.name=="go-graph") | .by[0] | .glob == "**/*.go" and 
 printf '%s\n' README.md docs/a.md | match "$HERE/../packs.yaml" > "$tmp/b.json"
 jq -e '.matched | map(.name) == ["docs-only"]' "$tmp/b.json" >/dev/null || { echo "docs-only should be the only match"; cat "$tmp/b.json"; exit 1; }
 
+# only: a mixed change is not docs-only, even though one file is markdown
+printf '%s\n' README.md api/x.go | match "$HERE/../packs.yaml" > "$tmp/d.json"
+jq -e '.matched | map(.name) | index("docs-only") | not' "$tmp/d.json" >/dev/null || { echo "docs-only must not match a mixed change"; cat "$tmp/d.json"; exit 1; }
+jq -e '.matched | map(.name) | index("go-graph")' "$tmp/d.json" >/dev/null || { echo "go-graph should still match the mixed change"; exit 1; }
+
+# a pack body that is not a map is refused, not silently treated as empty
+printf 'packs:\n  broken: "just a string"\n' > "$tmp/bad.yaml"
+if printf 'x.go\n' | match "$tmp/bad.yaml" >/dev/null 2>"$tmp/bad.err"; then echo "non-map pack must abort"; exit 1; fi
+grep -q "pack broken is not a map" "$tmp/bad.err" || { echo "abort message missing: $(cat "$tmp/bad.err")"; exit 1; }
+
 # site file adds a pack and overrides a probe map by name; later file wins per pack
 printf '%s\n' env/prod/main.tf api/x.go | match "$HERE/../packs.yaml" "$tmp/site.yaml" > "$tmp/c.json"
 jq -e '.matched | map(.name) | index("deploy")' "$tmp/c.json" >/dev/null || { echo "site pack should load"; exit 1; }
