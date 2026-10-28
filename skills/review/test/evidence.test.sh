@@ -17,6 +17,9 @@ echo "# readme" > README.md
 git add -A && git commit -qm base
 git checkout -qb feature
 printf 'package a\n\nfunc A() int { return 2 }\n' > mod/a/a.go
+# zz.md sorts after mod/a/a.go and has no go.mod above it: the modules loop
+# must not abort the run when the last changed file is outside a Go module.
+echo zz > zz.md; git add zz.md
 git commit -qam change
 git checkout -q main && echo more >> README.md && git commit -qam "main moved"
 git checkout -q feature
@@ -43,7 +46,9 @@ grep -q 'return 2' "$out/evidence/git/diff.patch"                 || { echo "dif
 jq -e '.paths["mod/a/a.go"].owners == ["@org/mod"]' "$out/evidence/owners.json" >/dev/null || { echo "owners resolution"; exit 1; }
 jq -e '.matched | map(.name) | index("go-graph")' "$out/evidence/packs.json" >/dev/null || { echo "go-graph pack should match"; exit 1; }
 jq -e '.kind == "path" and .base == "main" and .head == "feature"' "$out/evidence/target.json" >/dev/null || { echo "target.json"; exit 1; }
-grep -qx 'mod/a' "$out/evidence/git/modules"                       || { echo "modules list"; exit 1; }
+[ "$(cat "$out/evidence/git/modules")" = 'mod/a' ]                 || { echo "modules list want exactly mod/a, got: $(cat "$out/evidence/git/modules")"; exit 1; }
+for f in owners.json packs.json manifest.sha256; do [ -f "$out/evidence/$f" ] || { echo "missing $f: run aborted early"; exit 1; }; done
+jq -e '.matched | map(.name) | index("docs-only") | not' "$out/evidence/packs.json" >/dev/null || { echo "docs-only must not match a mixed change"; exit 1; }
 # every probe has exactly one status from the allowed set
 jq -e '[.probes[].status] | all(. == "RAN" or . == "FAILED" or . == "UNAVAILABLE")' "$m" >/dev/null || { echo "bad status"; exit 1; }
 # replay line present

@@ -53,7 +53,8 @@ if [ -n "$CLEANUP" ]; then
     [ -f "$ev/git/worktree-path" ] && wt="$(cat "$ev/git/worktree-path")"
     [ -f "$ev/git/repo-dir" ] && rd="$(cat "$ev/git/repo-dir")"
     if [ "$kind" = pr ] && [ -n "$wt" ] && [ "$wt" != "$rd" ] && [ -d "$wt" ]; then
-        git -C "$rd" worktree remove --force "$wt" && note "removed worktree $wt"
+        git -C "$rd" worktree remove --force "$wt" || die "could not remove worktree $wt"
+        note "removed worktree $wt"
     else
         note "no worktree to remove for $CLEANUP (kind=${kind:-?}, worktree=${wt:-none})"
     fi
@@ -128,7 +129,9 @@ probe core commits     -- git -C "$REPO_DIR" log --format='%H %cI %s' "$MB..$HEA
 while read -r f; do
     d="$(dirname "$f")"
     while [ "$d" != "." ] && [ ! -f "$WT/$d/go.mod" ]; do d="$(dirname "$d")"; done
-    [ -f "$WT/$d/go.mod" ] && echo "$d"
+    # an if, not `&&`: a bare test as the loop's last command would make the
+    # pipeline fail under pipefail when the last file is outside any module
+    if [ -f "$WT/$d/go.mod" ]; then echo "$d"; fi
 done < "$OUTDIR/git/files" | sort -u > "$OUTDIR/git/modules"
 
 # ---- owners ---------------------------------------------------------------
