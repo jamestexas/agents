@@ -9,10 +9,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 
-import { DEFAULT_REVIEWS_GLOB, createServer, listReviews, parseReviewsGlob } from "../server.mjs";
+import {
+  DEFAULT_REVIEWS_GLOB,
+  createServer,
+  joinReviews,
+  listReviews,
+  parseReviewsGlob,
+} from "../server.mjs";
 
 const UI_DIR = path.join(import.meta.dirname, "..", "ui");
 
@@ -44,6 +51,26 @@ async function serve(t, root) {
     get: (p) => fetch(base + p, { cache: "no-store" }),
     verb: (method, p) => fetch(base + p, { method, cache: "no-store" }),
   };
+}
+
+/** A stub board upstream answering every path with `body` as JSON. */
+async function boardUpstream(t, body) {
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(body));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  return `http://127.0.0.1:${server.address().port}/api/board`;
+}
+
+/** A URL nothing is listening on: bind an ephemeral port, then release it. */
+async function deadUrl() {
+  const probe = http.createServer(() => {});
+  await new Promise((resolve) => probe.listen(0, "127.0.0.1", resolve));
+  const { port } = probe.address();
+  await new Promise((resolve) => probe.close(resolve));
+  return `http://127.0.0.1:${port}/api/board`;
 }
 
 /** Sorted `relpath\0size` census, to prove a request changed nothing on disk. */
@@ -454,7 +481,7 @@ test("reviews panel is wired and only links", () => {
   for (const id of ["wrap-reviews", "panel-reviews", "stamp-reviews"]) {
     assert.ok(html.includes(`id="${id}"`), `the shell declares ${id}`);
   }
-  assert.match(html, /<h2>Reviews<span/, "the panel is titled Reviews");
+  assert.match(html, /<h2>Review runs<span class="sub">in flight or not yet posted<\/span><span/, "the panel is titled Review runs, with its subtitle");
 
   // Reviews is the first panel in the aside: a run in flight is what the
   // reader checks on, so it sits above the board and the activity feed.
@@ -483,7 +510,7 @@ test("reviews panel is wired and only links", () => {
   );
   assert.match(
     html,
-    /<h2>Reviews<span[^]*?<div class="body" id="panel-reviews">/,
+    /<h2>Review runs<span[^]*?<div class="body" id="panel-reviews">/,
     "the heading sits outside the scrolling body",
   );
 
@@ -526,4 +553,264 @@ test("reviews panel is wired and only links", () => {
   const loader = html.slice(html.indexOf("async function loadReviews"), html.indexOf("async function refreshAll"));
   assert.match(loader, /res\.status === 404/);
   assert.match(loader, /noteSource\("reviews", "absent"/);
+  assert.match(loader, /\/api\/reviews\?scope=open/, "the panel shows runs in flight or not yet posted");
+});
+
+// ------------------------------------------------- joined onto the board
+//
+// A board row and a run name the same PR. With both sources on, the board
+// row carries the run's answer; the board's own contract — passthrough,
+// snapshot, degradation — is otherwise untouched.
+
+/** A board as the upstream sends it: three PRs and one issue, mixed shapes. */
+const board = {
+  generated_at: "2026-10-27T11:00:00.000Z",
+  items: [
+    // Named by repo + number: the finished, posted run.
+    {
+      kind: "pr",
+      repo: "owner/repo",
+      number: 7,
+      title: "feat(example): finished and posted",
+      state: "active",
+      reason: "approved",
+      url: "https://github.com/owner/repo/pull/7",
+    },
+    // Named by URL only: the running run.
+    {
+      number: 101,
+      title: "fix(example): still running",
+      state: "needs_you",
+      reason: "changes requested",
+      url: "https://github.com/owner/repo/pull/101/files?diff=unified",
+    },
+    // A PR no run has seen.
+    {
+      kind: "pr",
+      repo: "owner/repo",
+      number: 55,
+      title: "chore(example): never reviewed",
+      state: "opened",
+      reason: "",
+      url: "https://github.com/owner/repo/pull/55",
+    },
+    // An issue sharing a run's number: not a PR, so not joined.
+    {
+      kind: "issue",
+      repo: "owner/repo",
+      number: 7,
+      title: "bug report",
+      state: "active",
+      reason: "",
+      url: "https://github.com/owner/repo/issues/7",
+    },
+  ],
+};
+
+/** Exactly what the finished run contributes to its board row, key for key. */
+const REVIEW_OF_FINISHED = {
+  phase: "posted",
+  verdict: "APPROVE",
+  gates: finished.gates,
+  probes: { unavailable: 0 },
+  findings: finished.findings,
+  note_url: "/n/projects/example-two/notes/PR-7-finished",
+  posted: finished.posted,
+  review_state: REVIEW_STATE_SERVED,
+  running: false,
+  elapsed_s: 31 * 60 + 30,
+};
+
+test("board rows carry their latest review run when both sources are on", async (t) => {
+  const hudRoot = reviewsFixture(t);
+  writeConfig(hudRoot, { board: { url: await boardUpstream(t, board) }, reviews: {} });
+  const hud = await serve(t, hudRoot);
+
+  const res = await hud.get("/api/dyn/board");
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.source, "board");
+  assert.equal(body.stale, false);
+
+  const [posted, running, unseen, issue] = body.data.items;
+  assert.deepEqual(posted.review, REVIEW_OF_FINISHED, "the whitelisted shape, nothing else");
+  assert.deepEqual(Object.keys(posted.review).sort(), [
+    "elapsed_s", "findings", "gates", "note_url", "phase", "posted", "probes", "review_state", "running", "verdict",
+  ]);
+  // The row's own fields are untouched by the join.
+  assert.deepEqual({ ...posted, review: undefined }, { ...board.items[0], review: undefined });
+
+  // Keyed from the URL alone, path tail and query ignored.
+  assert.equal(running.review.running, true);
+  assert.equal(running.review.phase, "refute");
+  assert.equal(running.review.verdict, null);
+  assert.equal(running.review.posted, null);
+  assert.equal(running.review.review_state, null, "a run without the block says so with null");
+  assert.deepEqual(running.review.probes, { unavailable: 1 });
+  assert.equal(running.review.note_url, "/n/projects/example-one/notes/PR-101-still-running");
+  assert.ok(Number.isInteger(running.review.elapsed_s) && running.review.elapsed_s >= RUNNING_FOR_S - 2);
+
+  assert.equal("review" in unseen, false, "a PR with no run has no review key, not a null one");
+  assert.equal("review" in issue, false, "an issue is never joined, whatever its number");
+  assert.equal(body.data.generated_at, board.generated_at, "the envelope around the rows is kept");
+
+  // The snapshot is the upstream's own bytes: the join is never cached.
+  const snap = JSON.parse(fs.readFileSync(path.join(hudRoot, ".generated", "board.json"), "utf8"));
+  assert.deepEqual(snap.data, board);
+  assert.ok(!JSON.stringify(snap).includes("note_url"));
+});
+
+test("a board without a reviews source is passed through unchanged", async (t) => {
+  const hudRoot = reviewsFixture(t);
+  writeConfig(hudRoot, { board: { url: await boardUpstream(t, board) } });
+  const hud = await serve(t, hudRoot);
+  const body = await (await hud.get("/api/dyn/board")).json();
+  assert.deepEqual(body.data, board);
+});
+
+test("an unreachable board is not joined: stale snapshot or 503, as before", async (t) => {
+  const hudRoot = reviewsFixture(t);
+  writeConfig(hudRoot, { board: { url: await deadUrl() }, reviews: {} });
+  const hud = await serve(t, hudRoot);
+
+  // No snapshot: the 503 the ladder always gave.
+  const down = await hud.get("/api/dyn/board");
+  assert.equal(down.status, 503);
+  const downBody = await down.json();
+  assert.equal(downBody.source, "board");
+  assert.equal(downBody.data, undefined);
+
+  // A snapshot holding a row a run would match: served stale, and the row
+  // comes back exactly as cached — no review on it.
+  const cached = { items: [board.items[0]] };
+  fs.mkdirSync(path.join(hudRoot, ".generated"), { recursive: true });
+  fs.writeFileSync(
+    path.join(hudRoot, ".generated", "board.json"),
+    JSON.stringify({ cached_at: "2026-10-27T09:00:00.000Z", data: cached }),
+  );
+  const stale = await hud.get("/api/dyn/board");
+  assert.equal(stale.status, 200);
+  const staleBody = await stale.json();
+  assert.equal(staleBody.stale, true);
+  assert.deepEqual(staleBody.data, cached);
+  assert.equal("review" in staleBody.data.items[0], false);
+});
+
+test("a reviews fault leaves a live board as the upstream sent it", async (t) => {
+  const hudRoot = reviewsFixture(t);
+  // A glob the walker refuses: /api/reviews is a 503, and the board is still
+  // a 200 with no join rather than a fault of its own.
+  writeConfig(hudRoot, { board: { url: await boardUpstream(t, board) }, reviews: { glob: "../x/*.json" } });
+  const hud = await serve(t, hudRoot);
+  assert.equal((await hud.get("/api/reviews")).status, 503);
+  const res = await hud.get("/api/dyn/board");
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.stale, false);
+  assert.deepEqual(body.data, board);
+});
+
+test("joinReviews keys on repo+number, else a GitHub pull URL, in any accepted payload shape", (t) => {
+  const root = reviewsFixture(t);
+  const runs = listReviews(root).items;
+  const rows = [
+    { repo: "owner/repo", number: 7 },
+    { url: "https://github.com/owner/repo/pull/7" },
+    { url: "http://github.com/owner/repo/pull/7" },
+    { url: "https://example.invalid/owner/repo/pull/7" },
+    { url: "https://github.com/owner/repo/pull/7x" },
+    { url: "https://github.com/owner/repo/issues/7" },
+    { repo: "owner/repo", number: "7" },
+    { repo: "https://github.com/owner/repo", number: 7 },
+    { kind: "event", title: "stand-up" },
+    "not a row",
+    null,
+  ];
+  const joined = joinReviews(rows, runs);
+  assert.deepEqual(
+    joined.map((r) => Boolean(r && r.review)),
+    [true, true, false, false, false, false, true, false, false, false, false],
+  );
+  assert.notEqual(joined, rows, "a new array, not the upstream's mutated");
+  assert.equal("review" in rows[0], false);
+
+  // The two wrapper keys the page accepts, and a payload that is neither.
+  assert.deepEqual(Object.keys(joinReviews({ prs: rows.slice(0, 1), x: 1 }, runs)), ["prs", "x"]);
+  assert.equal(joinReviews({ prs: rows.slice(0, 1) }, runs).prs[0].review.verdict, "APPROVE");
+  assert.equal(joinReviews({ items: rows.slice(0, 1) }, runs).items[0].review.verdict, "APPROVE");
+  const odd = { rows: rows.slice(0, 1) };
+  assert.equal(joinReviews(odd, runs), odd, "an unknown shape is returned as is");
+  assert.equal(joinReviews("junk", runs), "junk");
+  assert.equal(joinReviews(rows, []), rows, "no runs means no copy either");
+});
+
+test("the latest run per PR wins the join", (t) => {
+  const older = { ...finished, started: "2026-10-26T10:00:00.000Z", ended: "2026-10-26T10:10:00.000Z", verdict: "COMMENT" };
+  const root = fixture(t, "hud-reviews-latest-", {
+    "projects/a/raw/PR-7/state.json": JSON.stringify(older),
+    "projects/b/raw/PR-7/state.json": JSON.stringify(finished),
+    "projects/c/raw/PR-7/state.json": "not json",
+  });
+  const [row] = joinReviews([{ repo: "owner/repo", number: 7 }], listReviews(root).items);
+  assert.equal(row.review.verdict, "APPROVE", "newest started wins over an older run of the same PR");
+});
+
+// ------------------------------------------------------------------ scope
+
+test("?scope=open keeps runs in flight or not yet posted; all keeps every run", async (t) => {
+  const hudRoot = reviewsFixture(t);
+  // A finished run that never posted stays open; a finished, posted one does not.
+  fs.mkdirSync(path.join(hudRoot, "projects/example-two/raw/PR-8"), { recursive: true });
+  fs.writeFileSync(
+    path.join(hudRoot, "projects/example-two/raw/PR-8/state.json"),
+    JSON.stringify({ ...finished, pr: 8, posted: null, started: "2026-10-27T12:00:00.000Z", ended: "2026-10-27T12:05:00.000Z" }),
+  );
+  writeConfig(hudRoot, { reviews: {} });
+  const hud = await serve(t, hudRoot);
+
+  const open = await (await hud.get("/api/reviews?scope=open")).json();
+  assert.equal(open.scope, "open");
+  assert.equal(open.count, 3);
+  assert.equal(open.truncated, false);
+  assert.deepEqual(paths(open), [
+    "projects/example-one/raw/PR-101/state.json",
+    "projects/example-two/raw/PR-8/state.json",
+    "projects/example-one/raw/PR-9/state.json",
+  ]);
+
+  const all = await (await hud.get("/api/reviews?scope=all")).json();
+  assert.equal(all.scope, "all");
+  assert.equal(all.count, 4);
+  assert.ok(paths(all).includes("projects/example-two/raw/PR-7/state.json"));
+
+  const bare = await (await hud.get("/api/reviews")).json();
+  assert.equal(bare.scope, "all", "no query is today's answer");
+  assert.deepEqual(paths(bare), paths(all));
+
+  const bad = await hud.get("/api/reviews?scope=posted");
+  assert.equal(bad.status, 400);
+  assert.match((await bad.json()).error, /scope must be one of/);
+});
+
+test("MY PRS declares the review columns after its own", () => {
+  const html = fs.readFileSync(path.join(UI_DIR, "index.html"), "utf8");
+  const at = html.indexOf("const BOARD_COLUMNS");
+  assert.ok(at !== -1, "the board declares its columns");
+  const columns = html.slice(at, html.indexOf("];", at));
+  const ids = [...columns.matchAll(/\["([a-z]+)",/g)].map((m) => m[1]);
+  assert.deepEqual(ids, ["pr", "title", "why", "verdict", "gates", "note", "posted", "threads"]);
+
+  const start = html.indexOf("function boardRow(");
+  const block = html.slice(start, html.indexOf("function setDial("));
+  assert.match(block, /gridNode\(BOARD_COLUMNS/, "the board is the same grid the runs are");
+  for (const fn of ["verdictCell", "gatesNode", "noteCell", "postedCell", "threadsCell"]) {
+    assert.match(block, new RegExp(`\\b${fn}\\(`), `${fn} is shared with the runs panel`);
+  }
+  assert.match(block, /item\.review/, "the cells read the joined block");
+  assert.ok(!/fetch\s*\(/.test(block), "the board makes no request of its own");
+  assert.ok(!/https?:\/\//.test(block), "no URL is hardcoded");
+  // Both tables share one style, so a verdict reads the same in each.
+  assert.match(html, /function gridNode\(/);
+  assert.match(html, /node\("div", "prgrid"\)/);
+  assert.ok(!/\.reviews\s*\{/.test(html), "the old reviews-only table style is gone");
 });

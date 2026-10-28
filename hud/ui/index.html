@@ -514,6 +514,13 @@
         font-weight: 400;
         color: var(--muted);
       }
+      /* A subtitle says what the panel leaves out, in the heading's own line. */
+      .panel > h2 .sub {
+        letter-spacing: 0;
+        text-transform: none;
+        font-weight: 400;
+        color: var(--muted);
+      }
       /* A body scrolls inside its panel rather than pushing the next panel
          off the column: the heading stays put and the aside stays a stack of
          panels, not one long one. The three that grow without bound get more
@@ -673,20 +680,22 @@
         word-break: break-all;
       }
 
-      /* ---- reviews panel: one run per row, running rows lead ---- */
-      /* Fourteen columns in a 340px aside: the table scrolls sideways rather
+      /* ---- PR grids: the board and the review runs, one PR per row ---- */
+      /* Many columns in a 340px aside: the table scrolls sideways rather
          than wrapping, so a row stays a row. The panel body is the scroller
-         on both axes, so the sideways bar is always at the panel's foot. */
-      .reviews {
+         on both axes, so the sideways bar is always at the panel's foot.
+         One style for both tables, because the five review columns are
+         the same cells in each and must read the same. */
+      .prgrid {
         width: max-content;
         min-width: 100%;
       }
-      .reviews table {
+      .prgrid table {
         border-collapse: collapse;
         white-space: nowrap;
         font-size: 11px;
       }
-      .reviews th {
+      .prgrid th {
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.06em;
@@ -695,78 +704,86 @@
         padding: 0 8px 4px 0;
         border-bottom: 1px solid var(--card);
       }
-      .reviews td {
+      .prgrid td {
         padding: 4px 8px 4px 0;
         border-top: 1px solid var(--card);
         vertical-align: baseline;
       }
-      .reviews tbody tr:first-child td {
+      .prgrid tbody tr:first-child td {
         border-top: 0;
       }
       /* A run in flight is the row the reader came for: its left edge is lit
          and its phase takes the live colour. Finished rows keep the panel's
          muted voice. */
-      .reviews tr.running td {
+      .prgrid tr.running td {
         color: var(--fg);
       }
-      .reviews tr.running td:first-child {
+      .prgrid tr.running td:first-child {
         box-shadow: inset 3px 0 0 var(--cyan);
         padding-left: 6px;
       }
-      .reviews tr.running .phase {
+      .prgrid tr.running .phase {
         color: var(--cyan);
       }
-      .reviews tr.unreadable .warn {
+      .prgrid tr.unreadable .warn {
         color: var(--yellow);
       }
-      .reviews .path {
+      /* The board's title is the one cell allowed to wrap: it is prose, and a
+         row of prose kept on one line would push every review column out
+         of sight. */
+      .prgrid td.title {
+        white-space: normal;
+        min-width: 160px;
+        max-width: 240px;
+      }
+      .prgrid .path {
         white-space: normal;
         word-break: break-all;
       }
-      .reviews .gate {
+      .prgrid .gate {
         letter-spacing: 2px;
       }
-      .reviews .g-ok {
+      .prgrid .g-ok {
         color: var(--green);
       }
-      .reviews .g-fail {
+      .prgrid .g-fail {
         color: var(--hot);
       }
-      .reviews .g-null {
+      .prgrid .g-null {
         color: var(--muted);
       }
-      .reviews .v-approve {
+      .prgrid .v-approve {
         color: var(--green);
       }
-      .reviews .v-request_changes {
+      .prgrid .v-request_changes {
         color: var(--hot);
       }
-      .reviews .v-comment {
+      .prgrid .v-comment {
         color: var(--yellow);
       }
-      .reviews .findings.hot {
+      .prgrid .findings.hot {
         color: var(--hot);
       }
       /* Who is waiting on whom. A thread waiting on the reader is the one
          cell in the row that asks for action, so it is the one that is lit. */
-      .reviews .threads.awaiting {
+      .prgrid .threads.awaiting {
         color: var(--hot);
         font-weight: 600;
       }
-      .reviews .mine .behind {
+      .prgrid .mine .behind {
         color: var(--yellow);
         margin-left: 3px;
       }
-      .reviews .rs-approved {
+      .prgrid .rs-approved {
         color: var(--green);
       }
-      .reviews .rs-changes_requested {
+      .prgrid .rs-changes_requested {
         color: var(--hot);
       }
-      .reviews .rs-commented {
+      .prgrid .rs-commented {
         color: var(--yellow);
       }
-      .reviews a.notelink {
+      .prgrid a.notelink {
         color: var(--cyan);
       }
 
@@ -808,13 +825,13 @@
       </div>
 
       <!-- One panel per dynamic source, each hidden until its route answers
-           with something to show. Document order is display order: reviews
+           with something to show. Document order is display order: review runs
            lead because a run in flight is what the reader checks on. A new
            source needs a block here plus a `renderPanel(id, env, build)` call
            in the script below. -->
       <aside>
         <div class="panel" id="wrap-reviews" data-source="reviews" hidden>
-          <h2>Reviews<span class="stamp" id="stamp-reviews"></span></h2>
+          <h2>Review runs<span class="sub">in flight or not yet posted</span><span class="stamp" id="stamp-reviews"></span></h2>
           <div class="body" id="panel-reviews"></div>
         </div>
         <div class="panel" id="wrap-board" data-source="board" hidden>
@@ -1791,27 +1808,46 @@
         return [];
       }
 
+      /**
+       * [column id, heading, tooltip]: the board row's own facts, then the
+       * five the server joins from the PR's latest review run. Without a
+       * `review` block those five are dashes: no run, not an empty one.
+       */
+      const BOARD_COLUMNS = [
+        ["pr", "PR", "the pull request, linked"],
+        ["title", "title", "its title"],
+        ["why", "why", "why it is on the board"],
+        ["verdict", "verdict", "the latest review run's verdict"],
+        ["gates", "gates", "ledger · triage · blocking"],
+        ["note", "note", "the run's note, in the tree"],
+        ["posted", "posted", "the review as posted, linked"],
+        ["threads", "threads", "review threads awaiting me · awaiting the author"],
+      ];
+
+      function boardRow(item) {
+        const tr = document.createElement("tr");
+        const num = item.number === undefined || item.number === null ? DASH : "#" + item.number;
+        cell(tr, linkOut(item.url, num, "text"), "pr", item.repo || "");
+        cell(tr, linkOut(item.url, item.title || item.url || "(untitled)", "text"), "title");
+        const reason = item.reason || item.state;
+        cell(
+          tr,
+          reason ? node("span", item.state === "needs_you" ? "needs-you" : null, String(reason)) : undefined,
+          "why",
+        );
+        const rv = item.review && typeof item.review === "object" ? item.review : null;
+        verdictCell(tr, rv ? rv.verdict : undefined);
+        cell(tr, rv ? gatesNode(rv.gates) : undefined, "gates");
+        noteCell(tr, rv ? rv.note_url : undefined);
+        postedCell(tr, rv ? rv.posted : undefined);
+        threadsCell(tr, rv && rv.review_state ? rv.review_state.threads : undefined, true);
+        return tr;
+      }
+
       function buildBoard(env) {
         const items = boardItems(env.data);
         if (!items.length) return node("div", "empty", "nothing needs you");
-        return rowsNode(items, (item) => {
-          const li = document.createElement("li");
-          const top = node("div", "row-top");
-          if (item.number !== undefined && item.number !== null) {
-            top.appendChild(node("span", "num", "#" + item.number));
-          }
-          top.appendChild(linkOut(item.url, item.title || item.url || "(untitled)", "text"));
-          li.appendChild(top);
-          const reason = item.reason || item.state;
-          if (reason) {
-            const sub = node("div", "row-sub");
-            sub.appendChild(
-              node("span", item.state === "needs_you" ? "needs-you" : null, String(reason)),
-            );
-            li.appendChild(sub);
-          }
-          return li;
-        });
+        return gridNode(BOARD_COLUMNS, items.map(boardRow));
       }
 
       function setDial(env) {
@@ -2054,6 +2090,11 @@
       // other cell is a fact or a link — out to GitHub for the PR and the
       // posted review, into the tree for the note. Nothing here starts,
       // stops, or posts anything.
+      //
+      // The panel asks for `scope=open`: runs in flight or not yet posted.
+      // Every other run's answer already sits on its board row, joined by the
+      // server, through the same cell helpers below — so a verdict reads the
+      // same in both places.
 
       const DASH = "—";
 
@@ -2112,6 +2153,64 @@
         return a;
       }
 
+      /** A table from [id, heading, tooltip] columns and built rows; the id is each cell's class. */
+      function gridNode(columns, rows) {
+        const wrap = node("div", "prgrid");
+        const table = document.createElement("table");
+        const head = document.createElement("tr");
+        for (const [id, label, title] of columns) {
+          const th = node("th", null, label);
+          th.dataset.col = id;
+          th.title = title;
+          head.appendChild(th);
+        }
+        table.appendChild(node("thead")).appendChild(head);
+        const body = table.appendChild(node("tbody"));
+        for (const tr of rows) body.appendChild(tr);
+        wrap.appendChild(table);
+        return wrap;
+      }
+
+      // The cells a board row and a run row share. Each takes the fact, not
+      // the row, so the two tables cannot drift on what a verdict looks like.
+
+      function verdictCell(tr, verdict) {
+        cell(tr, verdict, "verdict v-" + String(verdict || "none").toLowerCase());
+      }
+
+      function noteCell(tr, url, note) {
+        cell(tr, url ? noteLink(url) : undefined, "note", note || "");
+      }
+
+      function postedCell(tr, posted) {
+        const p = posted && typeof posted === "object" ? posted : null;
+        cell(
+          tr,
+          p && p.url ? linkOut(p.url, String(p.state || "posted").toLowerCase(), "text") : undefined,
+          "posted",
+          p && p.at ? "posted " + fmtTime(p.at) : "",
+        );
+      }
+
+      /**
+       * Who the threads wait on. The run row leads with the unresolved count;
+       * the board row (`brief`) shows only me · author, the two numbers that
+       * name a person. Either way the cell is lit when a thread waits on me.
+       */
+      function threadsCell(tr, threads, brief) {
+        const th = threads && typeof threads === "object" ? threads : null;
+        if (!th) return cell(tr, undefined, "threads");
+        const n = (k) => (typeof th[k] === "number" ? th[k] : DASH);
+        const who = "me " + n("awaiting_me") + " · author " + n("awaiting_author");
+        return cell(
+          tr,
+          brief ? who : n("unresolved") + " · " + who,
+          "threads" + (th.awaiting_me > 0 ? " awaiting" : ""),
+          "threads: " + n("total") + " total, " + n("unresolved") + " unresolved, " +
+            n("awaiting_me") + " awaiting me, " + n("awaiting_author") + " awaiting the author",
+        );
+      }
+
       function reviewRow(r) {
         const tr = document.createElement("tr");
         if (r.unreadable) {
@@ -2136,7 +2235,7 @@
           "phase",
           (r.running ? "running for " : "took ") + fmtElapsed(r.elapsed_s),
         );
-        cell(tr, r.verdict, "verdict v-" + String(r.verdict || "none").toLowerCase());
+        verdictCell(tr, r.verdict);
         reviewStateCells(tr, r.review_state);
         cell(tr, gatesNode(r.gates), "gates");
         const p = r.probes && typeof r.probes === "object" ? r.probes : null;
@@ -2156,16 +2255,8 @@
           "findings" + (f && f.blocking > 0 ? " hot" : ""),
           "findings: blocking / non-blocking / question / observation",
         );
-        cell(tr, r.note_url ? noteLink(r.note_url) : undefined, "note", r.note || "");
-        const posted = r.posted && typeof r.posted === "object" ? r.posted : null;
-        cell(
-          tr,
-          posted && posted.url
-            ? linkOut(posted.url, String(posted.state || "posted").toLowerCase(), "text")
-            : undefined,
-          "posted",
-          posted && posted.at ? "posted " + fmtTime(posted.at) : "",
-        );
+        noteCell(tr, r.note_url, r.note);
+        postedCell(tr, r.posted);
         return tr;
       }
 
@@ -2216,17 +2307,7 @@
           const sum = found.reduce((acc, b) => acc + b.findings, 0);
           cell(tr, bots.length + (found.length ? " · " + sum + "f" : ""), "bots", reviewerList(bots));
         } else cell(tr, undefined, "bots");
-        const th = rs.threads && typeof rs.threads === "object" ? rs.threads : null;
-        if (th) {
-          const n = (k) => (typeof th[k] === "number" ? th[k] : DASH);
-          cell(
-            tr,
-            n("unresolved") + " · me " + n("awaiting_me") + " · author " + n("awaiting_author"),
-            "threads" + (th.awaiting_me > 0 ? " awaiting" : ""),
-            "threads: " + n("total") + " total, " + n("unresolved") + " unresolved, " +
-              n("awaiting_me") + " awaiting me, " + n("awaiting_author") + " awaiting the author",
-          );
-        } else cell(tr, undefined, "threads");
+        threadsCell(tr, rs.threads, false);
       }
 
       /** [column id, heading, tooltip]; the id is the class every cell in that column carries. */
@@ -2249,20 +2330,14 @@
 
       function buildReviews(env) {
         const items = Array.isArray(env.items) ? env.items : [];
-        if (!items.length) return node("div", "empty", "no review runs recorded");
-        const wrap = node("div", "reviews");
-        const table = document.createElement("table");
-        const head = document.createElement("tr");
-        for (const [id, label, title] of REVIEW_COLUMNS) {
-          const th = node("th", null, label);
-          th.dataset.col = id;
-          th.title = title;
-          head.appendChild(th);
+        if (!items.length) {
+          return node(
+            "div",
+            "empty",
+            env.scope === "open" ? "no run in flight or waiting to post" : "no review runs recorded",
+          );
         }
-        table.appendChild(node("thead")).appendChild(head);
-        const body = table.appendChild(node("tbody"));
-        for (const r of items) body.appendChild(reviewRow(r));
-        wrap.appendChild(table);
+        const wrap = gridNode(REVIEW_COLUMNS, items.map(reviewRow));
         if (env.truncated) wrap.appendChild(node("div", "row-sub greyed", "older runs not shown"));
         const running = items.filter((r) => r.running && !r.unreadable).length;
         wrap.appendChild(
@@ -2498,7 +2573,7 @@
       async function loadReviews() {
         let env = null;
         try {
-          const res = await fetch("/api/reviews", { cache: "no-store" });
+          const res = await fetch("/api/reviews?scope=open", { cache: "no-store" });
           const body = await res.json().catch(() => null);
           if (res.ok && body && Array.isArray(body.items)) {
             env = body;

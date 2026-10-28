@@ -13,8 +13,10 @@
 //   sessions — /api/sessions               (read `~/.claude`, graft via lectio)
 //   loadout  — /api/loadout                (what skills/agents are installed,
 //                                           where from, and where that drifts)
-//   reviews  — /api/reviews                (each review run's state.json,
-//                                           read out of the content tree)
+//   reviews  — /api/reviews[?scope=open]   (each review run's state.json,
+//                                           read out of the content tree; and,
+//                                           when the board is on too, joined
+//                                           onto each board row as `review`)
 //
 // Plus the shell routes: /, /ui/*, and the deep links /n/<path> and
 // /s/<group>/<id>, which all serve ui/index.html so a bookmarked view loads
@@ -1841,43 +1843,168 @@ export function listReviews(root, opts = {}) {
 }
 
 /**
+ * How the reviews source is configured, read once for both routes that need
+ * it: null when the table is absent, `{error}` when its glob cannot be
+ * honoured, else the root and glob to walk.
+ */
+function reviewsSource(cfg, root) {
+  const source = sourceOf(cfg, "reviews");
+  if (!source) return null;
+  const reviewsRoot =
+    typeof source.root === "string" && source.root !== "" ? expandHome(source.root) : root;
+  const glob =
+    typeof source.glob === "string" && source.glob !== "" ? source.glob : DEFAULT_REVIEWS_GLOB;
+  const parsed = parseReviewsGlob(glob);
+  if (parsed.error) return { error: `reviews.glob in ${CONFIG_TOML}: ${parsed.error}` };
+  return { root: reviewsRoot, glob };
+}
+
+/**
+ * `open` is what the runs panel shows once the board carries each PR's latest
+ * run: a run still going, or one that has not posted — the rows the board
+ * cannot stand in for. A row whose state could not be read has no `posted`
+ * and stays in view, as it does under `all`. `all` is every run, the panel's
+ * original answer.
+ */
+const REVIEW_SCOPES = new Set(["open", "all"]);
+
+function inReviewScope(item, scope) {
+  if (scope === "all") return true;
+  return item.running === true || item.posted == null;
+}
+
+/**
  * Not configured ⇒ 404, the panel-off contract sessions and loadout use: there
  * is no snapshot tier, so "unconfigured" and "down" are not two states worth
  * telling apart. A glob the walker cannot honour is the one way this source
  * can be configured and still unable to answer, and that is a 503 with the
- * reason, not a quiet 404 — a typo in `hud.toml` should read as a fault.
+ * reason, not a quiet 404 — a typo in `hud.toml` should read as a fault. So
+ * is a `scope` outside the vocabulary: 400, not a silent fall-back to `all`.
  */
-function serveReviews(res, root) {
-  const source = sourceOf(loadConfig(root), "reviews");
+function serveReviews(res, root, url) {
+  const source = reviewsSource(loadConfig(root), root);
   if (!source) {
     return sendJson(res, 404, {
       source: "reviews",
       error: `reviews is not configured in ${CONFIG_TOML}`,
     });
   }
-  const reviewsRoot =
-    typeof source.root === "string" && source.root !== "" ? expandHome(source.root) : root;
-  const glob =
-    typeof source.glob === "string" && source.glob !== "" ? source.glob : DEFAULT_REVIEWS_GLOB;
-  const parsed = parseReviewsGlob(glob);
-  if (parsed.error) {
-    return sendJson(res, 503, {
+  if (source.error) return sendJson(res, 503, { source: "reviews", error: source.error });
+  const scope = url.searchParams.get("scope") ?? "all";
+  if (!REVIEW_SCOPES.has(scope)) {
+    return sendJson(res, 400, {
       source: "reviews",
-      error: `reviews.glob in ${CONFIG_TOML}: ${parsed.error}`,
+      error: `scope must be one of ${[...REVIEW_SCOPES].join(", ")}`,
     });
   }
-  const { items, truncated } = listReviews(reviewsRoot, { glob });
-  const shown = items.slice(0, REVIEWS_LIMITS.maxReviews);
+  const { items, truncated } = listReviews(source.root, { glob: source.glob });
+  const kept = items.filter((item) => inReviewScope(item, scope));
+  const shown = kept.slice(0, REVIEWS_LIMITS.maxReviews);
   return sendJson(res, 200, {
     source: "reviews",
     stale: false,
     generated_at: new Date().toISOString(),
-    root: reviewsRoot,
-    glob,
+    root: source.root,
+    glob: source.glob,
+    scope,
     count: shown.length,
-    truncated: truncated || shown.length < items.length,
+    truncated: truncated || shown.length < kept.length,
     items: shown,
   });
+}
+
+// ----------------------------------------------- reviews joined onto the board
+//
+// The board and the review runs are two lists keyed on the same pull request.
+// Served apart, one PR appears twice with two answers to "who is waiting"; so
+// when both sources are on, a board row carries its latest run under one key,
+// `review`, and the runs panel keeps only what the board cannot show. This is
+// a stopgap join, not a card model: a declarative card schema replaces it.
+
+const GITHUB_PR_PATH_RE = /^\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/(\d+)(?:\/|$)/;
+
+/**
+ * The key a board row and a run meet on: the PR's canonical URL, the same
+ * string `pr_url` already carries on the run. A row naming `repo` and
+ * `number` is keyed directly; one carrying only a GitHub `url` is read for
+ * the same three parts; a row that says it is not a PR, or has neither, has
+ * no key and is never joined.
+ */
+function boardRowKey(row) {
+  if (!isObject(row)) return null;
+  if (typeof row.kind === "string" && row.kind !== "pr") return null;
+  const direct = prUrl(row.repo, row.number);
+  if (direct) return direct;
+  if (typeof row.url !== "string") return null;
+  let u;
+  try {
+    u = new URL(row.url);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "https:" || u.hostname !== "github.com") return null;
+  const m = GITHUB_PR_PATH_RE.exec(u.pathname);
+  return m ? prUrl(`${m[1]}/${m[2]}`, Number(m[3])) : null;
+}
+
+/**
+ * What a board row is told about its run, copied by name. The run row is the
+ * full contract; the board's columns are the subset that answers "where is
+ * the review and who is waiting", and naming it here keeps the board from
+ * growing a second, untested view of the state file. Every key is present,
+ * null when the run has nothing for it, so the shape is fixed.
+ */
+function reviewForBoard(item) {
+  const probes = isObject(item.probes) ? item.probes : null;
+  return {
+    phase: strOrNull(item.phase),
+    verdict: strOrNull(item.verdict),
+    gates: isObject(item.gates) ? item.gates : null,
+    probes: { unavailable: probes ? intOrNull(probes.unavailable) : null },
+    findings: isObject(item.findings) ? item.findings : null,
+    note_url: item.note_url ?? null,
+    posted: isObject(item.posted) ? item.posted : null,
+    review_state: item.review_state ?? null,
+    running: item.running === true,
+    elapsed_s: intOrNull(item.elapsed_s),
+  };
+}
+
+/** The latest run per PR. Runs arrive running-first, newest-first, so the first seen wins. */
+function latestRunByPr(runs) {
+  const byPr = new Map();
+  for (const item of runs) {
+    if (item.unreadable || !item.pr_url) continue;
+    if (!byPr.has(item.pr_url)) byPr.set(item.pr_url, item);
+  }
+  return byPr;
+}
+
+/**
+ * The board payload with `review` on each row whose PR has a run. The payload
+ * keeps whatever shape the upstream sent — an array, or an object holding one
+ * under `items` or `prs`, the same three the page accepts — and any other
+ * shape comes back untouched. A row with no run comes back as it came: no
+ * `review` key, not a null one.
+ *
+ * @param {unknown} data the upstream board payload
+ * @param {object[]} runs `listReviews().items`
+ */
+export function joinReviews(data, runs) {
+  const byPr = latestRunByPr(runs);
+  if (!byPr.size) return data;
+  const join = (rows) =>
+    rows.map((row) => {
+      const key = boardRowKey(row);
+      const run = key ? byPr.get(key) : undefined;
+      return run ? { ...row, review: reviewForBoard(run) } : row;
+    });
+  if (Array.isArray(data)) return join(data);
+  if (!isObject(data)) return data;
+  for (const k of ["items", "prs"]) {
+    if (Array.isArray(data[k])) return { ...data, [k]: join(data[k]) };
+  }
+  return data;
 }
 
 // -------------------------------------------------------------- deep links
@@ -2111,7 +2238,7 @@ function handle(req, res, root, uiDir, dyn, refresh) {
   if (pathname === "/api/loadout") return serveLoadout(res, root);
   // Reviews reads the content tree and nothing else: one GET route, no POST
   // case above, so every mutating verb lands on the 405 arm.
-  if (pathname === "/api/reviews") return serveReviews(res, root);
+  if (pathname === "/api/reviews") return serveReviews(res, root, url);
   // Matched against the raw target rather than `url.pathname`: the URL parser
   // folds `..` away, and a traversal attempt must be refused outright rather
   // than quietly rewritten into whichever route it normalises to.
@@ -2128,8 +2255,12 @@ function handle(req, res, root, uiDir, dyn, refresh) {
  * (`stale:true`) ⇒ 503 with a JSON body. `data` carries the upstream payload
  * verbatim; `stale` and `cached_at` are the envelope, so the client can tell
  * "now" from "as of" without the server reinterpreting anyone's schema.
+ *
+ * `decorate`, when given, is applied to a live payload after the snapshot is
+ * written and never to a snapshot: what is cached is the upstream's own
+ * bytes, and what is joined onto them is read fresh or not at all.
  */
-async function serveSource(res, root, name, source, produce) {
+async function serveSource(res, root, name, source, produce, decorate) {
   if (!source) {
     // Not configured ⇒ the source does not exist ⇒ the panel does not exist.
     // Deliberately not served from a snapshot: `sources` is the switchboard.
@@ -2138,7 +2269,8 @@ async function serveSource(res, root, name, source, produce) {
   try {
     const data = await produce();
     const { cached_at } = writeSnapshot(root, name, data);
-    return sendJson(res, 200, { source: name, stale: false, cached_at, data });
+    const served = decorate ? decorate(data) : data;
+    return sendJson(res, 200, { source: name, stale: false, cached_at, data: served });
   } catch (err) {
     const snap = readSnapshot(root, name);
     if (snap) {
@@ -2155,10 +2287,30 @@ async function serveSource(res, root, name, source, produce) {
 }
 
 function serveBoard(res, root, dyn) {
-  const source = sourceOf(loadConfig(root), "board");
+  const cfg = loadConfig(root);
+  const source = sourceOf(cfg, "board");
   const url = source && typeof source.url === "string" ? source.url : null;
-  return serveSource(res, root, "board", url ? source : null, () =>
-    fetchBoard(url, dyn.httpTimeoutMs),
+  // With both sources on, each board row carries its latest review run. The
+  // join is best effort: a reviews tree that cannot be read leaves the board
+  // as the upstream sent it rather than turning a board answer into a fault.
+  const reviews = reviewsSource(cfg, root);
+  const decorate =
+    reviews && !reviews.error
+      ? (data) => {
+          try {
+            return joinReviews(data, listReviews(reviews.root, { glob: reviews.glob }).items);
+          } catch {
+            return data;
+          }
+        }
+      : undefined;
+  return serveSource(
+    res,
+    root,
+    "board",
+    url ? source : null,
+    () => fetchBoard(url, dyn.httpTimeoutMs),
+    decorate,
   );
 }
 

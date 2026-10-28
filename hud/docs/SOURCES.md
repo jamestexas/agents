@@ -131,6 +131,24 @@ nothing — not a snapshot, not a cache. The budgets are the same shape as the
 other filesystem panels: at most 200 rows served, at most 2000 files looked
 at, and a state file larger than 256 KiB treated as unreadable.
 
+**Joined into MY PRS when both sources are present.** A board row and a
+review run name the same pull request, so with `[sources.board]` and
+`[sources.reviews]` both on, `/api/dyn/board` attaches each row's latest run
+under one key, `review`, holding `phase`, `verdict`, `gates`,
+`probes.unavailable`, `findings`, `note_url`, `posted`, `review_state`,
+`running` and `elapsed_s` — nothing else from the state file. Rows meet runs
+on the PR's canonical URL: a row carrying `repo` and `number` is keyed
+directly, one carrying only a GitHub `url` is read for the same parts, and a
+row that is not a PR, or has a PR no run has seen, comes back without a
+`review` key at all. The join is applied to a **live** board only and never
+to the snapshot, which stays the upstream's own bytes; a board that is down
+degrades exactly as before, and a reviews tree that cannot be read leaves
+the board as the upstream sent it. The runs panel then asks for
+`/api/reviews?scope=open` — runs still running or whose `posted` is null,
+the ones no board row can stand in for — and is titled **REVIEW RUNS**;
+`?scope=all` (the default with no query) is every run, as before, and any
+other value is a **400**.
+
 ## Top level
 
 | Key | Type | Read by |
