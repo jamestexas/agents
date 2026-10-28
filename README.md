@@ -26,7 +26,7 @@ rest are the library those eight call.
 
 | You want to | Type | It calls |
 |---|---|---|
-| Review a PR (incl. one you have no context on) | `/structural-pr-review <pr>` | `pr-context.sh`, `pr-review-kit`, `DIMENSIONS`, `finding-triage`, `explain-work` |
+| Review a PR (incl. one you have no context on) | `/review <pr>` | `review-evidence.sh`, `finding-triage`, `explain-work`, `check.mjs`; `/structural-pr-review` remains the structural slice |
 | Know what's waiting on you | `/pr-board` | lectio, `gh` |
 | Review several PRs at once | `/review-queue` | one isolated `/structural-pr-review` per PR |
 | Build a feature or fix | `/implement <task>` | `problem-decomposer`, `feature-impl`, TDD, `self-audit`, `test-fidelity`, `structural-pr-review` |
@@ -135,6 +135,7 @@ It links three things, not two: `agents/` and `skills/` into `~/.claude/`, and t
 | [`repo-topic-tagger`](skills/repo-topic-tagger/SKILL.md) | pre-approved | Audit and apply GitHub topic tags for discoverability — proposes tags from code signals, deduplicates against current tags, applies via gh api after explicit approval. |
 | [`review-prep`](skills/review-prep/SKILL.md) | pre-approved | Synthesize a PR's spec-driven diagram, emergent diagram, and impact analysis into reviewer context: what's proposed vs. |
 | [`review-queue`](skills/review-queue/SKILL.md) | prompts | Fan out isolated, one-per-PR reviews across your queue (own context + worktree per PR, no cross-pollution), then synthesize one report. |
+| [`review`](skills/review/SKILL.md) | pre-approved | One-command PR review built for checking LLM-produced work: a deterministic evidence script runs first (gh, git, CODEOWNERS, modmap, build/vet, site probes) and records RAN/FAILED/UNAVAILABLE per probe; a questions pass writes a decision ledger with "settled by" before any answer; isolated readers settle rows from the evidence directory alone; a fresh-context refute pass attacks every candidate; finding-triage gates significance; explain-work teaches; three arithmetic checks decide whether the one HUD artifact is postable. |
 | [`self-audit`](skills/self-audit/SKILL.md) | pre-approved | Pre-review self-audit of a PR branch: dead struct fields, rotting comments, duplicate types, scope drift — what a human catches but a compiler won't — then dispatches an adversarial agent for deeper design flaws. |
 | [`structural-pr-review`](skills/structural-pr-review/SKILL.md) | pre-approved | Deterministic PR-review chain with pluggable structural intelligence. |
 | [`survey`](skills/survey/SKILL.md) | prompts | Multi-perspective codebase survey that produces beads and mermaid diagrams from code structure. |
