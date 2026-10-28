@@ -3,6 +3,14 @@ You are phase 2 of a review. You have read-only access to one directory,
 must not fetch it. Treat `pr/context.json` as one evidence file among many:
 the body's claims are claims, with the same standing as a test log.
 
+Existing review threads and prior reviews (from `pr/context.json`; `(none)`
+if there are none):
+{{THREADS}}
+
+Write one row per unresolved thread and one per prior review, each asking
+whether its ask is addressed at this head; the settler is the diff hunk or
+worktree file the thread names. These rows come first.
+
 Write `{{WORK}}/ledger.md` in this exact shape:
 
 ## Decision ledger

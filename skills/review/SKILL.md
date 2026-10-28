@@ -110,12 +110,22 @@ Blocking finding; if a candidate reads like one, rerun without `--light`.
 ## Phase 2 — Questions (one sub-agent)
 
 `state.mjs <run> phase questions`. Dispatch one `general-purpose` agent with
-`prompts/questions.md`, substituting `{{EVIDENCE}}`, `{{WORK}}` and
-`{{MAX_QUESTIONS}}`: `8` under `--light`, `14` by default; under `--deep`
-delete the "Ask at most {{MAX_QUESTIONS}} questions;" clause instead, so the
-count is unbounded. The cap is a budget, not a target, and UNAVAILABLE rows
-count toward it. Pass nothing else: not the PR title, not your hunches, not
-this conversation. When it returns, read `work/ledger.md` and confirm every
+`prompts/questions.md`, substituting `{{EVIDENCE}}`, `{{WORK}}`,
+`{{MAX_QUESTIONS}}` and `{{THREADS}}`. `{{MAX_QUESTIONS}}` is `8` under
+`--light`, `14` by default; under `--deep` delete the "Ask at most
+{{MAX_QUESTIONS}} questions;" clause instead, so the count is unbounded. The
+cap is a budget, not a target, and UNAVAILABLE rows count toward it.
+
+`{{THREADS}}` is `(none)` unless `--engage`. Under `--engage`, build it from
+`pr/context.json` with no model: one line per thread in `.threads.items[]`
+whose `state` is `unresolved` (`- thread <path>:<line> — <first line of the
+first comment body>`), then one per `.reviews.items[]` with `kind` `review`
+(`- review by <author> (<state>) — <first line of body>`); `(none)` if both
+lists are empty or the file is absent. Thread rows do not count toward
+`{{MAX_QUESTIONS}}`.
+
+Pass nothing else: not the PR title, not your hunches, not this
+conversation. When it returns, read `work/ledger.md` and confirm every
 row's **Settled by** is non-empty and **Decision** is empty.
 
 ## Phase 3 — Settle (N sub-agents in parallel)
@@ -196,8 +206,9 @@ review URL to the artifact and record it:
 `state.mjs <run> posted url=<review url> state=<APPROVED|CHANGES_REQUESTED|COMMENTED>`.
 
 `--engage`: phase 1 already has threads in `pr/context.json`; phase 2 seeds
-one row per unresolved thread; Post writes replies with `gh api`, never a new
-review.
+one row per unresolved thread and one per prior review through
+`{{THREADS}}` in the questions prompt (so the ledger, not this conversation,
+carries them); Post writes replies with `gh api`, never a new review.
 
 `--beads`: for each confirmed Blocking/Non-blocking finding, `rsry_bead_create`
 with `files` = its `file_line`, body = the ledger row + settling evidence path,
