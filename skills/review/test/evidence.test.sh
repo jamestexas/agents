@@ -53,3 +53,10 @@ jq -e '.matched | map(.name) | index("docs-only") | not' "$out/evidence/packs.js
 jq -e '[.probes[].status] | all(. == "RAN" or . == "FAILED" or . == "UNAVAILABLE")' "$m" >/dev/null || { echo "bad status"; exit 1; }
 # replay line present
 grep -q 'review-evidence.sh --path' "$out/evidence/replay.txt"     || { echo "replay"; exit 1; }
+
+# relative --out and --path . from inside the repo must still record absolute
+# paths; a relative WORKTREE would make pack probes RAN with empty output
+cd "$repo"
+PATH="$bin" bash "$HERE/../scripts/review-evidence.sh" --path . --base main --head feature --out rel/run 2>/dev/null
+jq -e '(.repo_dir|startswith("/")) and (.worktree|startswith("/"))' "$repo/rel/run/evidence/target.json" >/dev/null || { echo "relative args must resolve to absolute paths: $(jq -c . "$repo/rel/run/evidence/target.json")"; exit 1; }
+[ "$(jq -r '.probes[]|select(.name=="go-graph/build")|.status' "$repo/rel/run/evidence/manifest.json")" = UNAVAILABLE ] || { echo "relative run: go-graph/build must be UNAVAILABLE"; exit 1; }

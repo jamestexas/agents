@@ -27,7 +27,31 @@ usage() {
     exit "${1:-0}"
 }
 
-MODE="" PR="" REPO="" REPO_DIR="" BASE="" HEAD="" RUN="" CLEANUP=""
+status_of()   { jq -r --arg n "$1" '.probes[]|select(.name==$n)|.status' "$MANIFEST"; }
+require_ran() { [ "$(status_of "$1")" = RAN ] || die "probe $1 is $(status_of "$1"), cannot continue; see $MANIFEST"; }
+
+cleanup() {
+    local run="$1" ev="$1/evidence" kind prn wt="" rd=""
+    # Only a PR run owns its worktree. In path mode the "worktree" is the
+    # user's own repo dir, which must never be removed.
+    kind="$(jq -r '.kind // ""' "$ev/target.json" 2>/dev/null || true)"
+    prn="$(jq -r '.pr // ""' "$ev/target.json" 2>/dev/null || true)"
+    [ -f "$ev/git/worktree-path" ] && wt="$(cat "$ev/git/worktree-path")"
+    [ -f "$ev/git/repo-dir" ] && rd="$(cat "$ev/git/repo-dir")"
+    if [ "$kind" = pr ] && [ -n "$wt" ] && [ "$wt" != "$rd" ] && [ -d "$wt" ]; then
+        git -C "$rd" worktree remove --force "$wt" || die "could not remove worktree $wt"
+        note "removed worktree $wt"
+    else
+        note "no worktree to remove for $run (kind=${kind:-?}, worktree=${wt:-none})"
+    fi
+    # the fetch refspec parked the PR head under refs/review/<N>; drop it too
+    if [ "$kind" = pr ] && [ -n "$prn" ] && [ -n "$rd" ] && git -C "$rd" show-ref --quiet "refs/review/$prn"; then
+        git -C "$rd" update-ref -d "refs/review/$prn" && note "deleted refs/review/$prn in $rd"
+    fi
+    exit 0
+}
+
+MODE="" PR="" REPO="" REPO_DIR="" BASE="" HEAD="" RUN=""
 ARGS=("$@")
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -37,34 +61,16 @@ while [ $# -gt 0 ]; do
         --base)     BASE="$2"; shift 2 ;;
         --head)     HEAD="$2"; shift 2 ;;
         --out)      RUN="$2"; shift 2 ;;
-        --cleanup)  CLEANUP="$2"; shift 2 ;;
+        --cleanup)  cleanup "$2" ;;
         -h|--help)  usage 0 ;;
         *) die "unknown arg $1" ;;
     esac
 done
 
-if [ -n "$CLEANUP" ]; then
-    ev="$CLEANUP/evidence"
-    # Only a PR run owns its worktree. In path mode the "worktree" is the
-    # user's own repo dir, which must never be removed.
-    kind="$(jq -r '.kind // ""' "$ev/target.json" 2>/dev/null || true)"
-    prn="$(jq -r '.pr // ""' "$ev/target.json" 2>/dev/null || true)"
-    wt=""; rd=""
-    [ -f "$ev/git/worktree-path" ] && wt="$(cat "$ev/git/worktree-path")"
-    [ -f "$ev/git/repo-dir" ] && rd="$(cat "$ev/git/repo-dir")"
-    if [ "$kind" = pr ] && [ -n "$wt" ] && [ "$wt" != "$rd" ] && [ -d "$wt" ]; then
-        git -C "$rd" worktree remove --force "$wt" || die "could not remove worktree $wt"
-        note "removed worktree $wt"
-    else
-        note "no worktree to remove for $CLEANUP (kind=${kind:-?}, worktree=${wt:-none})"
-    fi
-    # the fetch refspec parked the PR head under refs/review/<N>; drop it too
-    if [ "$kind" = pr ] && [ -n "$prn" ] && [ -n "$rd" ] && git -C "$rd" show-ref --quiet "refs/review/$prn"; then
-        git -C "$rd" update-ref -d "refs/review/$prn" && note "deleted refs/review/$prn in $rd"
-    fi
-    exit 0
-fi
 [ -n "$MODE" ] && [ -n "$RUN" ] || die "need --pr or --path, and --out"
+# absolute from here on: pack probes cd into the worktree and get these as env
+mkdir -p "$RUN"; RUN="$(cd "$RUN" && pwd)"
+REPO_DIR="${REPO_DIR:-$PWD}"; REPO_DIR="$(cd "$REPO_DIR" && pwd)" || die "no such directory: $REPO_DIR"
 
 OUTDIR="$RUN/evidence"; MANIFEST="$OUTDIR/manifest.json"
 mkdir -p "$OUTDIR/pr" "$OUTDIR/git" "$OUTDIR/probes" "$RUN/work"
@@ -74,9 +80,9 @@ printf '%q ' "$(basename "$0")" "${ARGS[@]}" > "$OUTDIR/replay.txt"; echo >> "$O
 # ---- resolve the target ---------------------------------------------------
 if [ "$MODE" = pr ]; then
     if [[ "$PR" == */*#* ]]; then REPO="${PR%%#*}"; PR="${PR##*#}"; fi
-    REPO_DIR="${REPO_DIR:-$PWD}"
     if [ -z "$REPO" ]; then
-        REPO="$(git -C "$REPO_DIR" remote get-url upstream 2>/dev/null || git -C "$REPO_DIR" remote get-url origin)"
+        REPO="$(git -C "$REPO_DIR" remote get-url upstream 2>/dev/null || git -C "$REPO_DIR" remote get-url origin 2>/dev/null)" \
+            || die "no origin/upstream remote in $REPO_DIR"
         REPO="$(echo "$REPO" | sed -E 's#\.git$##; s#.*[:/]([^/]+/[^/]+)$#\1#')"
     fi
     # one GraphQL query for the shas; REST is the fallback nobody wants at rate-limit time
@@ -88,9 +94,12 @@ if [ "$MODE" = pr ]; then
         HEAD="$(jq -r '.data.repository.pullRequest.headRefOid' "$OUTDIR/probes/core/pr-shas.out")"
         BASE_BRANCH="$(jq -r '.data.repository.pullRequest.baseRefName' "$OUTDIR/probes/core/pr-shas.out")"
         # the remote whose URL names this repo; in a fork setup that is usually `upstream`
-        REMOTE="$(git -C "$REPO_DIR" remote -v | awk -v r="$REPO" '$2 ~ r"(\\.git)?$" && $3=="(fetch)" {print $1; exit}')"
+        REMOTE="$(git -C "$REPO_DIR" remote -v | awk -v r="$REPO" '$3=="(fetch)" {
+            u=$2; sub(/\.git$/, "", u); n=length(r)
+            if (length(u) > n && substr(u, length(u)-n+1) == r && substr(u, length(u)-n, 1) ~ /[:\/]/) { print $1; exit } }')"
         [ -n "$REMOTE" ] || die "no remote in $REPO_DIR points at $REPO"
         probe core fetch -- git -C "$REPO_DIR" fetch -q "$REMOTE" "refs/pull/$PR/head:refs/review/$PR" "$BASE_BRANCH"
+        require_ran core/fetch
         BASE="$REMOTE/$BASE_BRANCH"
         TMP="${TMPDIR:-/tmp}"; WT="${REVIEW_WORKTREE_ROOT:-${TMP%/}/review-worktrees}/${REPO//\//-}-$PR"
         if [ ! -d "$WT" ]; then probe core worktree -- git -C "$REPO_DIR" worktree add -q --detach "$WT" "$HEAD"; fi
@@ -99,7 +108,7 @@ if [ "$MODE" = pr ]; then
         die "cannot resolve PR $REPO#$PR without gh; see manifest"
     fi
     probe core pr-context --needs gh -- "$AGENTS_ROOT/scripts/pr-context.sh" --pr "$REPO#$PR" --similar 3
-    cp "$OUTDIR/probes/core/pr-context.out" "$OUTDIR/pr/context.json" 2>/dev/null || true
+    if [ "$(status_of core/pr-context)" = RAN ]; then cp "$OUTDIR/probes/core/pr-context.out" "$OUTDIR/pr/context.json"; fi
     probe core pr-checks  --needs gh -- gh pr checks "$PR" --repo "$REPO" --json name,state,link,workflow
 else
     [ -n "$BASE" ] && [ -n "$HEAD" ] || die "--path needs --base and --head"
@@ -114,18 +123,18 @@ jq -n --arg kind "$MODE" --arg repo "$REPO" --arg pr "$PR" --arg base "$BASE" --
    '{kind:$kind, repo:$repo, pr:$pr, base:$base, head:$head, worktree:$worktree, repo_dir:$repo_dir}' > "$OUTDIR/target.json"
 
 # ---- git facts ------------------------------------------------------------
-git -C "$REPO_DIR" merge-base "$BASE" "$HEAD" > "$OUTDIR/git/merge-base"
+probe core merge-base  -- git -C "$REPO_DIR" merge-base "$BASE" "$HEAD"
+require_ran core/merge-base
+cp "$OUTDIR/probes/core/merge-base.out" "$OUTDIR/git/merge-base"
 MB="$(cat "$OUTDIR/git/merge-base")"
 probe core diff        -- git -C "$REPO_DIR" diff "$MB" "$HEAD"
 cp "$OUTDIR/probes/core/diff.out" "$OUTDIR/git/diff.patch"
-probe core merge-base  -- bash -c "echo $MB"
 probe core files       -- git -C "$REPO_DIR" diff --name-only "$MB" "$HEAD"
 cp "$OUTDIR/probes/core/files.out" "$OUTDIR/git/files"
 probe core staleness   -- git -C "$REPO_DIR" rev-list --count "$MB..$BASE"
 cp "$OUTDIR/probes/core/staleness.out" "$OUTDIR/git/behind-base"
 probe core commits     -- git -C "$REPO_DIR" log --format='%H %cI %s' "$MB..$HEAD"
 # nearest go.mod above each changed file, deduped: the unit `go build` works in
-: > "$OUTDIR/git/modules"
 while read -r f; do
     d="$(dirname "$f")"
     while [ "$d" != "." ] && [ ! -f "$WT/$d/go.mod" ]; do d="$(dirname "$d")"; done
