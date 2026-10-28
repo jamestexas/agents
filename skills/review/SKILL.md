@@ -101,7 +101,8 @@ Skip under `--light`. Dispatch `prompts/refute.md` with `{{CANDIDATES}}` =
 ## Phase 5 — Triage (one sub-agent)
 
 Skip under `--light` (then `findings.json` is every surviving candidate
-tagged `Question`). Dispatch `prompts/triage.md`. It invokes
+tagged `Question`). Dispatch `prompts/triage.md` with `{{CANDIDATES}}` =
+`work/candidates.md` (the same list refute received). It invokes
 `finding-triage`.
 
 ## Phase 6 — Teach and render (one sub-agent, then scripts)
