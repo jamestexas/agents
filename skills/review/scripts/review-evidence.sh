@@ -102,7 +102,13 @@ if [ "$MODE" = pr ]; then
         require_ran core/fetch
         BASE="$REMOTE/$BASE_BRANCH"
         TMP="${TMPDIR:-/tmp}"; WT="${REVIEW_WORKTREE_ROOT:-${TMP%/}/review-worktrees}/${REPO//\//-}-$PR"
-        if [ ! -d "$WT" ]; then probe core worktree -- git -C "$REPO_DIR" worktree add -q --detach "$WT" "$HEAD"; fi
+        if [ ! -d "$WT" ]; then
+            probe core worktree -- git -C "$REPO_DIR" worktree add -q --detach "$WT" "$HEAD"
+        else
+            # a worktree left by an earlier run may sit on an older push; re-point it
+            probe core worktree -- git -C "$WT" checkout -q --detach "$HEAD"
+        fi
+        require_ran core/worktree
         echo "$WT" > "$OUTDIR/git/worktree-path"
     else
         die "cannot resolve PR $REPO#$PR without gh; see manifest"
@@ -170,7 +176,9 @@ ruby "$HERE/packs-match.rb" "${PACK_FILES[@]}" < "$OUTDIR/git/files" > "$OUTDIR/
 jq -c '.matched[]' "$OUTDIR/packs.json" | while read -r pack; do
     name="$(jq -r .name <<<"$pack")"
     needs=(); while read -r b; do [ -n "$b" ] && needs+=(--needs "$b"); done < <(jq -r '.needs[]?' <<<"$pack")
-    jq -r '.probes | to_entries[] | "\(.key)\t\(.value)"' <<<"$pack" | while IFS=$'\t' read -r pname cmd; do
+    # @json keeps a block-scalar command on one line; a pack may carry only a question
+    jq -r '(.probes // {}) | to_entries[] | "\(.key)\t\(.value|@json)"' <<<"$pack" | while IFS=$'\t' read -r pname cmd; do
+        cmd="$(jq -r . <<<"$cmd")"
         # stdin is the probe list; a command that read it would eat the next probe
         probe "$name" "$pname" "${needs[@]+"${needs[@]}"}" \
             --env "WORKTREE=$WT" --env "REPO_DIR=$REPO_DIR" --env "OUTDIR=$OUTDIR" \

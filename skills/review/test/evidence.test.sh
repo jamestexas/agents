@@ -29,8 +29,25 @@ for t in git jq ruby uname shasum date mktemp head tr cut mkdir cat grep sort un
     p="$(command -v $t || true)"; [ -n "$p" ] && ln -sf "$p" "$bin/$t"
 done
 
+# a site pack file: a YAML block-scalar probe must run as ONE probe, and a
+# pack that only asks a question (no probes) must not abort the run
+hud="$tmp/hud"; mkdir -p "$hud"
+cat > "$hud/review-packs.yaml" <<'YAML'
+packs:
+  multi:
+    question: "does a block-scalar probe run as one command?"
+    match: ["**/*.md"]
+    probes:
+      two: |
+        echo one
+        echo two
+  bare:
+    question: "a pack with a question and no probes"
+    match: ["**/*.go"]
+YAML
+
 out="$tmp/run"
-PATH="$bin" bash "$HERE/../scripts/review-evidence.sh" --path "$repo" --base main --head feature --out "$out"
+HUD_ROOT="$hud" PATH="$bin" bash "$HERE/../scripts/review-evidence.sh" --path "$repo" --base main --head feature --out "$out"
 
 m="$out/evidence/manifest.json"
 [ -f "$m" ] || { echo "no manifest"; exit 1; }
@@ -49,6 +66,10 @@ jq -e '.kind == "path" and .base == "main" and .head == "feature"' "$out/evidenc
 [ "$(cat "$out/evidence/git/modules")" = 'mod/a' ]                 || { echo "modules list want exactly mod/a, got: $(cat "$out/evidence/git/modules")"; exit 1; }
 for f in owners.json packs.json manifest.sha256; do [ -f "$out/evidence/$f" ] || { echo "missing $f: run aborted early"; exit 1; }; done
 jq -e '.matched | map(.name) | index("docs-only") | not' "$out/evidence/packs.json" >/dev/null || { echo "docs-only must not match a mixed change"; exit 1; }
+[ "$(st multi/two)" = RAN ]          || { echo "multi-line probe: got $(st multi/two)"; exit 1; }
+grep -q '^one$' "$out/evidence/probes/multi/two.out" && grep -q '^two$' "$out/evidence/probes/multi/two.out" || { echo "multi-line probe must run both lines"; exit 1; }
+jq -e '[.probes[]|select(.name|startswith("multi/"))]|length == 1' "$m" >/dev/null || { echo "block scalar must be one probe, not one per line"; exit 1; }
+jq -e '.matched | map(.name) | index("bare")' "$out/evidence/packs.json" >/dev/null || { echo "bare pack should match"; exit 1; }
 # every probe has exactly one status from the allowed set
 jq -e '[.probes[].status] | all(. == "RAN" or . == "FAILED" or . == "UNAVAILABLE")' "$m" >/dev/null || { echo "bad status"; exit 1; }
 # replay line present
