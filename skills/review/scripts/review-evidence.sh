@@ -85,7 +85,9 @@ mkdir -p "$RUN"; RUN="$(cd "$RUN" && pwd)"
 REPO_DIR="${REPO_DIR:-$PWD}"; REPO_DIR="$(cd "$REPO_DIR" && pwd)" || die "no such directory: $REPO_DIR"
 
 OUTDIR="$RUN/evidence"; MANIFEST="$OUTDIR/manifest.json"
-mkdir -p "$OUTDIR/pr" "$OUTDIR/git" "$OUTDIR/probes" "$RUN/work"
+# work/decisions, claims, refute exist before any reader runs: a reader that
+# has to mkdir its own output dir is one more thing it can get wrong.
+mkdir -p "$OUTDIR/pr" "$OUTDIR/git" "$OUTDIR/probes" "$RUN/work"/{decisions,claims,refute}
 manifest_init
 printf '%q ' "$(basename "$0")" "${ARGS[@]}" > "$OUTDIR/replay.txt"; echo >> "$OUTDIR/replay.txt"
 

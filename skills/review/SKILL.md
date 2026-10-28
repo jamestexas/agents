@@ -72,17 +72,27 @@ ledger question in phase 2. Do not re-fetch what the script fetched.
 Authorship: compare `pr/context.json`'s author login to `gh api user --jq
 .login`. Record `own` or `peer` for phase 6; tell no reader.
 
+Then open the run's state file, which the HUD reviews panel reads:
+
+```bash
+node $SKILL/scripts/state.mjs <run> init mode=<light|default|deep>
+```
+
+Every later phase starts with `node $SKILL/scripts/state.mjs <run> phase
+<name>`; phase 6 ends with `finish`, Post with `posted`. `state.json` is a
+progress file, not evidence: no phase reads it.
+
 ## Phase 2 — Questions (one sub-agent)
 
-Dispatch one `general-purpose` agent with `prompts/questions.md`, substituting
-`{{EVIDENCE}}` and `{{WORK}}`. Pass nothing else: not the PR title, not your
-hunches, not this conversation. When it returns, read `work/ledger.md` and
+`state.mjs <run> phase questions`. Dispatch one `general-purpose` agent with
+`prompts/questions.md`, substituting `{{EVIDENCE}}` and `{{WORK}}`. Pass
+nothing else: not the PR title, not your hunches, not this conversation. When it returns, read `work/ledger.md` and
 confirm every row's **Settled by** is non-empty and **Decision** is empty.
 
 ## Phase 3 — Settle (N sub-agents in parallel)
 
-Default: split rows into up to 3 groups by the evidence they name (git,
-probes, pr). `--deep`: one reader per dimension in
+`state.mjs <run> phase settle`. Default: split rows into up to 3 groups by
+the evidence they name (git, probes, pr). `--deep`: one reader per dimension in
 `skills/pr-review/DIMENSIONS.md` plus one per invariant skill whose paths
 match `owners.json`/`packs.json`. Each reader gets `prompts/reader.md` with
 `{{ROWS}}` = its rows verbatim and `{{READER}}` = a short id. Readers run
@@ -98,26 +108,33 @@ count only what is in `work/candidates.md`.
 
 ## Phase 4 — Refute (one sub-agent, fresh)
 
-Skip under `--light`. Dispatch `prompts/refute.md` with `{{CANDIDATES}}` =
-`work/candidates.md`. Drop any `falls` row with no citation.
+Skip under `--light`. `state.mjs <run> phase refute`. Dispatch
+`prompts/refute.md` with `{{CANDIDATES}}` = `work/candidates.md`. Drop any
+`falls` row with no citation.
 
 ## Phase 5 — Triage (one sub-agent)
 
 Skip under `--light` (then `findings.json` is every surviving candidate
-tagged `Question`). Dispatch `prompts/triage.md` with `{{CANDIDATES}}` =
-`work/candidates.md` (the same list refute received). It invokes
+tagged `Question`). `state.mjs <run> phase triage`. Dispatch
+`prompts/triage.md` with `{{CANDIDATES}}` = `work/candidates.md` (the same
+list refute received). It invokes
 `finding-triage`.
 
 ## Phase 6 — Teach and render (one sub-agent, then scripts)
 
-Dispatch `prompts/teach.md` with `{{AUTHORSHIP}}` and `{{CONTEXT}}` =
-the project's `CONTEXT.md` path if any. Then:
+`state.mjs <run> phase teach`. Dispatch `prompts/teach.md` with
+`{{AUTHORSHIP}}` and `{{CONTEXT}}` = the project's `CONTEXT.md` path if any. Then:
 
 ```bash
 node $SKILL/scripts/render.mjs <run> --title "PR N — <title>" --out <notes path>
 node $SKILL/scripts/check.mjs <run>
+node $SKILL/scripts/state.mjs <run> finish note=<notes path relative to $HUD_ROOT>
 bash $SKILL/scripts/review-evidence.sh --cleanup <run>
 ```
+
+`finish` re-runs the gates and records each as ok or fail, the verdict from
+`summary.md`, and the finding counts; the HUD row turns from running to done
+on it.
 
 `check.mjs` prints one line per gate and exits non-zero if any fails: the
 ledger footer `Questions asked: N.` must equal the row count, no Decision
@@ -137,7 +154,8 @@ posting" and stop. Otherwise: re-run `review-evidence.sh --pr ... --out
 to `<run>/work/post.md`, apply every rule in the policy file (prefixes,
 per-author discuss-only, comment-not-approve cases), print it, and post with
 `gh pr review`. For the operator's own PRs, stop after staging. Append the
-review URL to the artifact.
+review URL to the artifact and record it:
+`state.mjs <run> posted url=<review url> state=<APPROVED|CHANGES_REQUESTED|COMMENTED>`.
 
 `--engage`: phase 1 already has threads in `pr/context.json`; phase 2 seeds
 one row per unresolved thread; Post writes replies with `gh api`, never a new

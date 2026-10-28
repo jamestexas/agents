@@ -68,6 +68,8 @@ jq -e '.matched | map(.name) | index("go-graph")' "$out/evidence/packs.json" >/d
 jq -e '.kind == "path" and .base == "main" and .head == "feature"' "$out/evidence/target.json" >/dev/null || { echo "target.json"; exit 1; }
 [ "$(cat "$out/evidence/git/modules")" = 'mod/a' ]                 || { echo "modules list want exactly mod/a, got: $(cat "$out/evidence/git/modules")"; exit 1; }
 for f in owners.json packs.json manifest.sha256; do [ -f "$out/evidence/$f" ] || { echo "missing $f: run aborted early"; exit 1; }; done
+# the reader output dirs exist before any reader is dispatched
+for d in decisions claims refute; do [ -d "$out/work/$d" ] || { echo "work/$d must be pre-created"; exit 1; }; done
 jq -e '.matched | map(.name) | index("docs-only") | not' "$out/evidence/packs.json" >/dev/null || { echo "docs-only must not match a mixed change"; exit 1; }
 [ "$(st multi/two)" = RAN ]          || { echo "multi-line probe: got $(st multi/two)"; exit 1; }
 { grep -q '^one$' "$out/evidence/probes/multi/two.out" && grep -q '^two$' "$out/evidence/probes/multi/two.out"; } || { echo "multi-line probe must run both lines"; exit 1; }
