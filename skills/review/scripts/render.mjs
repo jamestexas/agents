@@ -16,7 +16,8 @@ const title = opt('--title', 'Review');
 const outFile = opt('--out', path.join(run, 'work', 'artifact.md'));
 const w = (f) => { const p = path.join(run, 'work', f); return fs.existsSync(p) ? fs.readFileSync(p, 'utf8').trim() : ''; };
 // The artifact's only H1 is --title. A phase file that opens with its own H1
-// (teach.md forbids it, but a model may still write one) loses that one line.
+// (the prompts forbid it, but a model may still write one) loses that one
+// line, whether it lands in an open section or inside <details>.
 const noH1 = (s) => s.replace(/^# [^\n]*\n+/, '');
 const e = (f) => { const p = path.join(run, 'evidence', f); return fs.existsSync(p) ? fs.readFileSync(p, 'utf8').trim() : ''; };
 const tryJSON = (text) => { try { return JSON.parse(text); } catch { return undefined; } };
@@ -27,11 +28,19 @@ const details = (summary, body) => {
   return `<details><summary>${summary}</summary>\n\n${body}\n\n</details>\n`;
 };
 
+const claimLines = w('claims.jsonl').split('\n').filter(Boolean).map(tryJSON);
+const claims = claimLines.includes(undefined) ? undefined : claimLines;
+const assumedIds = new Set((claims ?? []).filter((c) => c?.class === 'ASSUMED').map((c) => c.id));
+
 const findings = w('findings.json') ? tryJSON(w('findings.json')) : [];
 const findingLine = (f) => {
   const rows = f.rows || [];
   const rowNote = rows.length ? ` Ledger row${rows.length > 1 ? 's' : ''} ${rows.join(', ')}.` : '';
-  return `- [${f.tag}] ${f.title} — \`${f.file_line ?? '?'}\`. Blast: ${f.blast}.${rowNote}`;
+  // A finding resting on an ASSUMED claim says so where the reader looks
+  // first; the gate already keeps such a finding out of [Blocking].
+  const assumed = (f.claims || []).some((id) => assumedIds.has(id)) ? ' (assumed)' : '';
+  const blast = String(f.blast ?? '').trim();
+  return `- [${f.tag}] ${f.title} — \`${f.file_line ?? '?'}\`. Blast: ${blast}${blast.endsWith('.') ? '' : '.'}${rowNote}${assumed}`;
 };
 const findingsMd = !Array.isArray(findings) ? '_findings.json not parseable_'
   : findings.length ? findings.map(findingLine).join('\n') : '_none confirmed_';
@@ -45,8 +54,6 @@ const manifestMd = manifest === undefined ? undefined : manifest.length
        .map((p) => `| ${p.name} | ${p.status} | ${p.status === 'RAN' ? `\`${p.file}\`` : p.reason} |`)].join('\n')
   : '';
 
-const claimLines = w('claims.jsonl').split('\n').filter(Boolean).map(tryJSON);
-const claims = claimLines.includes(undefined) ? undefined : claimLines;
 const claimsMd = claims === undefined ? undefined : !claims.length ? '' : ['RAN', 'READ', 'ASSUMED'].map((k) => {
   const rows = claims.filter((c) => c.class === k);
   return `**${k}** (${rows.length})\n${rows.map((c) => `- ${c.id}: ${c.text} — \`${c.source}\` (row ${c.row})`).join('\n') || '- none'}`;
@@ -61,11 +68,11 @@ const md = [
   '## Job-level impact', '', noH1(w('impact.md')) || '_no impact section produced_', '',
   '---', '',
   details('Decision ledger', w('ledger.md')),
-  details('Triage', w('triage.md')),
-  details('Refutations', w('refutations.md')),
+  details('Triage', noH1(w('triage.md'))),
+  details('Refutations', noH1(w('refutations.md'))),
   details('Claims', claimsMd),
   details('Evidence manifest', manifestMd),
-  details('Explain', w('teach.md')),
+  details('Explain', noH1(w('teach.md'))),
   details('Replay', replay),
 ].join('\n');
 

@@ -57,3 +57,33 @@ test('missing run dir argument is a usage error', () => {
   assert.equal(r.status, 2);
   assert.match(r.stderr, /usage: render\.mjs/);
 });
+
+const renderPolish = () => {
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rv-')), 'artifact.md');
+  const r = spawnSync('node', [render, path.join(here, 'fixtures', 'render-polish'), '--title', 'PR 1 — swap parse/verify', '--out', out], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  return fs.readFileSync(out, 'utf8');
+};
+
+test('a leading H1 in triage, refutations or teach is dropped inside <details> too', () => {
+  const md = renderPolish();
+  const h1s = md.split('\n').filter((l) => /^# /.test(l));
+  assert.deepEqual(h1s, ['# PR 1 — swap parse/verify']);
+  // the bodies under the dropped headings survive
+  assert.match(md, /<details><summary>Triage<\/summary>\n\n## Triage — 2 candidates in/);
+  assert.match(md, /<details><summary>Refutations<\/summary>\n\n\| Finding \| Verdict \| Why \|/);
+  assert.match(md, /<details><summary>Explain<\/summary>\n\nPeer's work\./);
+});
+
+test('a blast that already ends with a period is not given a second one', () => {
+  const md = renderPolish();
+  assert.match(md, /Blast: every inbound webhook\. Ledger row 1\./);
+  assert.doesNotMatch(md, /webhook\.\./);
+  assert.match(md, /Blast: one deploy window\. Ledger row 2\./, 'a blast without a period still gets one');
+});
+
+test('a finding whose claims include an ASSUMED id is marked (assumed) after its rows', () => {
+  const md = renderPolish();
+  assert.match(md, /\[Question\] rolling deploy reads the new column — `migrate\.sql:3`\. Blast: one deploy window\. Ledger row 2\. \(assumed\)/);
+  assert.match(md, /\[Blocking\] parse before signature check — `handler\.go:88`\. Blast: every inbound webhook\. Ledger row 1\.\n/, 'a RAN/READ-backed finding carries no marker');
+});
