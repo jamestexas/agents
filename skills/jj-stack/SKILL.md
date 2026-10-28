@@ -277,5 +277,19 @@ not restate them.
 - `jj help <cmd>` / `jj <cmd> --help` is the ground truth for the installed version.
 
 Adjacent tools, if this skill's hand-rolled orchestration stops paying for itself:
+- [jj-stack](https://www.serpentine.com/software/jj-stack) — **name collision with this skill, different project.** On jj's own community-tools list: "turns a linear series of local jj changes into a stack of GitHub pull requests... run `jj-stack submit` to update GitHub." Does the Phase 3/5 split-and-push mechanics this skill hand-rolls, but targets one PR per commit directly (no feature-branch single-merge step) — check it before re-deriving this skill's orchestration from scratch.
 - [jj-spr](https://github.com/jennings/jj-spr) — stacked PRs via shadow base branches, so each PR's diff is just its own slice. Different tradeoff from the feature-branch approach here.
 - [LazyJJ](https://lazyjj.dev) — a jj *distribution* shipping a stacked workflow (stack-view/-top/-sync, PR integration) preconfigured. Not the same project as the `lazyjj` TUI on jj's community-tools list; the names collide.
+
+## Verified against (2026-10-16)
+Installed `jj 0.45.1`; latest upstream is `0.46.0` (one minor behind, not urgent). Confirmed against
+live docs + `--help` on the installed binary: signing config keys (Phase 0.5), `jj git push --named`
+(Phase 5.1 — real flag, documented in `jj git push --help` even though the web docs page omits it;
+trust `--help` over a doc-page summary), `jj parallelize` sibling/contiguous-range behavior (Phase 3),
+and that `jj op undo` does not exist while top-level `jj undo` does (Recovery). No corrections needed
+to command semantics.
+
+0.46.0 adds `jj workspace add --[no-]colocate` and a `git.colocate` setting — colocating a *non-main*
+workspace, not just the repo root. Not needed for this skill's pattern (a child workspace doesn't need
+git to see it directly), but worth knowing about if a future workflow wants git tooling inside a
+workspace other than the main checkout.
