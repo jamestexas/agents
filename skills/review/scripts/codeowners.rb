@@ -24,7 +24,11 @@ def expand(pat)
   p = pat.sub(%r{\A/}, '')
   p = p + '**' if p.end_with?('/')
   globs = anchored ? [p] : [p, "**/#{p}"]
-  globs.flat_map { |g| g.include?('/') ? [g] : [g, "**/#{g}"] }.uniq
+  globs = globs.flat_map { |g| g.include?('/') ? [g] : [g, "**/#{g}"] }
+  # Under FNM_PATHNAME a trailing "**" only recurses when followed by "/", so
+  # "api/**" alone matches api/x.go but not api/sub/x.go. GitHub matches at
+  # any depth; "<glob>/*" restores that, and "**/" recursing covers depth >= 3.
+  globs.flat_map { |g| g.end_with?('/**') ? [g, "#{g}/*"] : [g] }.uniq
 end
 
 paths = {}
@@ -39,7 +43,7 @@ end
 
 puts JSON.pretty_generate(
   'source' => file,
-  'semantics' => 'last matching rule wins; File.fnmatch FNM_PATHNAME approximation of GitHub CODEOWNERS',
+  'semantics' => 'last matching rule wins; rules match at any depth; File.fnmatch FNM_PATHNAME approximation of GitHub CODEOWNERS',
   'paths' => paths,
   'teams' => paths.values.flat_map { |h| h['owners'] }.uniq.sort
 )
