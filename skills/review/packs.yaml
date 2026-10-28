@@ -1,0 +1,44 @@
+# packs.yaml — generic probe packs shipped with /review.
+#
+# A pack is matched when ANY changed file matches ANY of its globs (Ruby
+# File.fnmatch with FNM_PATHNAME, the same rule scripts/which-applies.sh
+# uses). `only: true` means the pack matches only when EVERY changed file
+# matches (docs-only). Each probe is one shell command run with these
+# variables exported: WORKTREE REPO_DIR OUTDIR FILES MODULES BASE HEAD PR REPO.
+# `needs` lists binaries; a missing one makes every probe UNAVAILABLE.
+#
+# Every pack states the question it answers. Phase 2 reads that line to know
+# an answer exists; a pack without one is a lint failure.
+#
+# Site-specific packs (deploy workflows, metric names, CLI probes) do not
+# belong here — this repo is public. Put them in $HUD_ROOT/review-packs.yaml
+# or <repo>/.claude/review-packs.yaml; see packs.site.example.yaml.
+packs:
+  go-graph:
+    question: "Which modules and callers does this change reach, and do the touched modules still build and vet?"
+    match: ["**/*.go", "**/go.mod", "**/go.sum"]
+    needs: [go]
+    probes:
+      build: 'cd "$WORKTREE" && while read -r m; do echo "## $m"; (cd "$m" && go build ./... 2>&1 | head -100); done < "$MODULES"'
+      vet:   'cd "$WORKTREE" && while read -r m; do echo "## $m"; (cd "$m" && go vet ./... 2>&1 | head -100); done < "$MODULES"'
+      modmap-impact: 'cd "$WORKTREE" && command -v modmap >/dev/null || { echo "missing binary: modmap" >&2; exit 127; }; modmap impact --root . --json < "$FILES"'
+  terraform:
+    question: "Does the Terraform format, and which resources does the diff add, change, or remove?"
+    match: ["**/*.tf", "**/*.tfvars"]
+    needs: [terraform]
+    probes:
+      fmt: 'cd "$WORKTREE" && terraform fmt -check -recursive -diff $(grep -E "\.tf(vars)?$" "$FILES" | xargs -n1 dirname | sort -u) 2>&1'
+      resources: 'cd "$WORKTREE" && git diff "$BASE...$HEAD" -- "*.tf" | grep -E "^[+-](resource|module|data) " || true'
+      alerts-without-docs: 'cd "$WORKTREE" && git diff "$BASE...$HEAD" -- "*.tf" | grep -nE "^\+.*google_monitoring_alert_policy" || echo "no new alert policies in diff"'
+  github-actions:
+    question: "Do the changed workflows lint, and are the actions pinned?"
+    match: [".github/workflows/**"]
+    probes:
+      actionlint: 'cd "$WORKTREE" && command -v actionlint >/dev/null || { echo "missing binary: actionlint" >&2; exit 127; }; actionlint $(grep -E "^\.github/workflows/" "$FILES")'
+      unpinned: 'cd "$WORKTREE" && grep -nE "uses: [^@]+@(main|master|v[0-9]+)\b" $(grep -E "^\.github/workflows/" "$FILES") || echo "all uses pinned to a sha or none changed"'
+  docs-only:
+    question: "Is every touched file documentation, so the run is --light eligible?"
+    match: ["**/*.md", "*.md"]
+    only: true
+    probes:
+      links: 'cd "$WORKTREE" && grep -noE "\]\((\.{0,2}/[^) ]+)\)" $(cat "$FILES") | while IFS=: read -r f n link; do p="${link#](}"; p="${p%)}"; [ -e "$(dirname "$f")/$p" ] || echo "$f:$n broken relative link $p"; done; true'

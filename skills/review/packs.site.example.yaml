@@ -1,0 +1,26 @@
+# packs.site.example.yaml — shapes for the packs that carry site knowledge.
+# Copy to $HUD_ROOT/review-packs.yaml (per person) or
+# <repo>/.claude/review-packs.yaml (per repo) and fill the env vars in your
+# shell profile. Nothing here names an organization.
+packs:
+  deploy:
+    question: "Is the PR's base commit included in the latest successful staging and production deploys?"
+    match: ["env/**", ".github/workflows/**", "**/*.tf"]
+    needs: [gh]
+    probes:
+      staging: '[ -n "${REVIEW_STAGING_WORKFLOW:-}" ] || { echo "REVIEW_STAGING_WORKFLOW unset" >&2; exit 127; }; gh run list --repo "$REPO" -w "$REVIEW_STAGING_WORKFLOW" -s completed --json headSha,createdAt,conclusion -L 5'
+      prod:    '[ -n "${REVIEW_PROD_WORKFLOW:-}" ] || { echo "REVIEW_PROD_WORKFLOW unset" >&2; exit 127; }; gh run list --repo "$REPO" -w "$REVIEW_PROD_WORKFLOW" -s completed --json headSha,createdAt,conclusion -L 5'
+  metrics:
+    question: "What do the metrics the PR claims to gate on actually show over the claimed window, hourly, not as one instant read?"
+    match: ["env/**/*.tfvars", "env/**/*.tf"]
+    needs: [gcloud, curl]
+    probes:
+      # REVIEW_PROM_PROJECT and REVIEW_PROM_QUERY are set per run by the operator
+      # from the PR's own claim. Hourly steps over 48h; the caveat is part of the
+      # evidence because a counter resets on every Cloud Run revision rollover.
+      range: '[ -n "${REVIEW_PROM_QUERY:-}" ] || { echo "REVIEW_PROM_QUERY unset" >&2; exit 127; }; echo "# caveat: counters reset on revision rollover; read the series, not one increase[]"; curl -sS -H "Authorization: Bearer $(gcloud auth print-access-token)" "https://monitoring.googleapis.com/v1/projects/$REVIEW_PROM_PROJECT/location/global/prometheus/api/v1/query_range" --data-urlencode "query=$REVIEW_PROM_QUERY" --data-urlencode "start=$(date -u -v-48H +%s 2>/dev/null || date -u -d "48 hours ago" +%s)" --data-urlencode "end=$(date -u +%s)" --data-urlencode "step=3600"'
+  live-api:
+    question: "Does the live read the PR's claim implies return what the PR says?"
+    match: ["cli/**", "api/**"]
+    probes:
+      read: '[ -n "${REVIEW_LIVE_CMD:-}" ] || { echo "REVIEW_LIVE_CMD unset (a read-only command the operator sets per run)" >&2; exit 127; }; bash -c "$REVIEW_LIVE_CMD"'
