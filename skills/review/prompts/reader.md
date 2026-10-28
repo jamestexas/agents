@@ -9,8 +9,18 @@ Assigned rows (from `{{WORK}}/ledger.md`):
 For each assigned row, append to `{{WORK}}/decisions/{{READER}}.md` one
 line: `| <row#> | <Decision> |`, where Decision is one of:
 - a conclusion, citing the exact evidence file and line/key/hunk that
-  settled it, ending `→ candidate: <one line>` if it yields a finding;
+  settled it, ending `→ candidate: <one line>` only if it yields a finding;
 - `**Unresolved** — <which probe or file was missing or UNAVAILABLE>`.
+
+A row that settles clean ends with no `→ candidate:` clause at all. Never
+write `→ candidate: none`: the merge collects every `→ candidate:` line into
+the triage input, so a "none" is a candidate that two later phases must
+spend effort dismissing. The two shapes:
+
+```
+| 3 | No — `parse()` runs first; call order at `git/diff.patch` hunk @@ -84,9 +88,11 @@ (`handler.go:88` vs `:104`). → candidate: signature verified after parse |
+| 4 | Yes — retry budget is 1k via `config.go:41` default; no caller overrides it (`probes/go-graph/callers.out`). |
+```
 
 Also append to `{{WORK}}/claims/{{READER}}.jsonl` one JSON object per
 claim you relied on:

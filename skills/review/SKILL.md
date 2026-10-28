@@ -90,8 +90,11 @@ concurrently and write `work/decisions/<id>.md` and `work/claims/<id>.jsonl`.
 
 Afterwards, merge: fill each ledger row's **Decision** from the decisions
 files (a row answered twice keeps both, flagged `conflict`), concatenate
-claims into `work/claims.jsonl`, and collect every `→ candidate:` line into
-`work/candidates.md` in row order.
+claims into `work/claims.jsonl`, and collect into `work/candidates.md`, in
+row order, every `→ candidate:` line whose text after the colon is not
+empty, `none`, or `n/a` (case-insensitive). A settled-clean row carries no
+clause, so those three are reader slips, not candidates; refute and triage
+count only what is in `work/candidates.md`.
 
 ## Phase 4 — Refute (one sub-agent, fresh)
 
