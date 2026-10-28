@@ -40,6 +40,18 @@ test('unparseable claims or findings become a message in the artifact, not a cra
   assert.match(fs.readFileSync(path.join(dir, 'b.md'), 'utf8'), /_findings\.json not parseable_/);
 });
 
+test('one H1 per artifact: a leading H1 in summary.md or impact.md is dropped', () => {
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rv-')), 'artifact.md');
+  const r = spawnSync('node', [render, path.join(here, 'fixtures', 'leading-h1'), '--title', 'PR 1 — swap parse/verify', '--out', out], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  const md = fs.readFileSync(out, 'utf8');
+  const h1s = md.split('\n').filter((l) => /^# /.test(l));
+  assert.deepEqual(h1s, ['# PR 1 — swap parse/verify']);
+  // the body under the dropped heading survives
+  assert.match(md, /\*\*TL;DR\*\* — Moves parsing/);
+  assert.match(md, /## Job-level impact\n\n- Deploy: staging state unknown/);
+});
+
 test('missing run dir argument is a usage error', () => {
   const r = spawnSync('node', [render], { encoding: 'utf8' });
   assert.equal(r.status, 2);

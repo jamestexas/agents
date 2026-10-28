@@ -15,6 +15,9 @@ const opt = (k, d) => { const i = args.indexOf(k); return i === -1 ? d : args[i 
 const title = opt('--title', 'Review');
 const outFile = opt('--out', path.join(run, 'work', 'artifact.md'));
 const w = (f) => { const p = path.join(run, 'work', f); return fs.existsSync(p) ? fs.readFileSync(p, 'utf8').trim() : ''; };
+// The artifact's only H1 is --title. A phase file that opens with its own H1
+// (teach.md forbids it, but a model may still write one) loses that one line.
+const noH1 = (s) => s.replace(/^# [^\n]*\n+/, '');
 const e = (f) => { const p = path.join(run, 'evidence', f); return fs.existsSync(p) ? fs.readFileSync(p, 'utf8').trim() : ''; };
 const tryJSON = (text) => { try { return JSON.parse(text); } catch { return undefined; } };
 // '' = file absent, undefined = present but not parseable, otherwise the body.
@@ -53,9 +56,9 @@ const replay = `\`\`\`\n${e('replay.txt')}\n\`\`\`\nmanifest sha256: ${e('manife
 
 const md = [
   `# ${title}`, '',
-  w('summary.md'), '',
+  noH1(w('summary.md')), '',
   '## Confirmed findings', '', findingsMd, '',
-  '## Job-level impact', '', w('impact.md') || '_no impact section produced_', '',
+  '## Job-level impact', '', noH1(w('impact.md')) || '_no impact section produced_', '',
   '---', '',
   details('Decision ledger', w('ledger.md')),
   details('Triage', w('triage.md')),
