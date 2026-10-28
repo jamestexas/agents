@@ -17,9 +17,13 @@ Rules:
    `probes/<pack>/<probe>.out`, `pr/context.json` path), or a file in the
    worktree named in `target.json`, or a probe a pack in `packs.json` declares.
    "Read the code" is not a settler.
-3. Ask only questions that could go either way for THIS change. Include at
-   least one job-level question: what changes for the deploy, the callers in
-   `probes/go-graph/modmap-impact.out`, or the on-call surface.
+3. Ask only questions that could go either way for THIS change. Ask at most
+   {{MAX_QUESTIONS}} questions; prefer the ones that could change the
+   verdict. Include at least one job-level question: if `packs.json` shows
+   the go-graph pack matched, one job-level question uses
+   `probes/go-graph/modmap-impact.out` (callers reached); otherwise use
+   `owners.json` (who is on the hook) and the deploy probes (what changes
+   for the rollout or the on-call surface).
 4. For every probe in `manifest.json` with status UNAVAILABLE, write one row
    whose settler is that probe, so the gap is visible as a question.
 5. End with: `Questions asked: N.`

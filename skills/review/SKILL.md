@@ -82,12 +82,41 @@ Every later phase starts with `node $SKILL/scripts/state.mjs <run> phase
 <name>`; phase 6 ends with `finish`, Post with `posted`. `state.json` is a
 progress file, not evidence: no phase reads it.
 
+## Mode
+
+`--light`, default, `--deep`. **Auto-light**: after phase 1, if
+`packs.json` matched only `docs-only`, or `git/files` lists 3 or fewer
+files and none ends in `.go` or `.tf`, run light unless `--deep` was given;
+say so in the hand-over. Pass the resolved mode to `state.mjs init`.
+
+Light skips refute and triage, so the orchestrator writes their two files
+itself, as pass-throughs, and the gates run unchanged:
+
+- `work/triage.md`: header `## Triage — N candidates in, N dispositions
+  out` where N is the line count of `work/candidates.md`; the skill's table
+  (`| # | Candidate (one line) | Disposition | Evidence / reason |`), one
+  row per candidate in order, disposition `question (light)`, the last cell
+  the candidate's citing ledger row (`row N`); then the counted footer
+  (`**Confirmed: N. Dropped: 0. Already raised: 0. Already addressed: 0.
+  Revised: 0.**`).
+- `work/findings.json`: every candidate as `{"tag":"Question", "title":
+  <candidate text>, "file_line": <from the row's decision, or "?">,
+  "blast": "not assessed (light)", "rows":[N], "claims":[<ids in
+  claims.jsonl with that row>]}`.
+
+No model is dispatched for either file. A light run can never produce a
+Blocking finding; if a candidate reads like one, rerun without `--light`.
+
 ## Phase 2 — Questions (one sub-agent)
 
 `state.mjs <run> phase questions`. Dispatch one `general-purpose` agent with
-`prompts/questions.md`, substituting `{{EVIDENCE}}` and `{{WORK}}`. Pass
-nothing else: not the PR title, not your hunches, not this conversation. When it returns, read `work/ledger.md` and
-confirm every row's **Settled by** is non-empty and **Decision** is empty.
+`prompts/questions.md`, substituting `{{EVIDENCE}}`, `{{WORK}}` and
+`{{MAX_QUESTIONS}}`: `8` under `--light`, `14` by default; under `--deep`
+delete the "Ask at most {{MAX_QUESTIONS}} questions;" clause instead, so the
+count is unbounded. The cap is a budget, not a target, and UNAVAILABLE rows
+count toward it. Pass nothing else: not the PR title, not your hunches, not
+this conversation. When it returns, read `work/ledger.md` and confirm every
+row's **Settled by** is non-empty and **Decision** is empty.
 
 ## Phase 3 — Settle (N sub-agents in parallel)
 
@@ -114,8 +143,8 @@ Skip under `--light`. `state.mjs <run> phase refute`. Dispatch
 
 ## Phase 5 — Triage (one sub-agent)
 
-Skip under `--light` (then `findings.json` is every surviving candidate
-tagged `Question`). `state.mjs <run> phase triage`. Dispatch
+Skip under `--light` (the orchestrator writes the pass-through `triage.md`
+and `findings.json` described under Mode). `state.mjs <run> phase triage`. Dispatch
 `prompts/triage.md` with `{{CANDIDATES}}` = `work/candidates.md` (the same
 list refute received). It invokes
 `finding-triage`.
