@@ -25,7 +25,12 @@ def expand(pat)
   anchored = pat.start_with?('/') || pat.chomp('/').include?('/')
   p = pat.sub(%r{\A/}, '')
   p = p + '**' if p.end_with?('/')
-  globs = anchored ? [p] : [p, "**/#{p}"]
+  # A pattern with no trailing slash may name a directory, and GitHub then
+  # owns everything under it ("/chainctl" covers chainctl/pkg/x.go). Try that
+  # reading too. Anchoring is unchanged, so "/README.md" still does not reach
+  # sub/dir/README.md.
+  bases = p.end_with?('**') ? [p] : [p, "#{p}/**"]
+  globs = bases.flat_map { |b| anchored ? [b] : [b, "**/#{b}"] }
   # Under FNM_PATHNAME a trailing "**" only recurses when followed by "/", so
   # "api/**" alone matches api/x.go but not api/sub/x.go. GitHub matches at
   # any depth; "<glob>/*" restores that, and "**/" recursing covers depth >= 3.
@@ -44,7 +49,7 @@ end
 
 puts JSON.pretty_generate(
   'source' => file,
-  'semantics' => 'last matching rule wins; rules match at any depth; `**/dir` directory patterns match only the entry itself (known gap); File.fnmatch FNM_PATHNAME approximation of GitHub CODEOWNERS',
+  'semantics' => 'last matching rule wins; rules match at any depth; a path with no trailing slash also covers a directory of that name and its contents; File.fnmatch FNM_PATHNAME approximation of GitHub CODEOWNERS',
   'paths' => paths,
   'teams' => paths.values.flat_map { |h| h['owners'] }.uniq.sort
 )

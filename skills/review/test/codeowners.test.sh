@@ -10,10 +10,12 @@ cat > "$tmp/CODEOWNERS" <<'EOF'
 docs/*.md         @org/docs @alice
 README.md         @org/readme
 /README.md        @root
+/chainctl         @org/cli
+tools             @org/tools
 EOF
 printf '%s\n' api/x.go api/internal/y.go docs/a.md other/z.txt \
     api/sub/x.go api/internal/deep/y.go api/internal/a/b/c.go sub/dir/README.md \
-    README.md sub/docs/a.md > "$tmp/files"
+    README.md sub/docs/a.md chainctl/pkg/commands/commands.go chainctl/main.go a/tools/x.sh > "$tmp/files"
 ruby "$HERE/../scripts/codeowners.rb" "$tmp/CODEOWNERS" < "$tmp/files" > "$tmp/owners.json"
 own() { jq -r --arg p "$1" '.paths[$p].owners | join(",")' "$tmp/owners.json"; }
 [ "$(own api/x.go)" = "@org/api" ]                      || { echo "api: got $(own api/x.go)"; exit 1; }
@@ -29,6 +31,11 @@ own() { jq -r --arg p "$1" '.paths[$p].owners | join(",")' "$tmp/owners.json"; }
 # pattern containing "/" is anchored at the root even without a leading "/".
 [ "$(own README.md)" = "@root" ]                         || { echo "rooted: got $(own README.md)"; exit 1; }
 [ "$(own sub/docs/a.md)" = "@org/default" ]              || { echo "slashed pattern must stay anchored: got $(own sub/docs/a.md)"; exit 1; }
+# A bare path with no trailing slash may name a directory; GitHub then owns
+# everything under it, anchored or not.
+[ "$(own chainctl/pkg/commands/commands.go)" = "@org/cli" ] || { echo "bare dir nested: got $(own chainctl/pkg/commands/commands.go)"; exit 1; }
+[ "$(own chainctl/main.go)" = "@org/cli" ]                  || { echo "bare dir child: got $(own chainctl/main.go)"; exit 1; }
+[ "$(own a/tools/x.sh)" = "@org/tools" ]                    || { echo "unanchored bare dir: got $(own a/tools/x.sh)"; exit 1; }
 jq -e '.paths["api/x.go"].rule_index == 1' "$tmp/owners.json" >/dev/null || { echo "rule_index missing"; exit 1; }
 jq -e '.source == "'"$tmp"'/CODEOWNERS"' "$tmp/owners.json" >/dev/null || { echo "source missing"; exit 1; }
 jq -e '.teams | index("@org/api")' "$tmp/owners.json" >/dev/null || { echo "teams rollup missing"; exit 1; }
