@@ -150,13 +150,27 @@ while read -r f; do
 done < "$OUTDIR/git/files" | sort -u > "$OUTDIR/git/modules"
 
 # ---- owners ---------------------------------------------------------------
-CO=""
-for c in .github/CODEOWNERS CODEOWNERS docs/CODEOWNERS; do [ -f "$WT/$c" ] && { CO="$WT/$c"; break; }; done
-if [ -n "$CO" ]; then
-    probe core owners -- bash -c "ruby '$HERE/codeowners.rb' '$CO' < '$OUTDIR/git/files'"
-    cp "$OUTDIR/probes/core/owners.out" "$OUTDIR/owners.json"
+# CODEOWNERS is read at the BASE ref of the reviewer's checkout, never from the
+# PR worktree: GitHub resolves reviewers from the base branch, and a PR must
+# not be able to rewrite its own ownership evidence.
+CO_LOC=""
+for c in .github/CODEOWNERS CODEOWNERS docs/CODEOWNERS; do
+    if git -C "$REPO_DIR" show "$BASE:$c" > "$OUTDIR/CODEOWNERS" 2>/dev/null; then CO_LOC="$c"; break; fi
+done
+if [ -n "$CO_LOC" ]; then
+    # Not a direct `ruby codeowners.rb "$OUTDIR/CODEOWNERS"` call: run inside
+    # OUTDIR with relative paths so neither the recorded command nor the output
+    # names the run directory, and the manifest hash stays equal across run
+    # dirs of the same target. Positional args, not a quoted command string.
+    # shellcheck disable=SC2016  # $OUTDIR and $1 expand inside the probe's bash, by design
+    probe core owners --env "OUTDIR=$OUTDIR" -- bash -c 'cd "$OUTDIR" && ruby "$1" CODEOWNERS < git/files' _ "$HERE/codeowners.rb"
+    if [ "$(status_of core/owners)" = RAN ]; then
+        jq --arg ref "$BASE" --arg loc "$CO_LOC" '. + {ref: $ref, location: $loc}' "$OUTDIR/probes/core/owners.out" > "$OUTDIR/owners.json"
+    fi
 else
-    probe core owners -- bash -c 'echo "no CODEOWNERS file in worktree" >&2; exit 127'
+    rm -f "$OUTDIR/CODEOWNERS"
+    # shellcheck disable=SC2016  # $BASE expands inside the probe's bash, by design
+    probe core owners --env "BASE=$BASE" -- bash -c 'echo "no CODEOWNERS file at $BASE" >&2; exit 127'
 fi
 
 # ---- packs ----------------------------------------------------------------
@@ -188,6 +202,7 @@ jq -c '.matched[]' "$OUTDIR/packs.json" | while read -r pack; do
     done
 done
 
-# manifest hash: the replay check compares this across runs
-shasum -a 256 "$MANIFEST" | cut -d' ' -f1 > "$OUTDIR/manifest.sha256"
+# manifest hash: the replay check compares this across runs, so timestamps
+# are left out and keys are sorted
+jq -S 'del(.probes[].started, .probes[].ended)' "$MANIFEST" | shasum -a 256 | cut -d' ' -f1 > "$OUTDIR/manifest.sha256"
 note "evidence written to $OUTDIR ($(jq '.probes|length' "$MANIFEST") probes; $(jq '[.probes[]|select(.status=="UNAVAILABLE")]|length' "$MANIFEST") unavailable)"

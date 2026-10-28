@@ -20,6 +20,8 @@ printf 'package a\n\nfunc A() int { return 2 }\n' > mod/a/a.go
 # zz.md sorts after mod/a/a.go and has no go.mod above it: the modules loop
 # must not abort the run when the last changed file is outside a Go module.
 echo zz > zz.md; git add zz.md
+# the PR rewrites CODEOWNERS to claim everything: owners must still come from base
+printf '*\t@attacker\n' > .github/CODEOWNERS
 git commit -qam change
 git checkout -q main && echo more >> README.md && git commit -qam "main moved"
 git checkout -q feature
@@ -60,7 +62,8 @@ st() { jq -r --arg n "$1" '.probes[] | select(.name==$n) | .status' "$m"; }
 [ "$(st go-graph/build)" = UNAVAILABLE ]  || { echo "go-graph/build must be UNAVAILABLE without go, got $(st go-graph/build)"; exit 1; }
 grep -q 'return 2' "$out/evidence/git/diff.patch"                 || { echo "diff content"; exit 1; }
 [ "$(cat "$out/evidence/git/behind-base")" = 1 ]                   || { echo "staleness count want 1 got $(cat "$out/evidence/git/behind-base")"; exit 1; }
-jq -e '.paths["mod/a/a.go"].owners == ["@org/mod"]' "$out/evidence/owners.json" >/dev/null || { echo "owners resolution"; exit 1; }
+jq -e '.paths["mod/a/a.go"].owners == ["@org/mod"]' "$out/evidence/owners.json" >/dev/null || { echo "owners must come from the base ref, got $(jq -c '.paths["mod/a/a.go"].owners' "$out/evidence/owners.json")"; exit 1; }
+jq -e '.ref == "main"' "$out/evidence/owners.json" >/dev/null || { echo "owners.json must record the ref it was read at"; exit 1; }
 jq -e '.matched | map(.name) | index("go-graph")' "$out/evidence/packs.json" >/dev/null || { echo "go-graph pack should match"; exit 1; }
 jq -e '.kind == "path" and .base == "main" and .head == "feature"' "$out/evidence/target.json" >/dev/null || { echo "target.json"; exit 1; }
 [ "$(cat "$out/evidence/git/modules")" = 'mod/a' ]                 || { echo "modules list want exactly mod/a, got: $(cat "$out/evidence/git/modules")"; exit 1; }
@@ -70,6 +73,10 @@ jq -e '.matched | map(.name) | index("docs-only") | not' "$out/evidence/packs.js
 grep -q '^one$' "$out/evidence/probes/multi/two.out" && grep -q '^two$' "$out/evidence/probes/multi/two.out" || { echo "multi-line probe must run both lines"; exit 1; }
 jq -e '[.probes[]|select(.name|startswith("multi/"))]|length == 1' "$m" >/dev/null || { echo "block scalar must be one probe, not one per line"; exit 1; }
 jq -e '.matched | map(.name) | index("bare")' "$out/evidence/packs.json" >/dev/null || { echo "bare pack should match"; exit 1; }
+# the manifest hash must be stable across runs of the same target
+out2="$tmp/run2"
+HUD_ROOT="$hud" PATH="$bin" bash "$HERE/../scripts/review-evidence.sh" --path "$repo" --base main --head feature --out "$out2" 2>/dev/null
+cmp -s "$out/evidence/manifest.sha256" "$out2/evidence/manifest.sha256" || { echo "manifest.sha256 differs across identical runs: $(cat "$out/evidence/manifest.sha256") vs $(cat "$out2/evidence/manifest.sha256")"; exit 1; }
 # every probe has exactly one status from the allowed set
 jq -e '[.probes[].status] | all(. == "RAN" or . == "FAILED" or . == "UNAVAILABLE")' "$m" >/dev/null || { echo "bad status"; exit 1; }
 # replay line present
