@@ -27,7 +27,7 @@ git checkout -q main && echo more >> README.md && git commit -qam "main moved"
 git checkout -q feature
 
 bin="$tmp/bin"; mkdir -p "$bin"   # a PATH with no gh, no go, no modmap (uname: macOS system ruby runs it at startup)
-for t in git jq ruby uname shasum date mktemp head tr cut mkdir cat grep sort uniq xargs dirname basename wc sed awk tee rm mv cp realpath bash sh env; do
+for t in git jq ruby uname shasum date mktemp head tr cut mkdir cat grep sort uniq xargs dirname basename wc sed awk tee rm mv cp realpath readlink bash sh env; do
     p="$(command -v $t || true)"; [ -n "$p" ] && ln -sf "$p" "$bin/$t"
 done
 
@@ -97,6 +97,23 @@ cd "$repo"
 PATH="$bin" bash "$HERE/../scripts/review-evidence.sh" --path . --base main --head feature --out rel/run 2>/dev/null
 jq -e '(.repo_dir|startswith("/")) and (.worktree|startswith("/"))' "$repo/rel/run/evidence/target.json" >/dev/null || { echo "relative args must resolve to absolute paths: $(jq -c . "$repo/rel/run/evidence/target.json")"; exit 1; }
 [ "$(jq -r '.probes[]|select(.name=="go-graph/build")|.status' "$repo/rel/run/evidence/manifest.json")" = UNAVAILABLE ] || { echo "relative run: go-graph/build must be UNAVAILABLE"; exit 1; }
+
+# The installed skill is a symlink (~/.claude/skills/review -> <repo>/skills/review).
+# Run through such a link: the script must still locate <repo>/scripts/pr-context.sh,
+# so the path-mode reason is "no PR", never "not found" / "No such file".
+skill="$(cd -P "$HERE/.." && pwd -P)"
+link="$tmp/installed/skills"; mkdir -p "$link"; ln -s "$skill" "$link/review"
+out3="$tmp/run3"
+HUD_ROOT="$hud" PATH="$bin" bash "$link/review/scripts/review-evidence.sh" --path "$repo" --base main --head feature --out "$out3" 2>/dev/null
+m3="$out3/evidence/manifest.json"
+r3="$(jq -r '.probes[] | select(.name=="core/pr-context") | .reason' "$m3")"
+[[ "$r3" == *"no PR in path mode"* ]] || { echo "symlinked install: pr-context reason must be 'no PR in path mode', got '$r3'"; exit 1; }
+[[ "$r3" != *"not found"* && "$r3" != *"No such file"* ]] || { echo "symlinked install: pr-context.sh was not located: '$r3'"; exit 1; }
+grep -q 'review-evidence.sh --path' "$out3/evidence/replay.txt" || { echo "symlinked install: replay line missing"; exit 1; }
+c3="$(jq -r '.probes[] | select(.name=="core/pr-context") | .cmd' "$m3")"
+[ -n "$c3" ] || { echo "symlinked install: pr-context cmd must be recorded"; exit 1; }
+[[ "$c3" != *"$tmp"* ]] || { echo "symlinked install: recorded cmd must not name the install or run dir: '$c3'"; exit 1; }
+cmp -s "$out/evidence/manifest.sha256" "$out3/evidence/manifest.sha256" || { echo "manifest.sha256 must not depend on the install path"; exit 1; }
 
 # --cleanup on a path-mode run must leave the user's repo alone
 bash "$HERE/../scripts/review-evidence.sh" --cleanup "$out" 2>/dev/null

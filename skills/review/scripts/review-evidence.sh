@@ -15,12 +15,24 @@
 # from scripts/pr-context.sh (one probe), head/base/merge shas from one
 # GraphQL query — never from grepping git log for the PR number.
 set -euo pipefail
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Physical location, not the invoked path: the skill is normally installed as
+# a symlink (~/.claude/skills/review -> <repo>/skills/review), and a logical
+# `cd ..` from there climbs the symlink's parent, not the repo, so
+# AGENTS_ROOT/scripts/pr-context.sh would not exist. macOS has no
+# `readlink -f`, hence the loop.
+SELF="${BASH_SOURCE[0]}"
+while [ -L "$SELF" ]; do
+    SELF_DIR="$(cd -P "$(dirname "$SELF")" && pwd -P)"
+    SELF="$(readlink "$SELF")"
+    [[ "$SELF" == /* ]] || SELF="$SELF_DIR/$SELF"
+done
+HERE="$(cd -P "$(dirname "$SELF")" && pwd -P)"
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=lib.sh
 source "$HERE/lib.sh"
-SKILL_DIR="$(cd "$HERE/.." && pwd)"
-AGENTS_ROOT="$(cd "$SKILL_DIR/../.." && pwd)"
+SKILL_DIR="$(cd -P "$HERE/.." && pwd -P)"
+AGENTS_ROOT="$(cd -P "$SKILL_DIR/../.." && pwd -P)"
+PR_CONTEXT="$AGENTS_ROOT/scripts/pr-context.sh"
 
 usage() {
     awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "${BASH_SOURCE[0]}"
@@ -113,7 +125,7 @@ if [ "$MODE" = pr ]; then
     else
         die "cannot resolve PR $REPO#$PR without gh; see manifest"
     fi
-    probe core pr-context --needs gh -- "$AGENTS_ROOT/scripts/pr-context.sh" --pr "$REPO#$PR" --similar 3
+    probe core pr-context --needs gh -- "$PR_CONTEXT" --pr "$REPO#$PR" --similar 3
     if [ "$(status_of core/pr-context)" = RAN ]; then cp "$OUTDIR/probes/core/pr-context.out" "$OUTDIR/pr/context.json"; fi
     probe core pr-checks  --needs gh -- gh pr checks "$PR" --repo "$REPO" --json name,state,link,workflow
 else
@@ -121,8 +133,13 @@ else
     REPO="$(basename "$REPO_DIR")"; PR=""
     WT="$REPO_DIR"
     echo "$WT" > "$OUTDIR/git/worktree-path"
-    # no PR in path mode; recorded as UNAVAILABLE with a reason, not skipped
-    probe core pr-context -- bash -c 'echo "no PR in path mode" >&2; exit 127'
+    # no PR in path mode; recorded as UNAVAILABLE with a reason, not skipped.
+    # The script is still located first, so a broken install surfaces here
+    # instead of only on the next PR run. The path travels by --env, not as an
+    # argument, so the recorded cmd (and the manifest hash) stays install-free.
+    # shellcheck disable=SC2016  # $PR_CONTEXT expands inside the probe's bash, by design
+    probe core pr-context --env "PR_CONTEXT=$PR_CONTEXT" -- bash -c \
+        '[ -f "$PR_CONTEXT" ] || { echo "pr-context.sh not found at $PR_CONTEXT" >&2; exit 127; }; echo "no PR in path mode" >&2; exit 127'
 fi
 echo "$REPO_DIR" > "$OUTDIR/git/repo-dir"
 jq -n --arg kind "$MODE" --arg repo "$REPO" --arg pr "$PR" --arg base "$BASE" --arg head "$HEAD" --arg worktree "$WT" --arg repo_dir "$REPO_DIR" \
