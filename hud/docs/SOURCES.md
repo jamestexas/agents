@@ -34,18 +34,22 @@ startup**, so a typo costs you one key rather than the whole switchboard.
 | `[sources.digest]` `cmd` | string | the first token being a command on `PATH` | `/api/dyn/digest` → **503**, same shape |
 | `[sources.sessions]` `root` | string, leading `~` expanded | a directory of agent sessions | `/api/sessions` → **404**; the panel does not exist |
 | `[sources.sessions]` `lectio` | string URL | the graft daemon answering | sessions stay **200** with `graft: "off"` — tier 1 intact |
+| `[sources.reviews]` (the table itself) | — | review runs writing `state.json` into the tree | `/api/reviews` → **404**; the panel does not exist |
+| `[sources.reviews]` `root` | string, leading `~` expanded | — | defaults to `HUD_ROOT` |
+| `[sources.reviews]` `glob` | string, `*` within one segment | — | defaults to `projects/*/raw/PR-*/state.json` |
 | `[sources] loadout` | `false` only | — (it is the off switch) | — |
 | `[sources.loadout]` `claude_root` | string, `~` expanded | a non-default install to inspect | defaults to `~/.claude` |
 
 Two things that table is deliberately precise about:
 
-**`board` and `digest` walk a degradation ladder; `sessions` and `loadout` do
-not.** For a proxied source, live ⇒ last snapshot (`stale: true`, still a 200)
+**`board` and `digest` walk a degradation ladder; `sessions`, `loadout` and
+`reviews` do not.** For a proxied source, live ⇒ last snapshot (`stale: true`, still a 200)
 ⇒ 503 with a JSON body. That is three distinguishable states, and the
 distinction is worth keeping: "configured but down" and "not configured" are
 different problems with different fixes. An absent `sessions` source is neither
 — it means the panel does not exist, which is why it answers 404 and the UI
-renders nothing. `loadout = false` uses that same panel-off 404.
+renders nothing. `loadout = false` and an absent `[sources.reviews]` use that
+same panel-off 404.
 
 **An unconfigured source is never served from a snapshot.** `[sources.*]` is
 the switchboard, so removing a source has to remove the panel even though
@@ -72,6 +76,49 @@ It reads the local filesystem and calls nothing, so the default root is enough
 to make it work out of the box — there is no endpoint to configure and nothing
 for `hud init` to detect. `loadout = false` under `[sources]` turns it off;
 `[sources.loadout]` `claude_root` points it at a non-default install.
+
+### `reviews` reads the tree it already serves
+
+There is no endpoint: each review run writes a `state.json` into the content
+tree, under its project's `raw/` directory, and the panel is a reader of
+those files. So the table's **presence is the switch** — a bare
+`[sources.reviews]` line turns the panel on with both defaults — and there is
+nothing for `hud init` to probe.
+
+```toml
+[sources.reviews]
+# root = "~/hud"                              # defaults to HUD_ROOT
+# glob = "projects/*/raw/PR-*/state.json"     # the default
+```
+
+`glob` is not a globbing library. It is split on `/`, and each segment is
+either a literal name or a within-segment `*` match — so `PR-*` matches
+`PR-76409` and nothing with a slash in it. The walk is the tree's own:
+`readdirSync` per segment, dot-prefixed names and symlinks skipped, an
+unreadable directory contributing nothing. A glob that is absolute, empty, or
+carries a `.`/`..` segment is refused, and `/api/reviews` answers **503**
+with the reason rather than quietly walking something else — a typo here
+should read as a fault, not as "no runs".
+
+The row's `project` is the name the **first wildcard segment** matched, which
+under the default glob is the project directory. Each row carries the state
+file's fields plus four the server derives: `project`, `elapsed_s` (now minus
+`started` while `ended` is null, else `ended` minus `started`), `pr_url`
+(`https://github.com/<repo>/pull/<pr>`, only when `repo` is `owner/name` and
+`pr` is a positive integer), and `note_url` (the `/n/` tree route for the
+note's path, `.md` dropped — the same rule a tree click applies). Running
+rows sort first, then newest `started` first.
+
+A file the glob names that is **not a JSON object** is still a row:
+`unreadable: true`, the path, and the parse error. A run whose state cannot
+be read is a fact about the tree, not an absence from it, and the panel says
+so in place rather than dropping the row. Fields the file omits render as
+`—`.
+
+Like sessions, the route is GET-only, reads live on every request, and writes
+nothing — not a snapshot, not a cache. The budgets are the same shape as the
+other filesystem panels: at most 200 rows served, at most 2000 files looked
+at, and a state file larger than 256 KiB treated as unreadable.
 
 ## Top level
 
@@ -343,6 +390,7 @@ configured ones:
 | `sessions.lectio` | does the graft daemon answer | commented `lectio` line; sessions still configured |
 | `peers` | `gh` on `PATH` **and** `gh auth status` | a comment, since there is no key — plus the `gh auth login` step |
 | `loadout` | nothing to probe | never a stub; it is on by default |
+| `reviews` | nothing to probe — it reads the tree | never written; add `[sources.reviews]` by hand to turn the panel on |
 
 The reason a stub carries its own explanation, rather than this file carrying
 all of them, is that a new user whose HUD comes up with four grey panels cannot

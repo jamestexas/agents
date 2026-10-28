@@ -13,6 +13,8 @@
 //   sessions — /api/sessions               (read `~/.claude`, graft via lectio)
 //   loadout  — /api/loadout                (what skills/agents are installed,
 //                                           where from, and where that drifts)
+//   reviews  — /api/reviews                (each review run's state.json,
+//                                           read out of the content tree)
 //
 // Plus the shell routes: /, /ui/*, and the deep links /n/<path> and
 // /s/<group>/<id>, which all serve ui/index.html so a bookmarked view loads
@@ -1572,6 +1574,258 @@ function serveLoadout(res, root) {
   return sendJson(res, 200, buildLoadout({ claudeRoot, hudRoot: root }));
 }
 
+// ------------------------------------------------------------ reviews layer
+//
+// One row per review run. A run writes `state.json` into the content tree
+// itself — under `raw/`, so the tree walker lists the file and never opens
+// it — and this layer is the one reader that does. Like sessions and loadout
+// it is watch-only: read live on every request, cached nowhere, reachable by
+// no verb but GET. Every "do" the panel offers is a link out (the PR, the
+// posted review) or a link into the tree (the note).
+
+/** Where a run's `state.json` is looked for when `glob` is not configured. */
+export const DEFAULT_REVIEWS_GLOB = "projects/*/raw/PR-*/state.json";
+
+export const REVIEWS_LIMITS = {
+  // Rows one response may carry. The sort needs every file, so the walk is
+  // bounded separately.
+  maxReviews: 200,
+  // Files the walk looks at before stopping. A tree with more runs than this
+  // is an archive, and the HUD is not the tool for one.
+  maxScanned: 2000,
+  // A state file is a few hundred bytes; one that is not is not a state file.
+  maxStateBytes: 256 * 1024,
+};
+
+/**
+ * Split a glob into segments and refuse what the walker cannot honour: an
+ * absolute path, an empty segment, `.` or `..`. `*` matches within one
+ * segment only — this is not a globbing library, it is `readdirSync` plus a
+ * per-name test, the same walk the tree uses, so a pattern can never reach
+ * outside the root it is applied to.
+ *
+ * @returns {{segments: Array<{literal?: string, re?: RegExp}>}|{error: string}}
+ */
+export function parseReviewsGlob(glob) {
+  const s = String(glob ?? "");
+  if (s === "" || s.startsWith("/") || /[\\\0]/.test(s)) {
+    return { error: "glob must be a relative path" };
+  }
+  const segments = [];
+  for (const seg of s.split("/")) {
+    if (seg === "" || seg === "." || seg === "..") {
+      return { error: "glob must not contain empty, '.' or '..' segments" };
+    }
+    if (!seg.includes("*")) {
+      segments.push({ literal: seg });
+      continue;
+    }
+    const parts = seg.split("*").map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    segments.push({ re: new RegExp(`^${parts.join("[^/]*")}$`) });
+  }
+  return { segments };
+}
+
+/**
+ * Every file the glob names, as `{rel, project}` — `project` being the name
+ * the first wildcard segment matched, which with the default glob is the
+ * project directory. Dot-prefixed names and symlinks are skipped, as the tree
+ * walk skips them; a directory that cannot be read contributes nothing.
+ */
+function walkGlob(root, segments, budget) {
+  const out = [];
+  const step = (dir, i, project) => {
+    const seg = segments[i];
+    const last = i === segments.length - 1;
+    let dirents;
+    try {
+      dirents = fs.readdirSync(path.join(root, dir), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const d of dirents) {
+      if (out.length >= budget) return;
+      if (d.name.startsWith(".") || SKIP_NAMES.has(d.name)) continue;
+      if (seg.literal !== undefined ? d.name !== seg.literal : !seg.re.test(d.name)) continue;
+      const childRel = dir ? `${dir}/${d.name}` : d.name;
+      const p = project ?? (seg.re ? d.name : null);
+      if (last) {
+        if (d.isFile()) out.push({ rel: childRel, project: p });
+      } else if (d.isDirectory()) {
+        step(childRel, i + 1, p);
+      }
+    }
+  };
+  step("", 0, null);
+  return out;
+}
+
+/**
+ * The state fields the panel reads, copied by name. The file is written by a
+ * tool and read by a page; naming the contract here is what keeps a key that
+ * tool adds tomorrow from reaching the page untested.
+ */
+const REVIEW_FIELDS = [
+  "version",
+  "repo",
+  "pr",
+  "title",
+  "author",
+  "mode",
+  "head",
+  "base",
+  "phase",
+  "phases",
+  "started",
+  "ended",
+  "verdict",
+  "gates",
+  "probes",
+  "findings",
+  "note",
+  "posted",
+];
+
+const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+/** `https://github.com/<repo>/pull/<pr>`, or null when either half is not what it claims. */
+function prUrl(repo, pr) {
+  if (typeof repo !== "string" || !REPO_RE.test(repo)) return null;
+  const n = typeof pr === "string" && /^\d+$/.test(pr) ? Number(pr) : pr;
+  if (!Number.isInteger(n) || n <= 0) return null;
+  return `https://github.com/${repo}/pull/${n}`;
+}
+
+/**
+ * The tree route for a note path: `/n/<path>` with the trailing `.md`
+ * dropped, which is the rule the UI's `entryUrl` applies. A path the deep-link
+ * resolver would refuse is not turned into a link at all.
+ */
+function noteUrl(note) {
+  if (typeof note !== "string" || note === "" || note.startsWith("/")) return null;
+  const segments = note.replace(/\.md$/i, "").split("/");
+  if (segments.some((s) => s === "" || s === "." || s === ".." || /[\\\0]/.test(s))) return null;
+  return `/n/${segments.map(encodeURIComponent).join("/")}`;
+}
+
+/** Whole seconds from `started` to `ended`, or to now while `ended` is null. */
+function elapsedSeconds(started, ended, now) {
+  const a = Date.parse(started);
+  if (Number.isNaN(a)) return null;
+  const b = ended == null ? now : Date.parse(ended);
+  if (Number.isNaN(b)) return null;
+  return Math.max(0, Math.round((b - a) / 1000));
+}
+
+/**
+ * One item for one file. A file that is not a JSON object is still a row —
+ * `unreadable: true` with the path and the reason — because a run whose state
+ * cannot be read is a fact about the tree, not an absence from it.
+ */
+function readReviewState(root, rel, project, now) {
+  const abs = path.join(root, rel);
+  const base = { path: rel, project };
+  let stat;
+  try {
+    stat = fs.statSync(abs);
+  } catch (err) {
+    return { ...base, unreadable: true, error: errText(err) };
+  }
+  if (stat.size > REVIEWS_LIMITS.maxStateBytes) {
+    const error = `larger than ${REVIEWS_LIMITS.maxStateBytes} bytes`;
+    return { ...base, unreadable: true, error };
+  }
+  let state;
+  try {
+    state = JSON.parse(fs.readFileSync(abs, "utf8"));
+  } catch (err) {
+    return { ...base, unreadable: true, error: errText(err) };
+  }
+  if (!state || typeof state !== "object" || Array.isArray(state)) {
+    return { ...base, unreadable: true, error: "not a JSON object" };
+  }
+  const item = { ...base };
+  for (const k of REVIEW_FIELDS) if (state[k] !== undefined) item[k] = state[k];
+  // The contract spells a run that has not finished as `ended: null`.
+  item.running = item.ended == null;
+  item.elapsed_s = elapsedSeconds(item.started, item.ended, now);
+  item.pr_url = prUrl(item.repo, item.pr);
+  item.note_url = noteUrl(item.note);
+  return item;
+}
+
+const startedMs = (item) => {
+  const t = Date.parse(item.started);
+  return Number.isNaN(t) ? -Infinity : t;
+};
+
+/** Running first, then newest `started` first; the path breaks ties so the order is stable. */
+function compareReviews(a, b) {
+  const ra = a.running && !a.unreadable ? 0 : 1;
+  const rb = b.running && !b.unreadable ? 0 : 1;
+  if (ra !== rb) return ra - rb;
+  const sa = startedMs(a);
+  const sb = startedMs(b);
+  if (sa !== sb) return sb - sa;
+  return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+}
+
+/**
+ * Every review run under `root`, sorted for the panel.
+ *
+ * @param {string} root
+ * @param {{glob?: string, now?: number}} [opts]
+ * @returns {{items: object[], scanned: number, truncated: boolean}}
+ */
+export function listReviews(root, opts = {}) {
+  const now = opts.now ?? Date.now();
+  const parsed = parseReviewsGlob(opts.glob ?? DEFAULT_REVIEWS_GLOB);
+  if (parsed.error) throw new Error(`reviews glob: ${parsed.error}`);
+  const found = walkGlob(root, parsed.segments, REVIEWS_LIMITS.maxScanned);
+  const items = found.map((f) => readReviewState(root, f.rel, f.project, now)).sort(compareReviews);
+  return { items, scanned: found.length, truncated: found.length >= REVIEWS_LIMITS.maxScanned };
+}
+
+/**
+ * Not configured ⇒ 404, the panel-off contract sessions and loadout use: there
+ * is no snapshot tier, so "unconfigured" and "down" are not two states worth
+ * telling apart. A glob the walker cannot honour is the one way this source
+ * can be configured and still unable to answer, and that is a 503 with the
+ * reason, not a quiet 404 — a typo in `hud.toml` should read as a fault.
+ */
+function serveReviews(res, root) {
+  const source = sourceOf(loadConfig(root), "reviews");
+  if (!source) {
+    return sendJson(res, 404, {
+      source: "reviews",
+      error: `reviews is not configured in ${CONFIG_TOML}`,
+    });
+  }
+  const reviewsRoot =
+    typeof source.root === "string" && source.root !== "" ? expandHome(source.root) : root;
+  const glob =
+    typeof source.glob === "string" && source.glob !== "" ? source.glob : DEFAULT_REVIEWS_GLOB;
+  const parsed = parseReviewsGlob(glob);
+  if (parsed.error) {
+    return sendJson(res, 503, {
+      source: "reviews",
+      error: `reviews.glob in ${CONFIG_TOML}: ${parsed.error}`,
+    });
+  }
+  const { items, truncated } = listReviews(reviewsRoot, { glob });
+  const shown = items.slice(0, REVIEWS_LIMITS.maxReviews);
+  return sendJson(res, 200, {
+    source: "reviews",
+    stale: false,
+    generated_at: new Date().toISOString(),
+    root: reviewsRoot,
+    glob,
+    count: shown.length,
+    truncated: truncated || shown.length < items.length,
+    items: shown,
+  });
+}
+
 // -------------------------------------------------------------- deep links
 //
 // The path *is* the slug. There is no registry mapping pretty names onto
@@ -1801,6 +2055,9 @@ function handle(req, res, root, uiDir, dyn, refresh) {
   // Same watch-only shape as sessions: one GET route, no POST case above, so
   // every mutating verb lands on the 405 arm.
   if (pathname === "/api/loadout") return serveLoadout(res, root);
+  // Reviews reads the content tree and nothing else: one GET route, no POST
+  // case above, so every mutating verb lands on the 405 arm.
+  if (pathname === "/api/reviews") return serveReviews(res, root);
   // Matched against the raw target rather than `url.pathname`: the URL parser
   // folds `..` away, and a traversal attempt must be refused outright rather
   // than quietly rewritten into whichever route it normalises to.

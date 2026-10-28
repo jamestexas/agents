@@ -662,6 +662,82 @@
         word-break: break-all;
       }
 
+      /* ---- reviews panel: one run per row, running rows lead ---- */
+      /* Ten columns in a 340px aside: the table scrolls sideways rather than
+         wrapping, so a row stays a row. */
+      .reviews {
+        overflow-x: auto;
+      }
+      .reviews table {
+        border-collapse: collapse;
+        white-space: nowrap;
+        font-size: 11px;
+      }
+      .reviews th {
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        text-align: left;
+        padding: 0 8px 4px 0;
+        border-bottom: 1px solid var(--card);
+      }
+      .reviews td {
+        padding: 4px 8px 4px 0;
+        border-top: 1px solid var(--card);
+        vertical-align: baseline;
+      }
+      .reviews tbody tr:first-child td {
+        border-top: 0;
+      }
+      /* A run in flight is the row the reader came for: its left edge is lit
+         and its phase takes the live colour. Finished rows keep the panel's
+         muted voice. */
+      .reviews tr.running td {
+        color: var(--fg);
+      }
+      .reviews tr.running td:first-child {
+        box-shadow: inset 3px 0 0 var(--cyan);
+        padding-left: 6px;
+      }
+      .reviews tr.running .phase {
+        color: var(--cyan);
+      }
+      .reviews tr.unreadable .warn {
+        color: var(--yellow);
+      }
+      .reviews .path {
+        white-space: normal;
+        word-break: break-all;
+      }
+      .reviews .gate {
+        letter-spacing: 2px;
+      }
+      .reviews .g-ok {
+        color: var(--green);
+      }
+      .reviews .g-fail {
+        color: var(--hot);
+      }
+      .reviews .g-null {
+        color: var(--muted);
+      }
+      .reviews .v-approve {
+        color: var(--green);
+      }
+      .reviews .v-request_changes {
+        color: var(--hot);
+      }
+      .reviews .v-comment {
+        color: var(--yellow);
+      }
+      .reviews .findings.hot {
+        color: var(--hot);
+      }
+      .reviews a.notelink {
+        color: var(--cyan);
+      }
+
       .footnote {
         color: var(--muted);
         font-size: 11px;
@@ -714,6 +790,10 @@
         <div class="panel" id="wrap-digest" data-source="digest" hidden>
           <h2>Recent activity<span class="stamp" id="stamp-digest"></span></h2>
           <div class="body" id="panel-digest"></div>
+        </div>
+        <div class="panel" id="wrap-reviews" data-source="reviews" hidden>
+          <h2>Reviews<span class="stamp" id="stamp-reviews"></span></h2>
+          <div class="body" id="panel-reviews"></div>
         </div>
         <div class="panel" id="wrap-sessions" data-source="sessions" hidden>
           <h2>Sessions<span class="stamp" id="stamp-sessions"></span></h2>
@@ -1933,6 +2013,169 @@
         return wrap;
       }
 
+      // ------------------------------------------------------ reviews panel
+      //
+      // One row per review run, read from the state.json each run writes into
+      // its project's raw/ directory. Running rows lead and are marked; every
+      // other cell is a fact or a link — out to GitHub for the PR and the
+      // posted review, into the tree for the note. Nothing here starts,
+      // stops, or posts anything.
+
+      const DASH = "—";
+
+      /** Seconds as the panel shows them: 45s, 22m, 1h05m. */
+      function fmtElapsed(s) {
+        if (typeof s !== "number" || isNaN(s)) return DASH;
+        if (s < 60) return s + "s";
+        const m = Math.floor(s / 60);
+        if (m < 60) return m + "m";
+        return Math.floor(m / 60) + "h" + String(m % 60).padStart(2, "0") + "m";
+      }
+
+      /** One cell; an absent fact renders as a dash rather than a blank. */
+      function cell(tr, content, cls, title) {
+        const td = node("td", cls);
+        if (content instanceof Node) td.appendChild(content);
+        else {
+          const blank = content === undefined || content === null || content === "";
+          td.textContent = blank ? DASH : String(content);
+        }
+        if (title) td.title = title;
+        tr.appendChild(td);
+        return td;
+      }
+
+      /** Three dots, one per gate, in order: ledger · triage · blocking. */
+      function gatesNode(gates) {
+        const g = gates && typeof gates === "object" ? gates : {};
+        const wrap = node("span", "gates");
+        const words = [];
+        for (const name of ["ledger", "triage", "blocking"]) {
+          const v = g[name] === "ok" || g[name] === "fail" ? g[name] : "null";
+          wrap.appendChild(node("span", "gate g-" + v, "●"));
+          words.push(name + " " + (v === "null" ? DASH : v));
+        }
+        wrap.title = words.join(" · ");
+        wrap.setAttribute("aria-label", wrap.title);
+        return wrap;
+      }
+
+      /**
+       * A link into the tree. The href is a real /n/ URL, so middle-click and
+       * copy work; a plain click takes the same path a tree click does, which
+       * is what makes a note that has moved land on "not found" rather than a
+       * reload.
+       */
+      function noteLink(url) {
+        const a = node("a", "notelink", "note");
+        a.href = url;
+        a.title = url.replace(/^\/n\//, "");
+        a.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          history.pushState({ kind: "entry", path: parseRoute(url).path }, "", url);
+          applyLocation();
+        });
+        return a;
+      }
+
+      function reviewRow(r) {
+        const tr = document.createElement("tr");
+        if (r.unreadable) {
+          tr.className = "unreadable";
+          cell(tr, "unreadable", "warn", r.error || "");
+          cell(tr, r.path, "path").colSpan = 9;
+          return tr;
+        }
+        if (r.running) tr.className = "running";
+        const prText = r.pr === undefined || r.pr === null ? DASH : "#" + r.pr;
+        cell(
+          tr,
+          r.pr_url ? linkOut(r.pr_url, prText, "text") : prText,
+          "pr",
+          [r.repo, r.title].filter(Boolean).join(": "),
+        );
+        cell(tr, r.project, "project");
+        cell(tr, r.mode, "mode");
+        cell(
+          tr,
+          r.running ? (r.phase || DASH) + " · " + fmtElapsed(r.elapsed_s) : r.phase,
+          "phase",
+          (r.running ? "running for " : "took ") + fmtElapsed(r.elapsed_s),
+        );
+        cell(tr, r.verdict, "verdict v-" + String(r.verdict || "none").toLowerCase());
+        cell(tr, gatesNode(r.gates), "gates");
+        const p = r.probes && typeof r.probes === "object" ? r.probes : null;
+        cell(
+          tr,
+          p ? p.unavailable : undefined,
+          "unavail",
+          p
+            ? "probes: " + p.ran + " ran, " + p.failed + " failed, " + p.unavailable + " unavailable of " + p.total
+            : "",
+        );
+        const f = r.findings && typeof r.findings === "object" ? r.findings : null;
+        const n = (k) => (f && typeof f[k] === "number" ? f[k] : DASH);
+        cell(
+          tr,
+          f ? [n("blocking"), n("non_blocking"), n("question"), n("observation")].join("/") : undefined,
+          "findings" + (f && f.blocking > 0 ? " hot" : ""),
+          "findings: blocking / non-blocking / question / observation",
+        );
+        cell(tr, r.note_url ? noteLink(r.note_url) : undefined, "note", r.note || "");
+        const posted = r.posted && typeof r.posted === "object" ? r.posted : null;
+        cell(
+          tr,
+          posted && posted.url
+            ? linkOut(posted.url, String(posted.state || "posted").toLowerCase(), "text")
+            : undefined,
+          "posted",
+          posted && posted.at ? "posted " + fmtTime(posted.at) : "",
+        );
+        return tr;
+      }
+
+      const REVIEW_COLUMNS = [
+        ["PR", "the pull request, linked"],
+        ["project", "the project directory the run wrote into"],
+        ["mode", "default, light, deep, or engage"],
+        ["phase", "where the run is; while it runs, with its elapsed time"],
+        ["verdict", "APPROVE, REQUEST_CHANGES, or COMMENT once settled"],
+        ["gates", "ledger · triage · blocking"],
+        ["unavail", "probes that could not run"],
+        ["B/N/Q/O", "findings: blocking / non-blocking / question / observation"],
+        ["note", "the run's note, in the tree"],
+        ["posted", "the review as posted, linked"],
+      ];
+
+      function buildReviews(env) {
+        const items = Array.isArray(env.items) ? env.items : [];
+        if (!items.length) return node("div", "empty", "no review runs recorded");
+        const wrap = node("div", "reviews");
+        const table = document.createElement("table");
+        const head = document.createElement("tr");
+        for (const [label, title] of REVIEW_COLUMNS) {
+          const th = node("th", null, label);
+          th.title = title;
+          head.appendChild(th);
+        }
+        table.appendChild(node("thead")).appendChild(head);
+        const body = table.appendChild(node("tbody"));
+        for (const r of items) body.appendChild(reviewRow(r));
+        wrap.appendChild(table);
+        if (env.truncated) wrap.appendChild(node("div", "row-sub greyed", "older runs not shown"));
+        const running = items.filter((r) => r.running && !r.unreadable).length;
+        wrap.appendChild(
+          node(
+            "div",
+            "footnote",
+            (running ? running + " running · " : "") +
+              items.length +
+              " run(s) · each row is one run's state.json; the HUD reads it and changes nothing.",
+          ),
+        );
+        return wrap;
+      }
+
       // ------------------------------------------------------ loadout panel
       //
       // Which skills and agents this machine has, which tree each one really
@@ -2145,6 +2388,32 @@
         renderPanel("loadout", env, buildLoadout);
       }
 
+      /**
+       * Reviews reads the content tree, so like sessions and loadout it has no
+       * snapshot tier and a 404 is the panel-off contract. A 503 is the one
+       * other answer it gives — a glob the walker cannot honour — and that is
+       * a configuration fault worth the banner, not a panel to hide quietly.
+       */
+      async function loadReviews() {
+        let env = null;
+        try {
+          const res = await fetch("/api/reviews", { cache: "no-store" });
+          const body = await res.json().catch(() => null);
+          if (res.ok && body && Array.isArray(body.items)) {
+            env = body;
+            noteSource("reviews", "live");
+          } else if (res.status === 404) {
+            SOURCE_STATE.delete("reviews");
+            paintConnState();
+          } else {
+            noteSource("reviews", "absent", body && body.error);
+          }
+        } catch {
+          /* the HUD server itself is gone; hide rather than shout */
+        }
+        renderPanel("reviews", env, buildReviews);
+      }
+
       /** ⟳ : the tree, the two proxied sources, and a real peers re-poll. */
       async function refreshAll() {
         const button = el("refresh");
@@ -2156,6 +2425,7 @@
             loadDigest(),
             loadSessions(),
             loadLoadout(),
+            loadReviews(),
             // POST first: peers are generated here, so a GET alone would only
             // re-serve the snapshot the server already has.
             fetch("/api/refresh/peers", { method: "POST", cache: "no-store" })
@@ -2218,6 +2488,7 @@
       loadDigest();
       loadPeers();
       loadLoadout();
+      loadReviews();
     </script>
   </body>
 </html>

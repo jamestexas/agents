@@ -58,6 +58,7 @@ Verified by building the image and probing every route against a fixture tree.
 | Theme, UI shell | Works | Static assets served from the image. |
 | Mermaid | Works | `ui/mermaid.min.js` is vendored into the image and renders client-side. |
 | Sessions — `/api/sessions` | Works **if** mounted and configured | Needs `~/.claude` bind-mounted *and* `sources.sessions.root` in `hud.toml` pointing at that mount — there is no default, so an unconfigured HUD 404s this route. The optional lectio graft stays `off`/`unavailable` without the daemon; tier-1 rows are unaffected. |
+| Reviews — `/api/reviews` | Works **if** configured | The same pure read of the mounted tree as `/api/tree`: it walks `projects/*/raw/PR-*/state.json` under `HUD_ROOT` (or `sources.reviews.root`) and calls nothing. An unconfigured HUD 404s this route, because the `[sources.reviews]` table is the switch. |
 | Loadout — `/api/loadout` | Partly, and its drift is **not** trustworthy | See below. |
 | Peers — `/api/dyn/peers` | Cannot | Needs the `gh` CLI plus auth. A distroless image has neither, so the refresh fails (`command not found: gh`) and the route 503s — unless a previously written `.generated/peers.json` is in the mounted tree, in which case it serves that snapshot, correctly flagged stale. |
 | Digest — `/api/dyn/digest` | Cannot | Runs `sources.digest.cmd`, i.e. the `lectio` CLI, which is not in the image. 503s with `command not found: lectio`. |
