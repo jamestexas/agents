@@ -9,9 +9,11 @@ cat > "$tmp/CODEOWNERS" <<'EOF'
 /api/internal/    @org/api-internal
 docs/*.md         @org/docs @alice
 README.md         @org/readme
+/README.md        @root
 EOF
 printf '%s\n' api/x.go api/internal/y.go docs/a.md other/z.txt \
-    api/sub/x.go api/internal/deep/y.go api/internal/a/b/c.go sub/dir/README.md > "$tmp/files"
+    api/sub/x.go api/internal/deep/y.go api/internal/a/b/c.go sub/dir/README.md \
+    README.md sub/docs/a.md > "$tmp/files"
 ruby "$HERE/../scripts/codeowners.rb" "$tmp/CODEOWNERS" < "$tmp/files" > "$tmp/owners.json"
 own() { jq -r --arg p "$1" '.paths[$p].owners | join(",")' "$tmp/owners.json"; }
 [ "$(own api/x.go)" = "@org/api" ]                      || { echo "api: got $(own api/x.go)"; exit 1; }
@@ -23,5 +25,10 @@ own() { jq -r --arg p "$1" '.paths[$p].owners | join(",")' "$tmp/owners.json"; }
 [ "$(own api/internal/deep/y.go)" = "@org/api-internal" ] || { echo "dir depth2: got $(own api/internal/deep/y.go)"; exit 1; }
 [ "$(own api/internal/a/b/c.go)" = "@org/api-internal" ]  || { echo "dir depth4: got $(own api/internal/a/b/c.go)"; exit 1; }
 [ "$(own sub/dir/README.md)" = "@org/readme" ]           || { echo "bare name any depth: got $(own sub/dir/README.md)"; exit 1; }
+# Anchoring must survive: a rooted pattern owns only the root entry, and a
+# pattern containing "/" is anchored at the root even without a leading "/".
+[ "$(own README.md)" = "@root" ]                         || { echo "rooted: got $(own README.md)"; exit 1; }
+[ "$(own sub/docs/a.md)" = "@org/default" ]              || { echo "slashed pattern must stay anchored: got $(own sub/docs/a.md)"; exit 1; }
+jq -e '.paths["api/x.go"].rule_index == 1' "$tmp/owners.json" >/dev/null || { echo "rule_index missing"; exit 1; }
 jq -e '.source == "'"$tmp"'/CODEOWNERS"' "$tmp/owners.json" >/dev/null || { echo "source missing"; exit 1; }
 jq -e '.teams | index("@org/api")' "$tmp/owners.json" >/dev/null || { echo "teams rollup missing"; exit 1; }
