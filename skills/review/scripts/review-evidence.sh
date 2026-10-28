@@ -48,13 +48,18 @@ if [ -n "$CLEANUP" ]; then
     # Only a PR run owns its worktree. In path mode the "worktree" is the
     # user's own repo dir, which must never be removed.
     kind="$(jq -r '.kind // ""' "$ev/target.json" 2>/dev/null || true)"
+    prn="$(jq -r '.pr // ""' "$ev/target.json" 2>/dev/null || true)"
     wt=""; rd=""
     [ -f "$ev/git/worktree-path" ] && wt="$(cat "$ev/git/worktree-path")"
     [ -f "$ev/git/repo-dir" ] && rd="$(cat "$ev/git/repo-dir")"
     if [ "$kind" = pr ] && [ -n "$wt" ] && [ "$wt" != "$rd" ] && [ -d "$wt" ]; then
         git -C "$rd" worktree remove --force "$wt" && note "removed worktree $wt"
     else
-        note "nothing to remove for $CLEANUP (kind=${kind:-?}, worktree=${wt:-none})"
+        note "no worktree to remove for $CLEANUP (kind=${kind:-?}, worktree=${wt:-none})"
+    fi
+    # the fetch refspec parked the PR head under refs/review/<N>; drop it too
+    if [ "$kind" = pr ] && [ -n "$prn" ] && [ -n "$rd" ] && git -C "$rd" show-ref --quiet "refs/review/$prn"; then
+        git -C "$rd" update-ref -d "refs/review/$prn" && note "deleted refs/review/$prn in $rd"
     fi
     exit 0
 fi
