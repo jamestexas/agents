@@ -59,3 +59,35 @@ test('"unresolved" inside a decided cell does not make the row unresolved', () =
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /ledger: 3 asked, 3 decided\+unresolved — ok/);
 });
+
+test('a Blocking finding attached to an unresolved ledger row fails gate 3', () => {
+  const r = run('bad-unresolved-row');
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /blocking: "parse before signature check" rests on unresolved ledger row 2/);
+});
+
+test('a Blocking finding with no ledger rows fails gate 3', () => {
+  const r = run('bad-no-row');
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /blocking: "parse before signature check" cites no ledger row/);
+});
+
+test('a Blocking finding citing a row the ledger does not have fails gate 3', () => {
+  const r = run('bad-unknown-row');
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /blocking: "parse before signature check" cites unknown ledger row 9/);
+});
+
+test('a broken claims.jsonl line is reported by line number, not as a stack trace', () => {
+  const r = run('bad-json');
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /blocking: work\/claims\.jsonl line 2 is not JSON/);
+  assert.doesNotMatch(r.stderr, /SyntaxError/);
+});
+
+test('a findings.json that is not JSON is reported as such', () => {
+  const r = run('bad-json-findings');
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /blocking: work\/findings\.json is not JSON/);
+  assert.doesNotMatch(r.stderr, /SyntaxError/);
+});

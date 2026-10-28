@@ -1,0 +1,3 @@
+[
+  {"tag":"Blocking","title":"parse before signature check","file_line":"handler.go:88","blast":"every inbound webhook","rows":[1,2],"claims":["c1","c2"]}
+]

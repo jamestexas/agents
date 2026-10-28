@@ -2,34 +2,49 @@
 // render.mjs <run-dir> --title T --out FILE — assemble the review artifact.
 // Open sections come from work/summary.md, findings.json, impact.md. Everything
 // else is wrapped in <details> so a human reads a screen and their AI reads
-// the rest. It does not judge anything; check.mjs does the gating.
+// the rest. It does not judge anything; check.mjs does the gating. A phase
+// file that is missing or not parseable becomes a labelled empty section, never
+// a crash. Without --out the artifact lands in <run>/work/artifact.md.
 import fs from 'node:fs';
 import path from 'node:path';
 
 const args = process.argv.slice(2);
 const run = args[0];
+if (!run || run.startsWith('--')) { console.error('usage: render.mjs <run-dir> [--title T] [--out FILE]'); process.exit(2); }
 const opt = (k, d) => { const i = args.indexOf(k); return i === -1 ? d : args[i + 1]; };
 const title = opt('--title', 'Review');
 const outFile = opt('--out', path.join(run, 'work', 'artifact.md'));
 const w = (f) => { const p = path.join(run, 'work', f); return fs.existsSync(p) ? fs.readFileSync(p, 'utf8').trim() : ''; };
 const e = (f) => { const p = path.join(run, 'evidence', f); return fs.existsSync(p) ? fs.readFileSync(p, 'utf8').trim() : ''; };
-const details = (summary, body) => body ? `<details><summary>${summary}</summary>\n\n${body}\n\n</details>\n` : `<details><summary>${summary} — not produced</summary>\n\n_absent_\n\n</details>\n`;
+const tryJSON = (text) => { try { return JSON.parse(text); } catch { return undefined; } };
+// '' = file absent, undefined = present but not parseable, otherwise the body.
+const details = (summary, body) => {
+  if (body === undefined) return `<details><summary>${summary} — not parseable</summary>\n\n_absent_\n\n</details>\n`;
+  if (!body) return `<details><summary>${summary} — not produced</summary>\n\n_absent_\n\n</details>\n`;
+  return `<details><summary>${summary}</summary>\n\n${body}\n\n</details>\n`;
+};
 
-const findings = w('findings.json') ? JSON.parse(w('findings.json')) : [];
-const findingsMd = findings.length
-  ? findings.map((f) => `- [${f.tag}] ${f.title} — \`${f.file_line}\`. Blast: ${f.blast}. Ledger row${(f.rows || []).length > 1 ? 's' : ''} ${(f.rows || []).join(', ')}.`).join('\n')
-  : '_none confirmed_';
+const findings = w('findings.json') ? tryJSON(w('findings.json')) : [];
+const findingLine = (f) => {
+  const rows = f.rows || [];
+  const rowNote = rows.length ? ` Ledger row${rows.length > 1 ? 's' : ''} ${rows.join(', ')}.` : '';
+  return `- [${f.tag}] ${f.title} — \`${f.file_line ?? '?'}\`. Blast: ${f.blast}.${rowNote}`;
+};
+const findingsMd = !Array.isArray(findings) ? '_findings.json not parseable_'
+  : findings.length ? findings.map(findingLine).join('\n') : '_none confirmed_';
 
-const manifest = e('manifest.json') ? JSON.parse(e('manifest.json')).probes : [];
+const manifestDoc = e('manifest.json') ? tryJSON(e('manifest.json')) : { probes: [] };
+const manifest = Array.isArray(manifestDoc?.probes) ? manifestDoc.probes : undefined;
 const order = { UNAVAILABLE: 0, FAILED: 1, RAN: 2 };
-const manifestMd = manifest.length
+const manifestMd = manifest === undefined ? undefined : manifest.length
   ? ['| Probe | Status | Reason / file |', '|---|---|---|',
-     ...manifest.sort((a, b) => order[a.status] - order[b.status] || a.name.localeCompare(b.name))
+     ...manifest.sort((a, b) => (order[a.status] ?? 99) - (order[b.status] ?? 99) || a.name.localeCompare(b.name))
        .map((p) => `| ${p.name} | ${p.status} | ${p.status === 'RAN' ? `\`${p.file}\`` : p.reason} |`)].join('\n')
   : '';
 
-const claims = w('claims.jsonl').split('\n').filter(Boolean).map((l) => JSON.parse(l));
-const claimsMd = ['RAN', 'READ', 'ASSUMED'].map((k) => {
+const claimLines = w('claims.jsonl').split('\n').filter(Boolean).map(tryJSON);
+const claims = claimLines.includes(undefined) ? undefined : claimLines;
+const claimsMd = claims === undefined ? undefined : !claims.length ? '' : ['RAN', 'READ', 'ASSUMED'].map((k) => {
   const rows = claims.filter((c) => c.class === k);
   return `**${k}** (${rows.length})\n${rows.map((c) => `- ${c.id}: ${c.text} — \`${c.source}\` (row ${c.row})`).join('\n') || '- none'}`;
 }).join('\n\n');
@@ -45,7 +60,7 @@ const md = [
   details('Decision ledger', w('ledger.md')),
   details('Triage', w('triage.md')),
   details('Refutations', w('refutations.md')),
-  details('Claims', claims.length ? claimsMd : ''),
+  details('Claims', claimsMd),
   details('Evidence manifest', manifestMd),
   details('Explain', w('teach.md')),
   details('Replay', replay),

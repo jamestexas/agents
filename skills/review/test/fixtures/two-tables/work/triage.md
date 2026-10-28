@@ -6,7 +6,7 @@
 | 2 | helper could be generic | dropped | fails MATTERS — no second caller in `probes/go-graph/modmap-impact.out` |
 | 3 | naming inconsistent | dropped | status quo — same shape at `other.go:40`, `:67` (read in worktree) |
 
-**Confirmed: 1. Dropped: 2. Already raised: 0. Already addressed: 0. Revised: 0.**
+**Confirmed: 1. Dropped: 2. Already raised: 0. Already addressed: 0. Revised: 2.**
 
 ### Revised candidates
 

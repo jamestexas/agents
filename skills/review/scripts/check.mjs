@@ -9,7 +9,9 @@
 //   2. triage:   header "N candidates in, N dispositions out" == rows of the
 //                table under that header (other tables in the file are ignored)
 //   3. blocking: every [Blocking] finding cites >=1 RAN/READ claim, 0 ASSUMED,
-//                and no claim id that is missing from claims.jsonl
+//                no claim id missing from claims.jsonl, and >=1 ledger row that
+//                exists and is not Unresolved (an unresolved row demotes the
+//                finding to a Question)
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -17,6 +19,7 @@ const run = process.argv[2];
 if (!run) { console.error('usage: check.mjs <run-dir>'); process.exit(2); }
 const work = (f) => path.join(run, 'work', f);
 const read = (f) => fs.existsSync(work(f)) ? fs.readFileSync(work(f), 'utf8') : null;
+const tryJSON = (text) => { try { return JSON.parse(text); } catch { return undefined; } };
 
 const isRow = (l) => /^\|\s*\d+\s*\|/.test(l);
 const cells = (l) => l.split('|').slice(1, -1).map((c) => c.trim());
@@ -50,11 +53,16 @@ const gate = (name, body) => {
   return ok;
 };
 
+// Parsed once; gate 1 judges it, gate 3 checks finding rows against it.
+// null = no usable table (file missing or no numbered rows).
+const ledgerText = read('ledger.md');
+const ledgerRows = ledgerText === null ? null : tableRows(ledgerText);
+const ledger = ledgerRows && ledgerRows.length ? ledgerRows : null;
+
 gate('ledger', (fail, pass) => {
-  const ledger = read('ledger.md');
-  if (ledger === null) return fail('work/ledger.md missing');
-  const rows = tableRows(ledger);
-  const footer = ledger.match(/Questions asked:\s*(\d+)\./);
+  if (ledgerText === null) return fail('work/ledger.md missing');
+  const rows = ledgerRows;
+  const footer = ledgerText.match(/Questions asked:\s*(\d+)\./);
   if (!footer) return fail('footer "Questions asked: N." missing');
   const asked = Number(footer[1]);
   if (asked !== rows.length) return fail(`footer says ${asked} asked, table has ${rows.length} rows`);
@@ -81,16 +89,36 @@ gate('blocking', (fail, pass) => {
   const claimsRaw = read('claims.jsonl');
   const findingsRaw = read('findings.json');
   if (claimsRaw === null || findingsRaw === null) return fail('work/claims.jsonl or work/findings.json missing');
-  const claims = new Map(claimsRaw.split('\n').filter(Boolean).map((l) => { const c = JSON.parse(l); return [c.id, c]; }));
-  const blocking = JSON.parse(findingsRaw).filter((f) => f.tag === 'Blocking');
+  const claims = new Map();
+  const claimLines = claimsRaw.split('\n');
+  for (let i = 0; i < claimLines.length; i++) {
+    if (!claimLines[i].trim()) continue;
+    const c = tryJSON(claimLines[i]);
+    if (c === undefined) return fail(`work/claims.jsonl line ${i + 1} is not JSON`);
+    claims.set(c.id, c);
+  }
+  const findings = tryJSON(findingsRaw);
+  if (findings === undefined) return fail('work/findings.json is not JSON');
+  if (!Array.isArray(findings)) return fail('work/findings.json is not a JSON array');
+  const blocking = findings.filter((f) => f.tag === 'Blocking');
   let bad = false;
+  if (blocking.length && ledger === null) { bad = true; fail('ledger unavailable for row check'); }
   for (const f of blocking) {
+    const rows = f.rows || [];
+    if (!rows.length) { bad = true; fail(`"${f.title}" cites no ledger row`); }
+    else if (ledger !== null) {
+      const byId = new Map(ledger.map((r) => [Number(r[0]), r]));
+      const unknown = rows.filter((n) => !byId.has(Number(n)));
+      const unresolved = rows.filter((n) => byId.has(Number(n)) && isUnresolved(byId.get(Number(n))[3]));
+      if (unknown.length) { bad = true; fail(`"${f.title}" cites unknown ledger row ${unknown.join(', ')}`); }
+      if (unresolved.length) { bad = true; fail(`"${f.title}" rests on unresolved ledger row ${unresolved.join(', ')}`); }
+    }
     const ids = f.claims || [];
-    const unknown = ids.filter((id) => !claims.has(id));
+    const unknownClaims = ids.filter((id) => !claims.has(id));
     const cs = ids.filter((id) => claims.has(id)).map((id) => claims.get(id));
     const assumed = cs.filter((c) => c.class === 'ASSUMED');
     const backed = cs.some((c) => c.class === 'RAN' || c.class === 'READ');
-    if (unknown.length) { bad = true; fail(`"${f.title}" cites unknown claim ${unknown.join(', ')}`); }
+    if (unknownClaims.length) { bad = true; fail(`"${f.title}" cites unknown claim ${unknownClaims.join(', ')}`); }
     if (assumed.length) { bad = true; fail(`"${f.title}" rests on ASSUMED claim ${assumed.map((c) => c.id).join(', ')}`); }
     else if (!backed) { bad = true; fail(`"${f.title}" cites no RAN/READ claim`); }
   }
