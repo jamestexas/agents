@@ -20,5 +20,7 @@ Write three files:
   `UNAVAILABLE`.
 - `{{WORK}}/teach.md`: the explanation, each finding written with the
   comment-craft tags and a citation, plus the explain-work degradation table
-  built from `manifest.json` statuses.
+  built from `manifest.json` statuses. If `{{CONTEXT}}` is `(none)`, mark
+  the situated layer skipped in that table rather than inventing project
+  context.
 Reply with one line: `done`.

@@ -30,5 +30,9 @@ claim you relied on:
 - ASSUMED: neither. Say in `text` what would upgrade it.
 
 Rules: do not widen scope to a question nobody assigned. Do not guess; an
-`Unresolved` is a correct answer. Report to disk, not in your reply; your
-reply is the single line `done: <n> rows, <m> claims`.
+`Unresolved` is a correct answer. No network: do not run `gh`, `curl`, or
+any fetch; the evidence is the directory and the worktree. If a row cannot
+be settled without a fetch, write `Unresolved` naming what probe is
+missing. Claim ids are exactly `{{READER}}-<n>`, numbered from 1. Escape
+`|` inside a cell as `\|`. Report to disk, not in your reply; your reply is
+the single line `done: <n> rows, <m> claims`.

@@ -19,4 +19,5 @@ Write `{{WORK}}/refutations.md`:
 
 Verdict is `stands`, `falls`, or `narrows (to: ...)`. `Why` cites the exact
 evidence file and line/hunk you used. A `falls` with no citation is not a
-refutation and will be discarded. Reply with one line: `done: N candidates`.
+refutation and will be discarded. Output is the table only; no heading or
+prose above it. Reply with one line: `done: N candidates`.

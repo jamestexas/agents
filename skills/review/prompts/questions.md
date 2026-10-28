@@ -34,6 +34,7 @@ Rules:
    for the rollout or the on-call surface).
 4. For every probe in `manifest.json` with status UNAVAILABLE, write one row
    whose settler is that probe, so the gap is visible as a question.
-5. End with: `Questions asked: N.`
+5. Escape `|` inside a cell as `\|`.
+6. End with: `Questions asked: N.`
 
 Write nothing else. Do not answer, do not review.
