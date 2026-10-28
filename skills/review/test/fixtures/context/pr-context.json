@@ -1,0 +1,30 @@
+{
+  "schema": "pr-context/v1",
+  "pr": {"repo": "owner/repo", "number": 1, "title": "fix(example): swap parse/verify", "author": "author-login"},
+  "reviews": {"status": "ok", "reason": null, "count": 6, "items": [
+    {"kind": "review", "author": "reviewer-one", "is_bot": false, "state": "COMMENTED", "at": "2026-10-20T10:00:00Z", "url": null, "body": "first look"},
+    {"kind": "review", "author": "reviewbot[bot]", "is_bot": true, "state": "COMMENTED", "at": "2026-10-20T10:05:00Z", "url": null, "body": "2 findings"},
+    {"kind": "review", "author": "something-app", "is_bot": false, "state": "COMMENTED", "at": "2026-10-20T10:06:00Z", "url": null, "body": "app review"},
+    {"kind": "review", "author": "me-login", "is_bot": false, "state": "CHANGES_REQUESTED", "at": "2026-10-20T11:00:00Z", "url": null, "body": "swap the calls"},
+    {"kind": "review", "author": "reviewer-one", "is_bot": false, "state": "APPROVED", "at": "2026-10-21T09:00:00Z", "url": null, "body": "lgtm"},
+    {"kind": "review", "author": "reviewer-two", "is_bot": false, "state": "COMMENTED", "at": "2026-10-21T09:30:00Z", "url": null, "body": "one question"},
+    {"kind": "comment", "author": "author-login", "is_bot": false, "state": null, "at": "2026-10-21T10:00:00Z", "url": null, "body": "addressed"}
+  ]},
+  "threads": {"status": "ok", "reason": null, "count": 3, "items": [
+    {"id": "t1", "path": "handler.go", "line": 88, "state": "unresolved", "resolved": false, "outdated": false,
+     "participants": ["author-login", "me-login"], "is_bot": false,
+     "comments": [{"author": "me-login", "is_bot": false, "at": "2026-10-20T11:00:00Z", "url": null, "body": "verify first?"},
+                  {"author": "author-login", "is_bot": false, "at": "2026-10-21T10:00:00Z", "url": null, "body": "done, see push"}]},
+    {"id": "t2", "path": "config.go", "line": 41, "state": "resolved", "resolved": true, "outdated": false,
+     "participants": ["reviewer-one", "author-login"], "is_bot": false,
+     "comments": [{"author": "reviewer-one", "is_bot": false, "at": "2026-10-20T10:00:00Z", "url": null, "body": "bounded?"},
+                  {"author": "author-login", "is_bot": false, "at": "2026-10-20T12:00:00Z", "url": null, "body": "yes, 1k"}]},
+    {"id": "t3", "path": "migrate.sql", "line": 3, "state": "unresolved", "resolved": false, "outdated": false,
+     "participants": ["something-app", "author-login"], "is_bot": false,
+     "comments": [{"author": "something-app", "is_bot": false, "at": "2026-10-20T10:06:00Z", "url": null, "body": "nullable?"},
+                  {"author": "author-login", "is_bot": false, "at": "2026-10-21T10:01:00Z", "url": null, "body": "intended"}]}
+  ]},
+  "bot_findings": {"status": "ok", "reason": null, "count": 1, "items": []},
+  "linked_tickets": {"status": "empty", "reason": null, "count": 0, "items": []},
+  "similar_prs": {"status": "skipped", "reason": "--similar 0", "count": 0, "items": []}
+}

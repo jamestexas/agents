@@ -78,9 +78,14 @@ Then open the run's state file, which the HUD reviews panel reads:
 node $SKILL/scripts/state.mjs <run> init mode=<light|default|deep>
 ```
 
-Every later phase starts with `node $SKILL/scripts/state.mjs <run> phase
-<name>`; phase 6 ends with `finish`, Post with `posted`. `state.json` is a
-progress file, not evidence: no phase reads it.
+Pass `viewer=<login>` if you already ran `gh api user`; otherwise `init`
+runs it. With `pr/context.json` present the file also carries
+`review_state`: authorship, the viewer's latest review, the latest review
+per human, bot reviews (by flag or login pattern), and how many unresolved
+threads wait on the viewer versus the author. Every later phase starts with
+`node $SKILL/scripts/state.mjs <run> phase <name>`; phase 6 ends with
+`finish`, Post with `posted`. `state.json` is a progress file, not evidence:
+no phase reads it.
 
 ## Mode
 

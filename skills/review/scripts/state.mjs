@@ -5,9 +5,12 @@
 // judges the review; check.mjs does that, and `finish` only records its
 // verdict per gate.
 //
-//   init   mode=<light|default|deep>
+//   init   mode=<light|default|deep> [viewer=<login>]
 //          evidence/target.json + evidence/manifest.json (+ core/pr-shas.out,
-//          pr/context.json for title and author) -> a fresh state.json
+//          pr/context.json for title and author) -> a fresh state.json.
+//          viewer is the operator's login (`gh api user` when not given);
+//          with pr/context.json present, init and finish also write
+//          review_state: who has reviewed, and who is waiting on whom.
 //   phase  <name>        close the open phase, open <name>
 //   finish note=<rel> [gates=-]
 //          ended=now, phase "rendered", verdict from work/summary.md, finding
@@ -23,6 +26,11 @@
 //    gates{ledger,triage,blocking}, probes{total,ran,failed,unavailable},
 //    findings{blocking,non_blocking,question,observation}, note,
 //    posted{url,state,at}|null}
+// plus two keys the HUD ignores today: viewer, and (only when
+// evidence/pr/context.json exists) review_state:
+//   {authorship: own|peer|null, mine{state,at,head_matches},
+//    humans[{login,state,at}], bots[{login,state,findings,at}],
+//    threads{total,unresolved,awaiting_me,awaiting_author}}
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -71,14 +79,16 @@ const closeOpen = (s, at) => {
 
 const ops = {
   init() {
-    const { mode = 'default' } = kv(['mode']);
+    const { mode = 'default', viewer: viewerArg } = kv(['mode', 'viewer']);
     const target = jsonIf(ev('target.json'));
     if (!target) { console.error(`state.mjs init: ${ev('target.json')} missing or not JSON`); process.exit(1); }
     const manifest = jsonIf(ev('manifest.json'));
     const probes = Array.isArray(manifest?.probes) ? manifest.probes : [];
     const count = (st) => probes.filter((p) => p.status === st).length;
     const shas = jsonIf(ev('probes/core/pr-shas.out'))?.data?.repository?.pullRequest ?? null;
-    const ctx = jsonIf(ev('pr/context.json'))?.pr ?? null;
+    const context = jsonIf(ev('pr/context.json'));
+    const ctx = context?.pr ?? null;
+    const viewer = viewerArg ?? ghViewer();
     const prNum = /^\d+$/.test(String(target.pr ?? '')) ? Number(target.pr) : null;
     // Evidence ran before init; its span is the manifest's, not "now".
     const starts = probes.map((p) => p.started).filter((t) => t && !Number.isNaN(Date.parse(t))).sort();
@@ -103,6 +113,8 @@ const ops = {
       findings: { blocking: 0, non_blocking: 0, question: 0, observation: 0 },
       note: null,
       posted: null,
+      viewer,
+      ...(context ? { review_state: reviewState(context, viewer, target.head ?? null) } : {}),
     });
   },
 
@@ -131,6 +143,8 @@ const ops = {
     s.verdict = v ? v[1] : null;
     s.findings = countFindings(jsonIf(work('findings.json')));
     s.gates = parseGates(args.gates === '-' ? fs.readFileSync(0, 'utf8') : runCheck());
+    const context = jsonIf(ev('pr/context.json'));
+    if (context) s.review_state = reviewState(context, s.viewer ?? null, s.head ?? null);
     save(s);
   },
 
@@ -177,6 +191,71 @@ function parseGates(text) {
     g[m[1]] = ok && g[m[1]] !== 'fail' ? 'ok' : 'fail';
   }
   return g;
+}
+
+// The operator's login; null when gh is absent or not logged in, which makes
+// authorship and the awaiting counts unknowable rather than wrong.
+function ghViewer() {
+  const r = spawnSync('gh', ['api', 'user', '--jq', '.login'], { encoding: 'utf8' });
+  const login = (r.stdout ?? '').trim();
+  return r.status === 0 && login ? login : null;
+}
+
+// A reviewer is a bot by what it is, not what it is called: pr-context.sh's
+// `is_bot` covers GitHub's Bot type and a named list, but an app-installed
+// reviewer posts as an ordinary User whose login only carries the install
+// suffix (`-app`), so the flag alone misses it. The pattern is the second net.
+const BOT_LOGIN_RE = /(-app$|\[bot\]$|^(reviewbot|autorev|depthfirst|github-actions|dependabot)\b)/i;
+const isBot = (item) => item?.is_bot === true || BOT_LOGIN_RE.test(item?.author ?? '');
+
+// Who has said what, and who the open threads wait on. Reads pr-context.sh's
+// shape: reviews.items[{kind: review|comment, author, is_bot, state, at}],
+// threads.items[{state: resolved|unresolved, participants, comments[{author, at}]}].
+function reviewState(context, viewer, head) {
+  const author = context.pr?.author ?? null;
+  const reviews = Array.isArray(context.reviews?.items) ? context.reviews.items : [];
+  const threads = Array.isArray(context.threads?.items) ? context.threads.items : [];
+  const threadsKnown = ['ok', 'empty'].includes(context.threads?.status);
+  const byAt = (a, b) => String(a.at ?? '').localeCompare(String(b.at ?? ''));
+  // latest item per login, in the order each login first appears
+  const latest = (items) => {
+    const m = new Map();
+    for (const it of [...items].sort(byAt)) m.set(it.author, it);
+    return [...m.values()];
+  };
+  const submitted = reviews.filter((r) => r.kind === 'review');
+  const mineLatest = viewer ? latest(submitted.filter((r) => r.author === viewer))[0] : undefined;
+  const humans = latest(submitted.filter((r) => !isBot(r) && r.author !== viewer))
+    .map((r) => ({ login: r.author, state: r.state ?? null, at: r.at ?? null }));
+  const bots = latest(reviews.filter(isBot)).map((r) => ({
+    login: r.author,
+    state: r.state ?? null,
+    // a bot's findings are the inline threads it opened; unknown when the
+    // thread query did not run
+    findings: threadsKnown ? threads.filter((t) => t.comments?.[0]?.author === r.author).length : null,
+    at: r.at ?? null,
+  }));
+  const t = { total: threads.length, unresolved: 0, awaiting_me: 0, awaiting_author: 0 };
+  for (const th of threads) {
+    if (th.state !== 'unresolved') continue;
+    t.unresolved++;
+    if (!viewer) continue; // cannot tell whose turn it is
+    const last = th.comments?.at(-1)?.author;
+    const participated = (th.participants ?? []).includes(viewer);
+    if (participated && last !== viewer) t.awaiting_me++;
+    else if (last === viewer || (last !== undefined && last !== author)) t.awaiting_author++;
+  }
+  return {
+    authorship: viewer && author ? (viewer === author ? 'own' : 'peer') : null,
+    mine: {
+      state: mineLatest?.state ?? null,
+      at: mineLatest?.at ?? null,
+      head_matches: mineLatest?.commit && head ? mineLatest.commit === head : null,
+    },
+    humans,
+    bots,
+    threads: t,
+  };
 }
 
 function runCheck() {

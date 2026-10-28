@@ -15,7 +15,10 @@ const copyGood = () => {
   fs.cpSync(path.join(here, 'fixtures', 'good'), dir, { recursive: true });
   return dir;
 };
-const run = (dir, args, input) => spawnSync('node', [state, dir, ...args], { encoding: 'utf8', input, env: { ...process.env, HUD_ROOT: '/hud' } });
+// PATH carries no gh, so `init` never reaches the network here: the viewer is
+// whatever the test passes, or null. node is spawned by its own path.
+const env = { ...process.env, HUD_ROOT: '/hud', PATH: '/nonexistent' };
+const run = (dir, args, input) => spawnSync(process.execPath, [state, dir, ...args], { encoding: 'utf8', input, env });
 const read = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8'));
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
 
@@ -25,7 +28,8 @@ test('init writes the HUD schema from target.json and manifest.json', () => {
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const s = read(dir);
   assert.deepEqual(Object.keys(s), ['version', 'repo', 'pr', 'title', 'author', 'mode', 'head', 'base', 'phase', 'phases',
-    'started', 'ended', 'verdict', 'gates', 'probes', 'findings', 'note', 'posted']);
+    'started', 'ended', 'verdict', 'gates', 'probes', 'findings', 'note', 'posted', 'viewer']);
+  assert.equal(s.viewer, null, 'no gh on PATH and no viewer= given');
   assert.equal(s.version, 1);
   assert.equal(s.repo, 'owner/repo');
   assert.equal(s.pr, 1, 'pr is a number so the HUD can build the PR link');
@@ -129,4 +133,68 @@ test('phase before init is an error naming the missing file', () => {
   const r = run(dir, ['phase', 'questions']);
   assert.equal(r.status, 1);
   assert.match(r.stderr, /state\.json missing or not JSON; run init first/);
+});
+
+const withContext = () => {
+  const dir = copyGood();
+  fs.mkdirSync(path.join(dir, 'evidence', 'pr'), { recursive: true });
+  fs.copyFileSync(path.join(here, 'fixtures', 'context', 'pr-context.json'), path.join(dir, 'evidence', 'pr', 'context.json'));
+  return dir;
+};
+
+test('without pr/context.json there is no review_state key; viewer= is recorded', () => {
+  const dir = copyGood();
+  assert.equal(run(dir, ['init', 'viewer=me-login']).status, 0);
+  const s = read(dir);
+  assert.equal(s.viewer, 'me-login');
+  assert.ok(!('review_state' in s));
+});
+
+test('review_state: authorship, my latest review, latest review per human, bots by flag or login pattern', () => {
+  const dir = withContext();
+  const r = run(dir, ['init', 'viewer=me-login']);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const s = read(dir);
+  assert.equal(s.author, 'author-login', 'author falls back to pr/context.json');
+  assert.equal(s.title, 'fix(example): swap parse/verify');
+  const rs = s.review_state;
+  assert.equal(rs.authorship, 'peer');
+  assert.deepEqual(rs.mine, { state: 'CHANGES_REQUESTED', at: '2026-10-20T11:00:00Z', head_matches: null });
+  assert.deepEqual(rs.humans, [
+    { login: 'reviewer-one', state: 'APPROVED', at: '2026-10-21T09:00:00Z' },
+    { login: 'reviewer-two', state: 'COMMENTED', at: '2026-10-21T09:30:00Z' },
+  ], 'latest per human; the PR author comment is not a review; bots and me excluded');
+  assert.deepEqual(rs.bots, [
+    { login: 'reviewbot[bot]', state: 'COMMENTED', findings: 0, at: '2026-10-20T10:05:00Z' },
+    { login: 'something-app', state: 'COMMENTED', findings: 1, at: '2026-10-20T10:06:00Z' },
+  ], 'something-app has no is_bot flag and lands in bots by its login');
+});
+
+test('review_state threads: awaiting_me when the author answered on my thread; a thread I am not on counts as unresolved only', () => {
+  const dir = withContext();
+  run(dir, ['init', 'viewer=me-login']);
+  assert.deepEqual(read(dir).review_state.threads, { total: 3, unresolved: 2, awaiting_me: 1, awaiting_author: 0 });
+});
+
+test('review_state with an unknown viewer: authorship null, awaiting counts stay at zero', () => {
+  const dir = withContext();
+  const r = run(dir, ['init']); // no gh on PATH, no viewer= given
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const s = read(dir);
+  assert.equal(s.viewer, null);
+  assert.equal(s.review_state.authorship, null);
+  assert.deepEqual(s.review_state.mine, { state: null, at: null, head_matches: null });
+  assert.deepEqual(s.review_state.threads, { total: 3, unresolved: 2, awaiting_me: 0, awaiting_author: 0 });
+});
+
+test('own PR: authorship own; finish refreshes review_state and keeps the viewer', () => {
+  const dir = withContext();
+  run(dir, ['init', 'viewer=author-login']);
+  assert.equal(read(dir).review_state.authorship, 'own');
+  const r = run(dir, ['finish', 'note=projects/p/notes/PR-1.md']);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const s = read(dir);
+  assert.equal(s.viewer, 'author-login');
+  assert.equal(s.review_state.authorship, 'own');
+  assert.equal(s.phase, 'rendered');
 });
