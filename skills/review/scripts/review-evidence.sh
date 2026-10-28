@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+# review-evidence.sh — phase 1 of /review. Bash, no model. Produces the
+# evidence directory every later phase reads, and nothing else.
+#
+# Usage:
+#   review-evidence.sh --pr <owner/repo#N | N> [--repo-dir DIR] --out RUN
+#   review-evidence.sh --path REPO_DIR --base REF --head REF --out RUN
+#   review-evidence.sh --cleanup RUN
+#
+# Layout under RUN/evidence (see SKILL.md): manifest.json target.json
+# pr/ git/ owners.json packs.json probes/ replay.txt
+#
+# Rules: never posts; never writes outside RUN and its own worktree; a probe
+# that cannot run is UNAVAILABLE in the manifest, not absent. PR context comes
+# from scripts/pr-context.sh (one probe), head/base/merge shas from one
+# GraphQL query — never from grepping git log for the PR number.
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=lib.sh
+source "$HERE/lib.sh"
+SKILL_DIR="$(cd "$HERE/.." && pwd)"
+AGENTS_ROOT="$(cd "$SKILL_DIR/../.." && pwd)"
+
+usage() {
+    awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "${BASH_SOURCE[0]}"
+    exit "${1:-0}"
+}
+
+MODE="" PR="" REPO="" REPO_DIR="" BASE="" HEAD="" RUN="" CLEANUP=""
+ARGS=("$@")
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --pr)       MODE="pr";   PR="$2"; shift 2 ;;
+        --repo-dir) REPO_DIR="$2"; shift 2 ;;
+        --path)     MODE="path"; REPO_DIR="$2"; shift 2 ;;
+        --base)     BASE="$2"; shift 2 ;;
+        --head)     HEAD="$2"; shift 2 ;;
+        --out)      RUN="$2"; shift 2 ;;
+        --cleanup)  CLEANUP="$2"; shift 2 ;;
+        -h|--help)  usage 0 ;;
+        *) die "unknown arg $1" ;;
+    esac
+done
+
+if [ -n "$CLEANUP" ]; then
+    ev="$CLEANUP/evidence"
+    # Only a PR run owns its worktree. In path mode the "worktree" is the
+    # user's own repo dir, which must never be removed.
+    kind="$(jq -r '.kind // ""' "$ev/target.json" 2>/dev/null || true)"
+    wt=""; rd=""
+    [ -f "$ev/git/worktree-path" ] && wt="$(cat "$ev/git/worktree-path")"
+    [ -f "$ev/git/repo-dir" ] && rd="$(cat "$ev/git/repo-dir")"
+    if [ "$kind" = pr ] && [ -n "$wt" ] && [ "$wt" != "$rd" ] && [ -d "$wt" ]; then
+        git -C "$rd" worktree remove --force "$wt" && note "removed worktree $wt"
+    else
+        note "nothing to remove for $CLEANUP (kind=${kind:-?}, worktree=${wt:-none})"
+    fi
+    exit 0
+fi
+[ -n "$MODE" ] && [ -n "$RUN" ] || die "need --pr or --path, and --out"
+
+OUTDIR="$RUN/evidence"; MANIFEST="$OUTDIR/manifest.json"
+mkdir -p "$OUTDIR/pr" "$OUTDIR/git" "$OUTDIR/probes" "$RUN/work"
+manifest_init
+printf '%q ' "$(basename "$0")" "${ARGS[@]}" > "$OUTDIR/replay.txt"; echo >> "$OUTDIR/replay.txt"
+
+# ---- resolve the target ---------------------------------------------------
+if [ "$MODE" = pr ]; then
+    if [[ "$PR" == */*#* ]]; then REPO="${PR%%#*}"; PR="${PR##*#}"; fi
+    REPO_DIR="${REPO_DIR:-$PWD}"
+    if [ -z "$REPO" ]; then
+        REPO="$(git -C "$REPO_DIR" remote get-url upstream 2>/dev/null || git -C "$REPO_DIR" remote get-url origin)"
+        REPO="$(echo "$REPO" | sed -E 's#\.git$##; s#.*[:/]([^/]+/[^/]+)$#\1#')"
+    fi
+    # one GraphQL query for the shas; REST is the fallback nobody wants at rate-limit time
+    # shellcheck disable=SC2016  # $o/$r/$n are GraphQL variables, not shell ones
+    probe core pr-shas --needs gh -- gh api graphql \
+        -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){number title state isDraft author{login} headRefOid baseRefOid baseRefName headRefName mergedAt mergeCommit{oid} reviewDecision changedFiles}}}' \
+        -F o="${REPO%%/*}" -F r="${REPO##*/}" -F n="$PR"
+    if [ "$(jq -r '.probes[]|select(.name=="core/pr-shas")|.status' "$MANIFEST")" = RAN ]; then
+        HEAD="$(jq -r '.data.repository.pullRequest.headRefOid' "$OUTDIR/probes/core/pr-shas.out")"
+        BASE_BRANCH="$(jq -r '.data.repository.pullRequest.baseRefName' "$OUTDIR/probes/core/pr-shas.out")"
+        # the remote whose URL names this repo; in a fork setup that is usually `upstream`
+        REMOTE="$(git -C "$REPO_DIR" remote -v | awk -v r="$REPO" '$2 ~ r"(\\.git)?$" && $3=="(fetch)" {print $1; exit}')"
+        [ -n "$REMOTE" ] || die "no remote in $REPO_DIR points at $REPO"
+        probe core fetch -- git -C "$REPO_DIR" fetch -q "$REMOTE" "refs/pull/$PR/head:refs/review/$PR" "$BASE_BRANCH"
+        BASE="$REMOTE/$BASE_BRANCH"
+        TMP="${TMPDIR:-/tmp}"; WT="${REVIEW_WORKTREE_ROOT:-${TMP%/}/review-worktrees}/${REPO//\//-}-$PR"
+        if [ ! -d "$WT" ]; then probe core worktree -- git -C "$REPO_DIR" worktree add -q --detach "$WT" "$HEAD"; fi
+        echo "$WT" > "$OUTDIR/git/worktree-path"
+    else
+        die "cannot resolve PR $REPO#$PR without gh; see manifest"
+    fi
+    probe core pr-context --needs gh -- "$AGENTS_ROOT/scripts/pr-context.sh" --pr "$REPO#$PR" --similar 3
+    cp "$OUTDIR/probes/core/pr-context.out" "$OUTDIR/pr/context.json" 2>/dev/null || true
+    probe core pr-checks  --needs gh -- gh pr checks "$PR" --repo "$REPO" --json name,state,link,workflow
+else
+    [ -n "$BASE" ] && [ -n "$HEAD" ] || die "--path needs --base and --head"
+    REPO="$(basename "$REPO_DIR")"; PR=""
+    WT="$REPO_DIR"
+    echo "$WT" > "$OUTDIR/git/worktree-path"
+    # no PR in path mode; recorded as UNAVAILABLE with a reason, not skipped
+    probe core pr-context -- bash -c 'echo "no PR in path mode" >&2; exit 127'
+fi
+echo "$REPO_DIR" > "$OUTDIR/git/repo-dir"
+jq -n --arg kind "$MODE" --arg repo "$REPO" --arg pr "$PR" --arg base "$BASE" --arg head "$HEAD" --arg worktree "$WT" --arg repo_dir "$REPO_DIR" \
+   '{kind:$kind, repo:$repo, pr:$pr, base:$base, head:$head, worktree:$worktree, repo_dir:$repo_dir}' > "$OUTDIR/target.json"
+
+# ---- git facts ------------------------------------------------------------
+git -C "$REPO_DIR" merge-base "$BASE" "$HEAD" > "$OUTDIR/git/merge-base"
+MB="$(cat "$OUTDIR/git/merge-base")"
+probe core diff        -- git -C "$REPO_DIR" diff "$MB" "$HEAD"
+cp "$OUTDIR/probes/core/diff.out" "$OUTDIR/git/diff.patch"
+probe core merge-base  -- bash -c "echo $MB"
+probe core files       -- git -C "$REPO_DIR" diff --name-only "$MB" "$HEAD"
+cp "$OUTDIR/probes/core/files.out" "$OUTDIR/git/files"
+probe core staleness   -- git -C "$REPO_DIR" rev-list --count "$MB..$BASE"
+cp "$OUTDIR/probes/core/staleness.out" "$OUTDIR/git/behind-base"
+probe core commits     -- git -C "$REPO_DIR" log --format='%H %cI %s' "$MB..$HEAD"
+# nearest go.mod above each changed file, deduped: the unit `go build` works in
+: > "$OUTDIR/git/modules"
+while read -r f; do
+    d="$(dirname "$f")"
+    while [ "$d" != "." ] && [ ! -f "$WT/$d/go.mod" ]; do d="$(dirname "$d")"; done
+    [ -f "$WT/$d/go.mod" ] && echo "$d"
+done < "$OUTDIR/git/files" | sort -u > "$OUTDIR/git/modules"
+
+# ---- owners ---------------------------------------------------------------
+CO=""
+for c in .github/CODEOWNERS CODEOWNERS docs/CODEOWNERS; do [ -f "$WT/$c" ] && { CO="$WT/$c"; break; }; done
+if [ -n "$CO" ]; then
+    probe core owners -- bash -c "ruby '$HERE/codeowners.rb' '$CO' < '$OUTDIR/git/files'"
+    cp "$OUTDIR/probes/core/owners.out" "$OUTDIR/owners.json"
+else
+    probe core owners -- bash -c 'echo "no CODEOWNERS file in worktree" >&2; exit 127'
+fi
+
+# ---- packs ----------------------------------------------------------------
+PACK_FILES=("$SKILL_DIR/packs.yaml")
+HUD="${HUD_ROOT:-$HOME/hud}"
+[ -f "$HUD/review-packs.yaml" ] && PACK_FILES+=("$HUD/review-packs.yaml")
+# Repo-local packs come from the reviewer's trusted checkout at the BASE ref, never
+# from the PR worktree: the PR author controls the worktree and probes run with
+# the reviewer's credentials. A PR cannot add or change the packs that review it.
+if git -C "$REPO_DIR" show "$BASE:.claude/review-packs.yaml" > "$OUTDIR/repo-review-packs.yaml" 2>/dev/null; then
+    PACK_FILES+=("$OUTDIR/repo-review-packs.yaml")
+else
+    rm -f "$OUTDIR/repo-review-packs.yaml"
+fi
+ruby "$HERE/packs-match.rb" "${PACK_FILES[@]}" < "$OUTDIR/git/files" > "$OUTDIR/packs.json"
+
+jq -c '.matched[]' "$OUTDIR/packs.json" | while read -r pack; do
+    name="$(jq -r .name <<<"$pack")"
+    needs=(); while read -r b; do [ -n "$b" ] && needs+=(--needs "$b"); done < <(jq -r '.needs[]?' <<<"$pack")
+    jq -r '.probes | to_entries[] | "\(.key)\t\(.value)"' <<<"$pack" | while IFS=$'\t' read -r pname cmd; do
+        # stdin is the probe list; a command that read it would eat the next probe
+        probe "$name" "$pname" "${needs[@]+"${needs[@]}"}" \
+            --env "WORKTREE=$WT" --env "REPO_DIR=$REPO_DIR" --env "OUTDIR=$OUTDIR" \
+            --env "FILES=$OUTDIR/git/files" --env "MODULES=$OUTDIR/git/modules" \
+            --env "BASE=$BASE" --env "HEAD=$HEAD" --env "PR=$PR" --env "REPO=$REPO" \
+            -- bash -c "$cmd" < /dev/null
+    done
+done
+
+# manifest hash: the replay check compares this across runs
+shasum -a 256 "$MANIFEST" | cut -d' ' -f1 > "$OUTDIR/manifest.sha256"
+note "evidence written to $OUTDIR ($(jq '.probes|length' "$MANIFEST") probes; $(jq '[.probes[]|select(.status=="UNAVAILABLE")]|length' "$MANIFEST") unavailable)"
