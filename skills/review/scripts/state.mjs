@@ -5,6 +5,10 @@
 // judges the review; check.mjs does that, and `finish` only records its
 // verdict per gate.
 //
+//   init --pending pr=<owner/repo#N> [mode=<m>]
+//          before evidence runs: phase pending, the PR, and the owner
+//          (session id, pid, transcript) when run under Claude Code, so the
+//          HUD shows the run at dispatch and can tell when its session died
 //   init   mode=<light|default|deep> [viewer=<login>]
 //          evidence/target.json + evidence/manifest.json (+ core/pr-shas.out,
 //          pr/context.json for title and author) -> a fresh state.json.
@@ -135,6 +139,19 @@ const startOver = () => {
 
 const ops = {
   init() {
+    if (rest[0] === '--pending') {
+      rest.shift();
+      const { pr: ref, mode = 'default' } = kv(['pr', 'mode']);
+      const m = String(ref ?? '').match(/^([^/#\s]+\/[^#\s]+)#(\d+)$/);
+      if (!m) { console.error('state.mjs init --pending: need pr=<owner/repo#N>'); process.exit(2); }
+      fs.mkdirSync(run, { recursive: true });
+      const o = owner();
+      const data = { repo: m[1], pr: Number(m[2]), mode, ...(o ? { owner: o } : {}) };
+      if (replayed('init-pending', data)) return;
+      startOver();
+      append('init-pending', data);
+      return;
+    }
     const { mode, viewer: viewerArg } = kv(['mode', 'viewer']);
     const target = jsonIf(ev('target.json'));
     if (!target) { console.error(`state.mjs init: ${ev('target.json')} missing or not JSON`); process.exit(1); }
@@ -245,6 +262,27 @@ function parseGates(text) {
     g[m[1]] = ok && g[m[1]] !== 'fail' ? 'ok' : 'fail';
   }
   return g;
+}
+
+// Who is running this review, so a reader can tell a live run from a dead
+// one. Claude Code exports the session id and its own pid to every Bash call
+// and keeps the transcript at ~/.claude/projects/<project slug>/<id>.jsonl.
+// The slug is of the session's project directory, which the shell's cwd need
+// not be after a cd, so the transcript is found by its name; none found is
+// null, and a reader then judges by the pid alone.
+function owner() {
+  const session_id = process.env.CLAUDE_CODE_SESSION_ID;
+  const pid = Number(process.env.CLAUDE_PID);
+  if (!session_id || !Number.isInteger(pid) || pid <= 0) return null;
+  const projects = path.join(os.homedir(), '.claude', 'projects');
+  let transcript_path = null;
+  try {
+    for (const d of fs.readdirSync(projects)) {
+      const p = path.join(projects, d, `${session_id}.jsonl`);
+      if (fs.existsSync(p)) { transcript_path = p; break; }
+    }
+  } catch { /* no transcript tree: judged by pid alone */ }
+  return { session_id, pid, transcript_path };
 }
 
 // The operator's login; null when gh is absent or not logged in, which makes

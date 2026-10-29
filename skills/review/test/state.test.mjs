@@ -17,7 +17,13 @@ const copyGood = () => {
 };
 // PATH carries no gh, so `init` never reaches the network here: the viewer is
 // whatever the test passes, or null. node is spawned by its own path.
-const env = { ...process.env, HUD_ROOT: '/hud', PATH: '/nonexistent' };
+// HOME is a temp dir and the Claude Code session variables are dropped, so
+// init --pending never reads the real transcript tree; a test that wants an
+// owner sets them itself.
+const home = fs.mkdtempSync(path.join(os.tmpdir(), 'rv-home-'));
+const env = { ...process.env, HUD_ROOT: '/hud', PATH: '/nonexistent', HOME: home };
+delete env.CLAUDE_CODE_SESSION_ID;
+delete env.CLAUDE_PID;
 const run = (dir, args, input) => spawnSync(process.execPath, [state, dir, ...args], { encoding: 'utf8', input, env });
 const read = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8'));
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
@@ -321,4 +327,58 @@ test('init over a state.json from before the log keeps the old file beside the n
   const kept = fs.readdirSync(dir).filter((f) => /^state\.superseded-.*\.json$/.test(f));
   assert.equal(kept.length, 1);
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, kept[0]), 'utf8')).phase, 'rendered');
+});
+
+test('init --pending writes a visible pending run with its owner before any evidence exists', () => {
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rv-pending-')), 'run');
+  const transcript = path.join(home, '.claude', 'projects', '-some-project', 'sess-1.jsonl');
+  fs.mkdirSync(path.dirname(transcript), { recursive: true });
+  fs.writeFileSync(transcript, '');
+  const e = { ...env, CLAUDE_CODE_SESSION_ID: 'sess-1', CLAUDE_PID: String(process.pid) };
+  const r = spawnSync(process.execPath, [state, dir, 'init', '--pending', 'pr=owner/repo#7', 'mode=fast'], { encoding: 'utf8', env: e });
+  assert.equal(r.status, 0, r.stderr);
+  const s = read(dir);
+  assert.equal(s.phase, 'pending');
+  assert.equal(s.repo, 'owner/repo');
+  assert.equal(s.pr, 7);
+  assert.equal(s.mode, 'fast');
+  assert.equal(s.owner.session_id, 'sess-1');
+  assert.equal(s.owner.pid, process.pid);
+  assert.equal(s.owner.transcript_path, transcript, 'found by session id, whatever directory the shell is in');
+});
+
+test('init --pending with a session but no transcript on disk records a null transcript_path', () => {
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rv-pending-')), 'run');
+  const e = { ...env, CLAUDE_CODE_SESSION_ID: 'sess-none', CLAUDE_PID: String(process.pid) };
+  assert.equal(spawnSync(process.execPath, [state, dir, 'init', '--pending', 'pr=owner/repo#7'], { encoding: 'utf8', env: e }).status, 0);
+  assert.deepEqual(read(dir).owner, { session_id: 'sess-none', pid: process.pid, transcript_path: null });
+});
+
+test('init --pending without a Claude Code session records no owner', () => {
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rv-pending-')), 'run');
+  const e = { ...env }; delete e.CLAUDE_CODE_SESSION_ID; delete e.CLAUDE_PID;
+  spawnSync(process.execPath, [state, dir, 'init', '--pending', 'pr=owner/repo#7'], { encoding: 'utf8', env: e });
+  assert.equal(read(dir).owner, undefined);
+});
+
+test('init --pending needs pr=<owner/repo#N>, and a repeat is a replay', () => {
+  const dir = copyGood();
+  assert.equal(run(dir, ['init', '--pending', 'pr=owner/repo']).status, 2);
+  assert.equal(run(dir, ['init', '--pending', 'pr=owner/repo#1']).status, 0);
+  assert.equal(run(dir, ['init', '--pending', 'pr=owner/repo#1']).status, 0);
+  assert.equal(events(dir).length, 1);
+  const other = run(dir, ['init', '--pending', 'pr=owner/repo#2']);
+  assert.notEqual(other.status, 0, 'a different run over an open one is refused');
+  assert.match(other.stderr, /still open at pending/);
+});
+
+test('pending then the evidence init closes pending and keeps the owner', () => {
+  const dir = copyGood();
+  const e = { ...env, CLAUDE_CODE_SESSION_ID: 'sess-2', CLAUDE_PID: String(process.pid) };
+  spawnSync(process.execPath, [state, dir, 'init', '--pending', 'pr=owner/repo#1'], { encoding: 'utf8', env: e });
+  assert.equal(run(dir, ['init', 'viewer=v']).status, 0);
+  const s = read(dir);
+  assert.equal(s.phase, 'evidence');
+  assert.notEqual(s.phases.pending.ended, null);
+  assert.equal(s.owner.session_id, 'sess-2');
 });
