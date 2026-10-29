@@ -47,7 +47,9 @@ import { lectioGraft, listSessions } from "./sessions.mjs";
 import { errText } from "./errtext.mjs";
 import { DEFAULT_REVIEWS_GLOB, expandHome, getCard, loadCards } from "./cards/registry.mjs";
 import { LIMITS as FS_LIMITS, SKIP_NAMES, parseGlob as parseReviewsGlob } from "./cards/kinds/fs.mjs";
-import { intOrNull, isObject, prUrl, strOrNull } from "./cards/normalize/review-state.mjs";
+import { forJoin, isObject } from "./cards/normalize/review-state.mjs";
+import { prUrl } from "./cards/keys.mjs";
+import { joinRows } from "./cards/join.mjs";
 import { MAX_ROWS, collectRows, serveCard } from "./cards/serve.mjs";
 
 // The reviews layer's pieces now live under cards/; the names stay exported
@@ -1684,66 +1686,18 @@ function serveReviews(res, root, url, dyn) {
 // The board and the review runs are two lists keyed on the same pull request.
 // Served apart, one PR appears twice with two answers to "who is waiting"; so
 // when both sources are on, a board row carries its latest run under one key,
-// `review`, and the runs panel keeps only what the board cannot show. This is
-// a stopgap join, not a card model: a declarative card schema replaces it.
-
-const GITHUB_PR_PATH_RE = /^\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/(\d+)(?:\/|$)/;
+// `review`, and the runs panel keeps only what the board cannot show. The key
+// (`cards/keys.mjs`) and the join (`cards/join.mjs`) are the card model's;
+// what remains here is the legacy payload shape around them.
 
 /**
- * The key a board row and a run meet on: the PR's canonical URL, the same
- * string `pr_url` already carries on the run. A row naming `repo` and
- * `number` is keyed directly; one carrying only a GitHub `url` is read for
- * the same three parts; a row that says it is not a PR, or has neither, has
- * no key and is never joined.
+ * The key a board row is joined on: the PR's canonical URL, from `repo` +
+ * `number` or from a GitHub `url`. A row that says it is not a PR has no key
+ * and is never joined, whatever its number.
  */
 function boardRowKey(row) {
-  if (!isObject(row)) return null;
   if (typeof row.kind === "string" && row.kind !== "pr") return null;
-  const direct = prUrl(row.repo, row.number);
-  if (direct) return direct;
-  if (typeof row.url !== "string") return null;
-  let u;
-  try {
-    u = new URL(row.url);
-  } catch {
-    return null;
-  }
-  if (u.protocol !== "https:" || u.hostname !== "github.com") return null;
-  const m = GITHUB_PR_PATH_RE.exec(u.pathname);
-  return m ? prUrl(`${m[1]}/${m[2]}`, Number(m[3])) : null;
-}
-
-/**
- * What a board row is told about its run, copied by name. The run row is the
- * full contract; the board's columns are the subset that answers "where is
- * the review and who is waiting", and naming it here keeps the board from
- * growing a second, untested view of the state file. Every key is present,
- * null when the run has nothing for it, so the shape is fixed.
- */
-function reviewForBoard(item) {
-  const probes = isObject(item.probes) ? item.probes : null;
-  return {
-    phase: strOrNull(item.phase),
-    verdict: strOrNull(item.verdict),
-    gates: isObject(item.gates) ? item.gates : null,
-    probes: { unavailable: probes ? intOrNull(probes.unavailable) : null },
-    findings: isObject(item.findings) ? item.findings : null,
-    note_url: item.note_url ?? null,
-    posted: isObject(item.posted) ? item.posted : null,
-    review_state: item.review_state ?? null,
-    running: item.running === true,
-    elapsed_s: intOrNull(item.elapsed_s),
-  };
-}
-
-/** The latest run per PR. Runs arrive running-first, newest-first, so the first seen wins. */
-function latestRunByPr(runs) {
-  const byPr = new Map();
-  for (const item of runs) {
-    if (item.unreadable || !item.pr_url) continue;
-    if (!byPr.has(item.pr_url)) byPr.set(item.pr_url, item);
-  }
-  return byPr;
+  return prUrl(row);
 }
 
 /**
@@ -1757,18 +1711,15 @@ function latestRunByPr(runs) {
  * @param {object[]} runs `listReviews().items`
  */
 export function joinReviews(data, runs) {
-  const byPr = latestRunByPr(runs);
-  if (!byPr.size) return data;
   const join = (rows) =>
-    rows.map((row) => {
-      const key = boardRowKey(row);
-      const run = key ? byPr.get(key) : undefined;
-      return run ? { ...row, review: reviewForBoard(run) } : row;
-    });
+    joinRows(rows, runs, { key: "pr_url", latest: "started", into: "review", keyOf: boardRowKey, project: forJoin }).rows;
   if (Array.isArray(data)) return join(data);
   if (!isObject(data)) return data;
   for (const k of ["items", "prs"]) {
-    if (Array.isArray(data[k])) return { ...data, [k]: join(data[k]) };
+    if (Array.isArray(data[k])) {
+      const joined = join(data[k]);
+      return joined === data[k] ? data : { ...data, [k]: joined };
+    }
   }
   return data;
 }

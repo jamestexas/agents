@@ -6,6 +6,8 @@
 // untested. Copy field by field, drop unknown keys at every depth — the rule
 // for every normaliser, first written for this one.
 
+import { prUrl } from "../keys.mjs";
+
 /** The columns a card of this shape shows when it declares none. */
 export const COLUMNS = Object.freeze([
   "pr",
@@ -113,17 +115,28 @@ export function sanitizeReviewState(v) {
   return Object.keys(out).length ? out : undefined;
 }
 
-const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
-
 /**
- * `https://github.com/<repo>/pull/<pr>`, or null when either half is not what
- * it claims. The `pr_url` key: a derived field, never raw input.
+ * What a row joined onto another card is told about its run, copied by name.
+ * The run row is the full contract; a board row's columns are the subset
+ * that answers "where is the review and who is waiting", and naming it here
+ * keeps the other card from growing a second, untested view of the state
+ * file. Every key is present, null when the run has nothing for it, so the
+ * shape is fixed.
  */
-export function prUrl(repo, pr) {
-  if (typeof repo !== "string" || !REPO_RE.test(repo)) return null;
-  const n = typeof pr === "string" && /^\d+$/.test(pr) ? Number(pr) : pr;
-  if (!Number.isInteger(n) || n <= 0) return null;
-  return `https://github.com/${repo}/pull/${n}`;
+export function forJoin(item) {
+  const probes = isObject(item.probes) ? item.probes : null;
+  return {
+    phase: strOrNull(item.phase),
+    verdict: strOrNull(item.verdict),
+    gates: isObject(item.gates) ? item.gates : null,
+    probes: { unavailable: probes ? intOrNull(probes.unavailable) : null },
+    findings: isObject(item.findings) ? item.findings : null,
+    note_url: item.note_url ?? null,
+    posted: isObject(item.posted) ? item.posted : null,
+    review_state: item.review_state ?? null,
+    running: item.running === true,
+    elapsed_s: intOrNull(item.elapsed_s),
+  };
 }
 
 /**
@@ -224,7 +237,7 @@ export function normalize(row, ctx) {
   item.running = item.ended == null;
   item.elapsed_s = elapsedSeconds(item.started, item.ended, now);
   item.phase_seconds = phaseSeconds(phases, now);
-  item.pr_url = prUrl(item.repo, item.pr);
+  item.pr_url = prUrl({ repo: item.repo, number: item.pr });
   item.note_url = noteUrl(item.note);
   return item;
 }
