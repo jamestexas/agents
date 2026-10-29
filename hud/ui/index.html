@@ -722,7 +722,8 @@
         box-shadow: inset 3px 0 0 var(--cyan);
         padding-left: 6px;
       }
-      .prgrid tr.running .phase {
+      .prgrid tr.running .phase,
+      .prgrid .phases .live {
         color: var(--cyan);
       }
       .prgrid tr.unreadable .warn {
@@ -2107,6 +2108,71 @@
         return Math.floor(m / 60) + "h" + String(m % 60).padStart(2, "0") + "m";
       }
 
+      /** Seconds as minutes to one decimal, the unit a phase is read in: 114 → 1.9. */
+      function fmtMinutes(s) {
+        return (s / 60).toFixed(1);
+      }
+
+      /** The short name a phase goes by in the phases cell; an unlisted phase keeps its first two letters. */
+      const PHASE_ABBR = { evidence: "ev", questions: "q", settle: "se", refute: "re", triage: "tr", teach: "te" };
+      const phaseAbbr = (name) => PHASE_ABBR[name] || String(name).slice(0, 2);
+
+      /**
+       * Where the run's time went: one `ev 1.9` per timed phase, in the order
+       * the run passed through them, the phase still open marked with an
+       * ellipsis because its number is still growing. A run with no timings
+       * (one written before phases were recorded) shows a dash.
+       */
+      function phasesCell(tr, r) {
+        const secs = r.phase_seconds && typeof r.phase_seconds === "object" ? r.phase_seconds : {};
+        const phases = r.phases && typeof r.phases === "object" ? r.phases : {};
+        const names = Object.keys(secs);
+        if (!names.length) return cell(tr, undefined, "phases");
+        const span = node("span");
+        const words = [];
+        names.forEach((name, i) => {
+          if (i) span.appendChild(document.createTextNode(" · "));
+          const open = phases[name] && phases[name].ended == null;
+          span.appendChild(node("span", open ? "live" : null, phaseAbbr(name) + " " + fmtMinutes(secs[name]) + (open ? "…" : "")));
+          words.push(name + " " + fmtElapsed(secs[name]) + (open ? " (running)" : ""));
+        });
+        return cell(tr, span, "phases", words.join(" · "));
+      }
+
+      /** The middle value; the mean of the two middle values when the count is even. */
+      function median(xs) {
+        const a = xs.slice().sort((x, y) => x - y);
+        const mid = a.length >> 1;
+        return a.length % 2 ? a[mid] : (a[mid - 1] + a[mid]) / 2;
+      }
+
+      /**
+       * "median per phase across N runs with timings" — the line under the
+       * runs table that says where review time goes. Only closed phases
+       * count: an open one would pull its median down by however long the
+       * run has left. Runs with no timings are skipped, and when none has
+       * any there is no line.
+       */
+      function phaseMedians(items) {
+        const by = new Map();
+        let runs = 0;
+        for (const r of items) {
+          const secs = r.phase_seconds && typeof r.phase_seconds === "object" ? r.phase_seconds : {};
+          const phases = r.phases && typeof r.phases === "object" ? r.phases : {};
+          const names = Object.keys(secs);
+          if (!names.length) continue;
+          runs++;
+          for (const name of names) {
+            if (phases[name] && phases[name].ended == null) continue;
+            if (!by.has(name)) by.set(name, []);
+            by.get(name).push(secs[name]);
+          }
+        }
+        if (!runs || !by.size) return null;
+        const parts = [...by].map(([name, xs]) => phaseAbbr(name) + " " + fmtMinutes(median(xs)));
+        return "median per phase across " + runs + " run(s) with timings: " + parts.join(" · ");
+      }
+
       /** One cell; an absent fact renders as a dash rather than a blank. */
       function cell(tr, content, cls, title) {
         const td = node("td", cls);
@@ -2235,6 +2301,7 @@
           "phase",
           (r.running ? "running for " : "took ") + fmtElapsed(r.elapsed_s),
         );
+        phasesCell(tr, r);
         verdictCell(tr, r.verdict);
         reviewStateCells(tr, r.review_state);
         cell(tr, gatesNode(r.gates), "gates");
@@ -2316,6 +2383,7 @@
         ["project", "project", "the project directory the run wrote into"],
         ["mode", "mode", "default, light, deep, or engage"],
         ["phase", "phase", "where the run is; while it runs, with its elapsed time"],
+        ["phases", "phases", "minutes per phase: ev q se re tr te; … marks the phase still running"],
         ["verdict", "verdict", "APPROVE, REQUEST_CHANGES, or COMMENT once settled"],
         ["mine", "mine", "my own review of this PR; † marks one that predates the current head"],
         ["humans", "humans", "human reviews: approved / commented / changes requested"],
@@ -2339,6 +2407,8 @@
         }
         const wrap = gridNode(REVIEW_COLUMNS, items.map(reviewRow));
         if (env.truncated) wrap.appendChild(node("div", "row-sub greyed", "older runs not shown"));
+        const medians = phaseMedians(items.filter((r) => !r.unreadable));
+        if (medians) wrap.appendChild(node("div", "row-sub greyed medians", medians));
         const running = items.filter((r) => r.running && !r.unreadable).length;
         wrap.appendChild(
           node(

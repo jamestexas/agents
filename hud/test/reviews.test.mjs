@@ -91,6 +91,8 @@ function census(root) {
 
 const RUNNING_FOR_S = 22 * 60;
 const RUNNING_STARTED = new Date(Date.now() - RUNNING_FOR_S * 1000).toISOString();
+/** `m` minutes after the running run started. */
+const atMin = (m) => new Date(Date.parse(RUNNING_STARTED) + m * 60 * 1000).toISOString();
 
 /** A value the state file carries under a key the contract does not name. */
 const EXTRA_CANARY = "extra-key-must-not-be-served";
@@ -105,7 +107,14 @@ const running = {
   head: "0123456789abcdef",
   base: "main",
   phase: "refute",
-  phases: { evidence: { started: RUNNING_STARTED, ended: RUNNING_STARTED } },
+  // Four phases so far; the one in flight has no `ended` yet. Each entry
+  // carries a key the contract does not name, so the pass-through is tested.
+  phases: {
+    evidence: { started: RUNNING_STARTED, ended: atMin(1), extra: EXTRA_CANARY },
+    questions: { started: atMin(1), ended: atMin(5) },
+    settle: { started: atMin(5), ended: atMin(12) },
+    refute: { started: atMin(12), ended: null },
+  },
   started: RUNNING_STARTED,
   ended: null,
   verdict: null,
@@ -255,6 +264,26 @@ test("api reviews serves runs running-first with the derived fields", async (t) 
   assert.deepEqual(run.probes, running.probes);
   assert.deepEqual(run.findings, running.findings);
   assert.deepEqual(run.gates, running.gates);
+  // `phases` is rebuilt field by field, and each timed phase gets its seconds;
+  // the open phase is measured to now.
+  assert.deepEqual(run.phases, {
+    evidence: { started: RUNNING_STARTED, ended: atMin(1) },
+    questions: { started: atMin(1), ended: atMin(5) },
+    settle: { started: atMin(5), ended: atMin(12) },
+    refute: { started: atMin(12), ended: null },
+  });
+  assert.deepEqual(Object.keys(run.phase_seconds), ["evidence", "questions", "settle", "refute"]);
+  assert.equal(run.phase_seconds.evidence, 60);
+  assert.equal(run.phase_seconds.questions, 240);
+  assert.equal(run.phase_seconds.settle, 420);
+  assert.ok(
+    run.phase_seconds.refute >= 10 * 60 - 2 && run.phase_seconds.refute <= 10 * 60 + 120,
+    `refute ${run.phase_seconds.refute} is not about ${10 * 60}`,
+  );
+  // A backfilled run has `phases: {}` and so no timings — an empty object,
+  // not a missing key, so the page can tell "untimed" from "unreadable".
+  assert.deepEqual(done.phases, {});
+  assert.deepEqual(done.phase_seconds, {});
 
   assert.equal(done.project, "example-two");
   assert.equal(done.running, false);
@@ -373,6 +402,75 @@ test("listReviews takes `now`, so elapsed_s is exact", (t) => {
   assert.equal(items[0].elapsed_s, 90);
   assert.equal(items[1].elapsed_s, 31 * 60 + 30);
   assert.equal(items[2].elapsed_s, undefined);
+});
+
+test("phase_seconds: ended − started per phase, now for the open one, fractional seconds parsed, junk dropped", (t) => {
+  const root = fixture(t, "hud-reviews-phases-", {
+    // Every phase closed, each stamp carrying fractional seconds as a
+    // high-resolution clock writes them.
+    "projects/p/raw/PR-1/state.json": JSON.stringify({
+      started: "2026-10-27T10:00:00.250Z",
+      ended: "2026-10-27T10:31:42.250Z",
+      phases: {
+        evidence: { started: "2026-10-27T10:00:00.250Z", ended: "2026-10-27T10:01:54.250Z" },
+        questions: { started: "2026-10-27T10:01:54.250Z", ended: "2026-10-27T10:05:54.250Z" },
+        settle: { started: "2026-10-27T10:05:54.250Z", ended: "2026-10-27T10:12:48.250Z" },
+        refute: { started: "2026-10-27T10:12:48.250Z", ended: "2026-10-27T10:23:42.250Z" },
+        triage: { started: "2026-10-27T10:23:42.250Z", ended: "2026-10-27T10:27:54.250Z" },
+        teach: { started: "2026-10-27T10:27:54.250Z", ended: "2026-10-27T10:31:42.250Z" },
+        // no `started`: not a timing
+        rendered: { ended: "2026-10-27T10:31:42.250Z" },
+        // not an object: dropped
+        posted: "2026-10-27T10:32:00.000Z",
+      },
+    }),
+    // Still running: the open phase is measured against the clock passed in.
+    "projects/p/raw/PR-2/state.json": JSON.stringify({
+      started: "2026-10-27T11:00:00.000Z",
+      ended: null,
+      phases: {
+        evidence: { started: "2026-10-27T11:00:00.000Z", ended: "2026-10-27T11:01:30.000Z" },
+        questions: { started: "2026-10-27T11:01:30.000Z", ended: null },
+      },
+    }),
+    // Backfilled: no phases recorded.
+    "projects/p/raw/PR-3/state.json": JSON.stringify({
+      started: "2026-10-27T12:00:00.000Z",
+      ended: "2026-10-27T12:10:00.000Z",
+      phases: {},
+    }),
+    // `phases` not an object at all: no key served, no timings.
+    "projects/p/raw/PR-4/state.json": JSON.stringify({
+      started: "2026-10-27T12:00:00.000Z",
+      ended: "2026-10-27T12:10:00.000Z",
+      phases: ["evidence"],
+    }),
+  });
+  const now = Date.parse("2026-10-27T11:05:30.000Z");
+  const byPath = new Map(listReviews(root, { now }).items.map((i) => [i.path, i]));
+
+  const full = byPath.get("projects/p/raw/PR-1/state.json");
+  assert.deepEqual(full.phase_seconds, {
+    evidence: 114,
+    questions: 240,
+    settle: 414,
+    refute: 654,
+    triage: 252,
+    teach: 228,
+  });
+  assert.deepEqual(Object.keys(full.phases), ["evidence", "questions", "settle", "refute", "triage", "teach"]);
+  assert.deepEqual(full.phases.evidence, { started: "2026-10-27T10:00:00.250Z", ended: "2026-10-27T10:01:54.250Z" });
+
+  const open = byPath.get("projects/p/raw/PR-2/state.json");
+  assert.deepEqual(open.phase_seconds, { evidence: 90, questions: 240 }, "the open phase runs to `now`");
+  assert.equal(open.phases.questions.ended, null);
+
+  assert.deepEqual(byPath.get("projects/p/raw/PR-3/state.json").phase_seconds, {});
+  assert.deepEqual(byPath.get("projects/p/raw/PR-3/state.json").phases, {});
+
+  const junk = byPath.get("projects/p/raw/PR-4/state.json");
+  assert.equal(junk.phases, undefined, "a phases value that is not an object is not served");
+  assert.deepEqual(junk.phase_seconds, {});
 });
 
 test("derived links are refused when the state cannot back them", (t) => {
@@ -534,6 +632,14 @@ test("reviews panel is wired and only links", () => {
   const verdictAt = ids.indexOf("verdict");
   assert.ok(verdictAt !== -1, "verdict is a column");
   assert.deepEqual(ids.slice(verdictAt + 1, verdictAt + 5), ["mine", "humans", "bots", "threads"]);
+  // Where the time went sits beside where the run is.
+  assert.deepEqual(ids.slice(verdictAt - 2, verdictAt), ["phase", "phases"]);
+  assert.match(block, /function phasesCell\b/, "the block renders per-phase minutes");
+  assert.match(block, /phase_seconds/, "from the server's derived seconds");
+  assert.match(block, /ended == null/, "the open phase is told apart by its missing end");
+  assert.match(block, /function phaseMedians\b/, "and a median per phase across the loaded runs");
+  assert.match(block, /median per phase across /, "named as such under the table");
+  assert.match(block, /\.toFixed\(1\)/, "minutes to one decimal");
   assert.match(block, /function reviewStateCells\b/, "the block renders the review_state block");
   assert.match(block, /head_matches === false/, "a review behind the head is marked");
   assert.match(block, /awaiting_me > 0/, "a thread waiting on the reader is highlighted");

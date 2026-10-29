@@ -102,12 +102,15 @@ should read as a fault, not as "no runs".
 
 The row's `project` is the name the **first wildcard segment** matched, which
 under the default glob is the project directory. Each row carries the state
-file's fields plus four the server derives: `project`, `elapsed_s` (now minus
-`started` while `ended` is null, else `ended` minus `started`), `pr_url`
+file's fields plus five the server derives: `project`, `elapsed_s` (now minus
+`started` while `ended` is null, else `ended` minus `started`), `phase_seconds`
+(the same arithmetic per entry of `phases`, in the file's order; a phase with
+no parseable `started` is left out), `pr_url`
 (`https://github.com/<repo>/pull/<pr>`, only when `repo` is `owner/name` and
 `pr` is a positive integer), and `note_url` (the `/n/` tree route for the
-note's path, `.md` dropped — the same rule a tree click applies). Running
-rows sort first, then newest `started` first.
+note's path, `.md` dropped — the same rule a tree click applies). `phases`
+itself is rebuilt as `{<name>: {started, ended}}`, strings or null, nothing
+else. Running rows sort first, then newest `started` first.
 
 A state file may also carry a `review_state` block — who has reviewed the PR
 and who is waited on — and it is the one nested object the server copies

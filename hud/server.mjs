@@ -1772,6 +1772,36 @@ function elapsedSeconds(started, ended, now) {
 }
 
 /**
+ * `phases` as the panel may see it: `{<name>: {started, ended}}` with each
+ * time a string or null. An entry that is not an object, or whose `started`
+ * is not a string, is dropped; a block that is not an object is no block.
+ */
+function sanitizePhases(v) {
+  if (!isObject(v)) return undefined;
+  const out = {};
+  for (const [name, p] of Object.entries(v)) {
+    if (!isObject(p) || typeof p.started !== "string") continue;
+    out[name] = { started: p.started, ended: strOrNull(p.ended) };
+  }
+  return out;
+}
+
+/**
+ * Whole seconds per phase, in the file's order: `ended` minus `started`, or
+ * now minus `started` for the phase still open. A phase whose times do not
+ * parse is left out rather than shown as zero, so a missing number reads as
+ * "not timed", never as "instant".
+ */
+function phaseSeconds(phases, now) {
+  const out = {};
+  for (const [name, p] of Object.entries(phases ?? {})) {
+    const s = elapsedSeconds(p.started, p.ended, now);
+    if (s !== null) out[name] = s;
+  }
+  return out;
+}
+
+/**
  * One item for one file. A file that is not a JSON object is still a row —
  * `unreadable: true` with the path and the reason — because a run whose state
  * cannot be read is a fact about the tree, not an absence from it.
@@ -1800,11 +1830,16 @@ function readReviewState(root, rel, project, now) {
   }
   const item = { ...base };
   for (const k of REVIEW_FIELDS) if (state[k] !== undefined) item[k] = state[k];
+  // `phases` is nested, so like `review_state` it is rebuilt rather than copied.
+  const phases = sanitizePhases(state.phases);
+  if (phases) item.phases = phases;
+  else delete item.phases;
   const rs = sanitizeReviewState(state.review_state);
   if (rs) item.review_state = rs;
   // The contract spells a run that has not finished as `ended: null`.
   item.running = item.ended == null;
   item.elapsed_s = elapsedSeconds(item.started, item.ended, now);
+  item.phase_seconds = phaseSeconds(phases, now);
   item.pr_url = prUrl(item.repo, item.pr);
   item.note_url = noteUrl(item.note);
   return item;
