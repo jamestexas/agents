@@ -87,6 +87,21 @@ export const KINDS = Object.freeze({
  */
 export const SHAPES = Object.freeze({ "review-state": reviewState, "work-board": workBoard });
 
+/** Seconds between a page's polls of a card that declares no `refresh`. */
+export const DEFAULT_REFRESH_S = 60;
+
+/**
+ * A `refresh` value in seconds: a whole number of seconds or minutes, `"15s"`
+ * or `"2m"`, at least one second. Anything else — a bare number, a fraction,
+ * a word — is null, and the card is misconfigured rather than polled at a
+ * cadence nobody wrote.
+ */
+export function parseRefresh(v) {
+  const m = typeof v === "string" ? /^([1-9][0-9]*)([sm])$/.exec(v) : null;
+  if (!m) return null;
+  return Number(m[1]) * (m[2] === "m" ? 60 : 1);
+}
+
 const NAME_RE = /^[A-Za-z0-9_-]+$/;
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -236,6 +251,14 @@ function buildCard(name, raw, ctx) {
       return fail(scopes.length ? `scope must be one of ${scopes.join(", ")}` : `shape "${raw.shape}" has no scopes`);
     }
     card.scope = raw.scope;
+  }
+
+  // Undeclared stays undeclared: the default is the server's to apply, so a
+  // card read back from the registry says only what its stanza said.
+  if (raw.refresh !== undefined) {
+    const secs = parseRefresh(raw.refresh);
+    if (secs === null) return fail('refresh must be a duration like "15s" or "2m"');
+    card.refresh = secs;
   }
 
   if (raw.columns !== undefined && !isStringList(raw.columns)) return fail("columns must be a list of strings");

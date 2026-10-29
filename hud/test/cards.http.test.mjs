@@ -212,7 +212,7 @@ test("GET /api/card/board: normalised rows with the latest review run joined on 
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.deepEqual(Object.keys(body), [
-    "card", "source", "title", "stale", "generated_at", "columns", "joins", "health", "count", "truncated", "rejected", "items",
+    "card", "source", "title", "stale", "generated_at", "refresh", "columns", "joins", "health", "count", "truncated", "rejected", "items",
   ]);
   assert.equal(body.card, "board");
   assert.equal(body.source, "http");

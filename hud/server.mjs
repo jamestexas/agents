@@ -22,6 +22,10 @@
 //                                           `board`, the work-board over HTTP
 //                                           with each row's latest run joined
 //                                           on as `reviews`)
+//              /api/events                 (Server-Sent Events: the name of
+//                                           each fs card a tree change
+//                                           belongs to, for the page to
+//                                           refetch; GET only)
 //              /api/reviews[?scope=open]   (the reviews card under its old
 //              /api/dyn/board               envelope; the board card under
 //                                           its — aliases for one release)
@@ -50,7 +54,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { lectioGraft, listSessions } from "./sessions.mjs";
 import { errText } from "./errtext.mjs";
 import { DEFAULT_REVIEWS_GLOB, expandHome, getCard, loadCards } from "./cards/registry.mjs";
-import { SKIP_NAMES, parseGlob as parseReviewsGlob } from "./cards/kinds/fs.mjs";
+import { SKIP_NAMES, covers as fsCovers, parseGlob as parseReviewsGlob } from "./cards/kinds/fs.mjs";
 import {
   LIMITS as HTTP_LIMITS,
   legacySnapshotFile,
@@ -1647,9 +1651,151 @@ function cardNameOf(pathname) {
   return name !== "" && !name.includes("/") ? name : null;
 }
 
-function serveCardRoute(res, root, url, dyn, name) {
+function serveCardRoute(req, res, root, url, dyn, name) {
   const { cards } = cardsOf(root);
-  return serveCard(res, cardCtx(root, dyn, cards), getCard(cards, name), { name, scope: url.searchParams.get("scope") });
+  return serveCard(res, cardCtx(root, dyn, cards), getCard(cards, name), {
+    name,
+    scope: url.searchParams.get("scope"),
+    ifNoneMatch: req.headers["if-none-match"],
+  });
+}
+
+// ------------------------------------------------------------------ events
+//
+// `GET /api/events` is a Server-Sent Events stream that says which card a
+// change in the tree belongs to, so an open page refetches that card within a
+// second instead of at its next poll. It carries names only — never rows —
+// so the card route stays the one place a card is read, with its ETag, and a
+// stream that drops costs nothing but latency: the page's polls go on.
+//
+// One `fs.watch` on HUD_ROOT, recursive, shared by every open stream, started
+// with the first and closed with the last. Changes are gathered for a short
+// window and then matched against every `fs` card whose root is HUD_ROOT or
+// under it, by the walk's own glob rules; a card rooted elsewhere, and every
+// `http` card, is polled only. The stream writes and never reads: no request
+// body, no write to the tree, and nothing a client sends changes what it says.
+
+/** How long changes are gathered before the cards they belong to are named. */
+export const EVENTS_DEBOUNCE_MS = 250;
+/** A comment line this often, so a proxy or the browser does not drop an idle stream. */
+export const EVENTS_PING_MS = 25 * 1000;
+
+/** The `fs` cards under the root, each with its root relative to the watched one. */
+function watchedCards(root) {
+  const out = [];
+  for (const card of cardsOf(root).cards.values()) {
+    if (card.error || card.kind !== "fs") continue;
+    const rel = path.relative(root, card.root);
+    if (rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))) out.push({ card, prefix: rel });
+  }
+  return out;
+}
+
+/** The cards a set of changed paths (relative to root, or null for "unknown") belong to. */
+function cardsTouched(root, changed) {
+  const names = [];
+  for (const { card, prefix } of watchedCards(root)) {
+    const hit = [...changed].some((rel) => {
+      if (rel === null) return true;
+      const under = prefix === "" ? rel : path.relative(prefix, rel);
+      if (under === "" || under.startsWith("..") || path.isAbsolute(under)) return false;
+      return fsCovers(card, under.split(path.sep).join("/"));
+    });
+    if (hit) names.push(card.name);
+  }
+  return names;
+}
+
+function eventFrame(event, data) {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
+/**
+ * The streams and the one watcher behind them. `closeAll` ends every stream,
+ * so closing the server does not wait on a page that never hangs up.
+ */
+function eventsHub(root, opts) {
+  const clients = new Set();
+  let watcher = null;
+  let watchError = null;
+  let pending = null;
+  let timer = null;
+
+  const flush = () => {
+    const changed = pending;
+    pending = null;
+    timer = null;
+    if (!changed || !clients.size) return;
+    let names;
+    try {
+      names = cardsTouched(root, changed);
+    } catch (err) {
+      process.stderr.write(`hud: events: ${errText(err)}\n`);
+      return;
+    }
+    for (const name of names) for (const res of clients) res.write(eventFrame("card", { name }));
+  };
+
+  const start = () => {
+    watchError = null;
+    try {
+      watcher = fs.watch(root, { recursive: true, persistent: false }, (_type, filename) => {
+        if (!pending) pending = new Set();
+        pending.add(filename == null ? null : String(filename));
+        if (!timer) timer = setTimeout(flush, opts.debounceMs);
+      });
+      watcher.on("error", (err) => {
+        watchError = errText(err);
+        stop();
+      });
+    } catch (err) {
+      watcher = null;
+      watchError = errText(err);
+    }
+  };
+
+  const stop = () => {
+    if (watcher) watcher.close();
+    watcher = null;
+    if (timer) clearTimeout(timer);
+    timer = null;
+    pending = null;
+  };
+
+  const drop = (res, ping) => {
+    clearInterval(ping);
+    clients.delete(res);
+    if (!clients.size) stop();
+  };
+
+  return {
+    serve(req, res) {
+      res.writeHead(200, {
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+      });
+      if (!watcher) start();
+      clients.add(res);
+      const ping = setInterval(() => res.write(": ping\n\n"), opts.pingMs);
+      req.on("close", () => drop(res, ping));
+      res.on("close", () => drop(res, ping));
+      let cards = [];
+      try {
+        cards = watcher ? watchedCards(root).map((w) => w.card.name) : [];
+      } catch (err) {
+        watchError = errText(err);
+      }
+      const hello = { watching: watcher !== null, cards };
+      if (watchError) hello.error = watchError;
+      res.write(`retry: 5000\n${eventFrame("hello", hello)}`);
+    },
+    closeAll() {
+      for (const res of clients) res.end();
+      clients.clear();
+      stop();
+    },
+  };
 }
 
 // ----------------------------------------------- reviews joined onto the board
@@ -1785,13 +1931,13 @@ export function contentTypeFor(p) {
   return CONTENT_TYPES[path.extname(p).toLowerCase()] || "application/octet-stream";
 }
 
-function sendText(res, code, body, type = "text/plain; charset=utf-8") {
-  res.writeHead(code, { "content-type": type, "cache-control": "no-store" });
+function sendText(res, code, body, type = "text/plain; charset=utf-8", headers = {}) {
+  res.writeHead(code, { "content-type": type, "cache-control": "no-store", ...headers });
   res.end(body);
 }
 
-function sendJson(res, code, obj) {
-  sendText(res, code, JSON.stringify(obj, null, 2), "application/json; charset=utf-8");
+function sendJson(res, code, obj, headers) {
+  sendText(res, code, JSON.stringify(obj, null, 2), "application/json; charset=utf-8", headers);
 }
 
 function sendFile(res, abs, type) {
@@ -1830,6 +1976,10 @@ export function createServer(opts = {}) {
     // serving one tree must agree to the second, which they cannot when each
     // reads `Date.now()` a few milliseconds apart.
     now: opts.now || Date.now,
+    events: eventsHub(root, {
+      debounceMs: opts.eventsDebounceMs || EVENTS_DEBOUNCE_MS,
+      pingMs: opts.eventsPingMs || EVENTS_PING_MS,
+    }),
   };
 
   const refresh = () => {
@@ -1865,6 +2015,14 @@ export function createServer(opts = {}) {
   });
 
   server.hudRefreshPeers = refresh;
+  // An open event stream never ends on its own, and `close` waits for every
+  // open response; so the streams are ended first, or stopping the HUD with a
+  // page open would hang.
+  const close = server.close.bind(server);
+  server.close = (cb) => {
+    dyn.events.closeAll();
+    return close(cb);
+  };
   return server;
 }
 
@@ -1890,6 +2048,12 @@ function handle(req, res, root, uiDir, dyn, refresh) {
     return sendText(res, 405, "method not allowed\n");
   }
   if (req.method !== "GET" && req.method !== "HEAD") return sendText(res, 405, "method not allowed\n");
+  // GET only: a HEAD of a stream that never ends has no headers worth
+  // answering, and it would start the watcher for nothing.
+  if (pathname === "/api/events") {
+    if (req.method !== "GET") return sendText(res, 405, "method not allowed\n");
+    return dyn.events.serve(req, res);
+  }
 
   if (pathname === "/api/tree") return sendJson(res, 200, buildTree(root));
   if (pathname === "/api/md") return serveMarkdown(res, root, url.searchParams.get("path"));
@@ -1914,7 +2078,7 @@ function handle(req, res, root, uiDir, dyn, refresh) {
   // reviews card under its old envelope.
   if (pathname === "/api/cards") return serveCardsList(res, root);
   const cardName = cardNameOf(pathname);
-  if (cardName !== null) return serveCardRoute(res, root, url, dyn, cardName);
+  if (cardName !== null) return serveCardRoute(req, res, root, url, dyn, cardName);
   if (pathname === "/api/reviews") return serveLegacy(res, root, url, dyn, "reviews");
   // Matched against the raw target rather than `url.pathname`: the URL parser
   // folds `..` away, and a traversal attempt must be refused outright rather

@@ -157,3 +157,22 @@ export function validate(raw, card, ctx) {
   card.root = typeof raw.root === "string" && raw.root !== "" ? expandHome(raw.root) : ctx.hudRoot;
   return null;
 }
+
+/**
+ * Whether a path under the card's root could change one of its rows: a file
+ * the glob names, or a directory on the way to one — a run directory removed
+ * or renamed whole is reported by its own name, not its files'. Judged by the
+ * walk's own rules, so a dot-prefixed or skipped name is never a row here
+ * either. `rel` is `/`-separated and relative to `card.root`.
+ */
+export function covers(card, rel) {
+  const parsed = parseGlob(card.glob);
+  if (parsed.error) return false;
+  const names = String(rel ?? "").split("/");
+  if (names.length > parsed.segments.length) return false;
+  return names.every((name, i) => {
+    if (name === "" || name.startsWith(".") || SKIP_NAMES.has(name)) return false;
+    const seg = parsed.segments[i];
+    return seg.literal !== undefined ? name === seg.literal : seg.re.test(name);
+  });
+}

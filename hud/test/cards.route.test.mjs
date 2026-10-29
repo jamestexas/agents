@@ -15,7 +15,7 @@ import { COLUMNS } from "../cards/normalize/review-state.mjs";
 import { census, paths, reviewsFixture, serve, writeConfig } from "./review-fixtures.mjs";
 
 const CARD_KEYS = [
-  "card", "source", "title", "stale", "generated_at", "root", "columns", "joins", "count", "truncated", "rejected", "items",
+  "card", "source", "title", "stale", "generated_at", "refresh", "root", "columns", "joins", "count", "truncated", "rejected", "items",
 ];
 
 const CARDS_TOML = `

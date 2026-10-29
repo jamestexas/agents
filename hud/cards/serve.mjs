@@ -6,8 +6,10 @@
 // old `/api/reviews` and `/api/dyn/board` routes and `/api/card/<name>`
 // cannot read the same source two ways.
 
+import { createHash } from "node:crypto";
+
 import { errText } from "../errtext.mjs";
-import { KINDS, SHAPES, getCard } from "./registry.mjs";
+import { DEFAULT_REFRESH_S, KINDS, SHAPES, getCard } from "./registry.mjs";
 import { joinRows } from "./join.mjs";
 
 /** Rows one response may carry. The sort needs every item, so the walk is bounded separately. */
@@ -128,6 +130,44 @@ async function applyJoins(card, items, payload, stale, ctx, opts = {}) {
 }
 
 /**
+ * Seconds a page should wait before asking again: the card's own cadence, or
+ * the shape's in-flight one while any item is live, whichever is sooner.
+ */
+function refreshOf(card, shape, items) {
+  const own = card.refresh ?? DEFAULT_REFRESH_S;
+  if (shape.LIVE_REFRESH_S === undefined || !items.some(shape.isLive)) return own;
+  return Math.min(own, shape.LIVE_REFRESH_S);
+}
+
+/** Every shape's clock-derived field names; a joined block carries its own shape's. */
+const CLOCK_FIELDS = new Set(Object.values(SHAPES).flatMap((shape) => shape.CLOCK_FIELDS ?? []));
+
+/**
+ * The card answer's ETag: the sha256 of the body as served, less what moves
+ * without the source moving — `generated_at`, and the fields a shape derives
+ * from the clock, at any depth. Hashed after normalisation and joins, so a
+ * change to a joined card's rows is a change to this card's answer, and so is
+ * a config edit to its columns or title.
+ */
+export function etagOf(body) {
+  const { generated_at: _when, ...rest } = body;
+  const text = JSON.stringify(rest, (k, v) => (CLOCK_FIELDS.has(k) ? undefined : v));
+  return `"${createHash("sha256").update(text).digest("hex")}"`;
+}
+
+/**
+ * Whether an `If-None-Match` value names `etag`: a list, each entry strong or
+ * weak (`W/` is a weak comparison, which is all a GET needs), or `*`.
+ */
+export function etagMatches(header, etag) {
+  if (typeof header !== "string" || header === "") return false;
+  return header.split(",").some((part) => {
+    const tag = part.trim();
+    return tag === "*" || tag.replace(/^W\//, "") === etag;
+  });
+}
+
+/**
  * The old routes' answer to "not configured". Reviews never had a snapshot
  * tier, so an absent source was the panel-off 404 sessions and loadout use;
  * the board had one, so "unconfigured" had to be told apart from "no panel"
@@ -210,20 +250,33 @@ export async function cardResponse(card, ctx, opts) {
       body: { source: legacy, stale, generated_at, root: card.root, glob: card.glob, scope, count, truncated: cut, items: shown },
     };
   }
-  const body = { card: name, source: card.kind, title: card.title, stale, generated_at };
+  const body = { card: name, source: card.kind, title: card.title, stale, generated_at, refresh: refreshOf(card, shape, items) };
   if (card.root !== undefined) body.root = card.root;
   body.columns = card.columns;
   body.joins = joins;
   if (shape.meta) body.health = shape.meta(read.payload);
   Object.assign(body, { count, truncated: cut, rejected: got.rejected, items: shown });
-  return { status: 200, body };
+  return { status: 200, body, etag: etagOf(body) };
 }
 
 /**
  * Serve one card. `ctx.sendJson` is the server's writer, passed in rather
  * than imported so this module never reaches back into the server.
+ *
+ * A card answer carries its ETag and `no-cache` — keep it, but ask — and an
+ * `If-None-Match` naming it is a 304 with no body, so a page polling a card
+ * that has not changed costs a hash, not a re-render. The body is still built
+ * to be hashed: the source is read either way, and that read is the check.
+ * Only a 200 on the card route is conditional; an error is never cached, and
+ * the aliases keep the headers they always had.
  */
 export async function serveCard(res, ctx, card, opts) {
-  const { status, body } = await cardResponse(card, ctx, opts);
-  return ctx.sendJson(res, status, body);
+  const { status, body, etag } = await cardResponse(card, ctx, opts);
+  if (etag === undefined) return ctx.sendJson(res, status, body);
+  const headers = { etag, "cache-control": "no-cache" };
+  if (etagMatches(opts.ifNoneMatch, etag)) {
+    res.writeHead(304, headers);
+    return res.end();
+  }
+  return ctx.sendJson(res, status, body, headers);
 }

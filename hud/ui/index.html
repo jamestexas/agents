@@ -2761,34 +2761,154 @@
       }
 
       /**
+       * What the page last heard from each card: the ETag to send back, the
+       * body it came with and when, when it was last confirmed (a 200 or a
+       * 304), and the timer for the next poll. A poll whose ETag still holds
+       * is a 304, and the rows already drawn stand.
+       */
+      const CARD_LIVE = new Map();
+
+      /**
+       * The event stream: whether it is open, and which cards it names. A
+       * card it names is "live" — refetched the moment its files change —
+       * and every card is polled on its served `refresh` either way, so a
+       * stream that drops costs latency, never data.
+       */
+      const STREAM = { open: false, cards: new Set() };
+
+      /**
+       * A kept body, advanced to now: the clock-derived fields of a run in
+       * flight are left out of the ETag, so a 304 means the run has not
+       * changed, not that its timer has stopped. The page moves them itself.
+       */
+      function advanced(resp, secs) {
+        if (!resp || !Array.isArray(resp.items) || secs <= 0) return resp;
+        const age = (r) => {
+          if (!r || typeof r !== "object" || r.running !== true) return r;
+          const out = { ...r };
+          if (Number.isInteger(r.elapsed_s)) out.elapsed_s = r.elapsed_s + secs;
+          if (r.phase_seconds && typeof r.phase_seconds === "object" && r.phases && typeof r.phases === "object") {
+            out.phase_seconds = { ...r.phase_seconds };
+            for (const [name, p] of Object.entries(r.phases)) {
+              if (p && p.ended == null && Number.isInteger(out.phase_seconds[name])) out.phase_seconds[name] += secs;
+            }
+          }
+          return out;
+        };
+        const items = resp.items.map((r) => {
+          const out = age(r);
+          for (const k of Object.keys(resp.joins || {})) if (out && out[k]) out[k] = age(out[k]);
+          return out;
+        });
+        return { ...resp, items };
+      }
+
+      /** The heading's stamp for a card answering live: "live" or "polling", and how long since it was confirmed. */
+      function paintLiveStamp(name) {
+        const state = CARD_LIVE.get(name);
+        const stamp = document.querySelector("#wrap-" + CSS.escape(name) + " > h2 .stamp");
+        if (!state || !stamp || !state.resp || state.resp.error || state.resp.stale) return;
+        const ago = Math.max(0, Math.round((Date.now() - state.checked) / 1000));
+        const mode = STREAM.open && STREAM.cards.has(name) ? "live · " : "polling · ";
+        stamp.textContent = mode + ago + "s ago";
+      }
+
+      /** The next poll, on the card's served cadence; a card that is gone is not polled again. */
+      function schedule(name, secs) {
+        const state = CARD_LIVE.get(name);
+        if (!state) return;
+        clearTimeout(state.timer);
+        state.timer = secs > 0 ? setTimeout(() => loadCard(name), secs * 1000) : null;
+      }
+
+      /**
        * One card. 404 is the panel-off contract — the stanza is absent, so the
-       * panel does not exist. Anything else but 200 is configured and failing
-       * to answer, which is a fault worth the banner and a body that says why.
-       * What the payload says about itself (`health`) outranks how old it is.
+       * panel does not exist. Anything else but 200 or 304 is configured and
+       * failing to answer, which is a fault worth the banner and a body that
+       * says why. What the payload says about itself (`health`) outranks how
+       * old it is. A 304 redraws the kept body, advanced to now.
        */
       async function loadCard(name) {
         const wrap = ensurePanel(name);
+        if (!CARD_LIVE.has(name)) CARD_LIVE.set(name, { etag: null, resp: null, at: 0, checked: 0, timer: null });
+        const state = CARD_LIVE.get(name);
         let resp = null;
+        let next = 0;
         try {
-          const res = await fetch("/api/card/" + encodeURIComponent(name), { cache: "no-store" });
-          const body = await res.json().catch(() => null);
-          if (res.ok && body && Array.isArray(body.items)) {
-            resp = body;
-            const health = payloadHealth(body.health);
-            if (health) noteSource(name, health.state, health.why);
-            else noteSource(name, body.stale ? "stale" : "live");
-          } else if (res.status === 404) {
-            SOURCE_STATE.delete(name);
-            paintConnState();
+          const headers = state.etag && state.resp ? { "if-none-match": state.etag } : {};
+          const res = await fetch("/api/card/" + encodeURIComponent(name), { cache: "no-store", headers });
+          if (res.status === 304 && state.resp) {
+            state.checked = Date.now();
+            resp = advanced(state.resp, Math.round((state.checked - state.at) / 1000));
+            next = state.resp.refresh;
           } else {
-            resp = { card: name, error: (body && body.error) || "HTTP " + res.status };
-            noteSource(name, "absent", resp.error);
+            const body = await res.json().catch(() => null);
+            if (res.ok && body && Array.isArray(body.items)) {
+              resp = body;
+              Object.assign(state, { etag: res.headers.get("etag"), resp: body, at: Date.now(), checked: Date.now() });
+              next = body.refresh;
+              const health = payloadHealth(body.health);
+              if (health) noteSource(name, health.state, health.why);
+              else noteSource(name, body.stale ? "stale" : "live");
+            } else if (res.status === 404) {
+              Object.assign(state, { etag: null, resp: null });
+              SOURCE_STATE.delete(name);
+              paintConnState();
+            } else {
+              resp = { card: name, error: (body && body.error) || "HTTP " + res.status };
+              Object.assign(state, { etag: null, resp });
+              next = DEFAULT_REFRESH_S;
+              noteSource(name, "absent", resp.error);
+            }
           }
         } catch {
-          /* the HUD server itself is gone; hide rather than shout */
+          /* the HUD server itself is gone; hide rather than shout, and keep asking */
+          next = DEFAULT_REFRESH_S;
         }
         if (name === "board") setDial(resp && !resp.error ? resp : null);
         renderCard(resp, wrap);
+        paintLiveStamp(name);
+        schedule(name, Number.isInteger(next) ? next : DEFAULT_REFRESH_S);
+      }
+
+      /** The cadence for a card whose answer carried none — an error, or a server that is gone. */
+      const DEFAULT_REFRESH_S = 60;
+
+      /**
+       * One stream for the page. `hello` names the cards it will push for —
+       * sent on every (re)connect, so a card changed while the stream was down
+       * is refetched then; `card` names one to refetch now. On an error the
+       * browser reconnects by itself, and until it does every panel says
+       * "polling" and its timer carries it.
+       */
+      function openStream() {
+        if (!window.EventSource) return;
+        const stream = new EventSource("/api/events");
+        stream.addEventListener("hello", (ev) => {
+          let data = null;
+          try {
+            data = JSON.parse(ev.data);
+          } catch {
+            /* a frame that is not JSON names nothing */
+          }
+          STREAM.open = !!(data && data.watching);
+          STREAM.cards = new Set(data && Array.isArray(data.cards) ? data.cards : []);
+          for (const name of STREAM.cards) if (CARD_LIVE.has(name)) loadCard(name);
+          for (const name of CARD_LIVE.keys()) paintLiveStamp(name);
+        });
+        stream.addEventListener("card", (ev) => {
+          let data = null;
+          try {
+            data = JSON.parse(ev.data);
+          } catch {
+            return;
+          }
+          if (data && typeof data.name === "string" && CARD_LIVE.has(data.name)) loadCard(data.name);
+        });
+        stream.addEventListener("error", () => {
+          STREAM.open = false;
+          for (const name of CARD_LIVE.keys()) paintLiveStamp(name);
+        });
       }
 
       /** ⟳ : the tree, the cards, the two remaining proxied sources, and a real peers re-poll. */
@@ -2864,6 +2984,11 @@
       loadDigest();
       loadPeers();
       loadLoadout();
+      openStream();
+      // The stamps' "Ns ago" is the only thing that moves every second.
+      setInterval(() => {
+        for (const name of CARD_LIVE.keys()) paintLiveStamp(name);
+      }, 1000);
     </script>
   </body>
 </html>

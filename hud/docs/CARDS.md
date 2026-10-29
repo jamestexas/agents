@@ -53,6 +53,7 @@ booleans — which is what `columns` and `order` need and all they need.
 | `key` | string | no | The derived field rows meet on in a join. Today: `pr_url`. |
 | `scope` | string | no | A filter the shape declares; `review-state` has `open` and `all`. The card's default; `?scope=` overrides it per request. |
 | `columns` | list of strings | no | Column ids the UI renders, through its cell registry. Defaults to the shape's own list. |
+| `refresh` | string, `"15s"` or `"2m"` | no | How often an open page polls the card. A whole number of seconds or minutes, at least `1s`; anything else (`"soon"`, `"15"`, `"1.5m"`) makes the card misconfigured. Defaults to `60s`. A `review-state` card holding a run in flight is polled every `15s` at most (see [Live updates](#live-updates)). |
 | `root` | string, `~` expanded | `fs` only, no | Where the glob is applied. Defaults to `HUD_ROOT`. |
 | `glob` | string, `*` within one segment | `fs` only, yes | The files that are rows, relative to `root`. The same walk and refusals as `[sources.reviews] glob`. |
 | `url` | string | `http` only, yes | An absolute http(s) URL to GET — loopback by intent, not enforced, because a HUD in a container reaches its board through the host's name. |
@@ -145,6 +146,7 @@ singular, and keeps doing so — that is the one place the old name survives.
   "title": "Review runs",
   "stale": false,
   "generated_at": "2026-10-29T10:00:00.000Z",
+  "refresh": 15,
   "root": "/path/to/hud",
   "columns": ["pr", "project", "mode", "phase", "phases", "verdict", "mine", "humans", "bots", "threads", "early", "gates", "unavail", "findings", "note", "posted"],
   "joins": {},
@@ -155,6 +157,7 @@ singular, and keeps doing so — that is the one place the old name survives.
 }
 ```
 
+`refresh` is the seconds the page waits before its next poll (below).
 `root` is present for kinds that have one; `health` for shapes that read a
 self-report. `generated_at` is when the rows were produced — now for a live
 answer, the snapshot's own age when `stale`. `count` is the rows served;
@@ -170,6 +173,7 @@ first, then newest `started` first.
 | `?scope=` outside the shape's vocabulary, or a scope on a shape that has none | **400**, `{card, error}` |
 | the upstream is down and the card has no snapshot (`http`) | **503**, `{card, error}` with the upstream's reason |
 | the upstream is down and the card has a snapshot (`http`) | **200**, `stale: true`, `generated_at` the snapshot's age, joins `unavailable` |
+| `If-None-Match` names the answer's current `ETag` | **304**, no body ([Live updates](#live-updates)) |
 | any verb but GET or HEAD, on this or any path under `/api/card/` | **405** |
 
 `?scope=<value>` overrides the card's declared scope for one request. A card
@@ -186,6 +190,71 @@ the new path and never written again.
 declares, misconfigured ones included (the page renders them red rather than
 losing them), and `[layout].order` or the default — so the UI can draw the
 aside without knowing any card's name in advance.
+
+## Live updates
+
+An open page follows its cards without a reload, two ways at once: it polls
+every card on the card's own cadence, and it listens on one event stream that
+names a card the moment a file it reads changes. The stream is the fast path;
+the polls are the floor, so a stream that drops — or a card the stream cannot
+see — costs latency, never data.
+
+**ETag polling.** A `200` from `GET /api/card/<name>` carries an `ETag` — the
+sha256 of the body as served — and `Cache-Control: no-cache`. The page sends
+it back as `If-None-Match`; when nothing changed the answer is **304** with no
+body, and the rows already drawn stand. The hash is taken after normalisation
+and joins, so a change to a joined card's rows (a board row's run) moves the
+board's ETag too, as does a config edit to the card's columns or title. Left
+out of the hash: `generated_at`, and the fields a shape derives from the clock
+(`elapsed_s`, `phase_seconds` for `review-state`) — they move every second a
+run is in flight while the run has not changed; the page advances them itself
+between answers. Errors (404, 400, 503) carry no ETag, and the
+`/api/reviews` and `/api/dyn/board` aliases answer as they always did.
+
+**Cadence.** The body's `refresh` is when to ask next, in seconds: the card's
+`refresh` (default `60`), or `15` while a `review-state` card holds a run in
+flight (`running`), whichever is sooner. A card that answered with an error is
+asked again after `60`; one that answered 404 — its stanza gone — is not asked
+again until ⟳.
+
+**The event stream.** `GET /api/events` is a Server-Sent Events stream. It
+opens with
+
+```
+retry: 5000
+event: hello
+data: {"watching":true,"cards":["reviews"]}
+```
+
+— which cards it will name — and then sends, for every change it sees,
+
+```
+event: card
+data: {"name":"reviews"}
+```
+
+plus a `: ping` comment every 25 s so an idle stream is not dropped. Behind it
+is one `fs.watch` on `HUD_ROOT`, recursive, shared by every open stream and
+closed with the last; changes are gathered for 250 ms, then matched against
+every `fs` card whose `root` is `HUD_ROOT` or under it, by the same rules the
+walk uses (a dot-prefixed or `_hud` name is never a row, so `.generated/`
+writes name nothing). A path names a card when the glob covers it — a file
+the glob matches, or a directory on the way to one. An `fs` card rooted
+outside `HUD_ROOT`, and every `http` card, is not in `hello.cards`: it is
+polled only. When the watcher cannot start, `hello` says `watching: false`
+with the reason and the page polls.
+
+The stream carries names, never rows: the card route stays the one place a
+card is read. It is **GET only** (every other verb, HEAD included, is 405),
+never reads a request body, and never writes to the tree.
+
+**The page.** Each panel's heading says how it is following: `live · 3s ago`
+for a card the open stream names, `polling · 3s ago` otherwise, where the age
+is since the card last confirmed its rows (a 200 or a 304). A stale card keeps
+its `as of <time>` stamp. When the stream errors the browser reconnects by
+itself, every panel reads `polling` meanwhile, and each `hello` on reconnect
+refetches the cards it names, so a change made while the stream was down is
+not missed.
 
 ## Legacy config
 

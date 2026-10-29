@@ -40,6 +40,23 @@ export function inScope(item, scope) {
   return item.running === true || item.posted == null;
 }
 
+/**
+ * Fields derived from the clock rather than the file: they move every second
+ * a run is in flight while the run itself has not changed, so they are left
+ * out of the card's ETag. The page advances them itself between answers.
+ */
+export const CLOCK_FIELDS = Object.freeze(["elapsed_s", "phase_seconds"]);
+
+/**
+ * A run in flight is worth watching more closely than the card's own cadence:
+ * a page polls a card holding one at most this many seconds apart.
+ */
+export const LIVE_REFRESH_S = 15;
+
+export function isLive(item) {
+  return item.running === true && !item.unreadable;
+}
+
 /** The state fields the panel reads, copied by name. */
 export const FIELDS = Object.freeze([
   "version",
