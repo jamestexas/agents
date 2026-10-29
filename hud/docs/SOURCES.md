@@ -21,10 +21,12 @@ panels. The static layer (the tree, notes, deep links) never depends on the
 config being present or valid.
 
 The parser is a TOML subset: `[table]` and `[dotted.table]` headers,
-`key = "string"`, `key = 123`, `key = true`/`false`, `#` comments whole-line or
-trailing, and blank lines. Anything outside that — an array, an inline table, a
-float, a dotted bare key — is **skipped with a warning printed once at
-startup**, so a typo costs you one key rather than the whole switchboard.
+`key = "string"`, `key = 123`, `key = true`/`false`, `key = ["a", "b"]` (one
+line, those three scalars, no nesting — enough for a card's `columns`), `#`
+comments whole-line or trailing, and blank lines. Anything outside that — a
+nested or multi-line array, an inline table, a float, a dotted bare key — is
+**skipped with a warning printed once at startup**, so a typo costs you one key
+rather than the whole switchboard.
 
 ## The sources
 

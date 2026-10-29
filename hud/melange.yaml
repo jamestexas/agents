@@ -54,6 +54,13 @@ pipeline:
       # server.mjs or every static asset 404s with no other symptom.
       install -Dm644 server.mjs   "${{targets.destdir}}/usr/share/hud/server.mjs"
       install -Dm644 sessions.mjs "${{targets.destdir}}/usr/share/hud/sessions.mjs"
+      # server.mjs imports the card registry, kinds and normalisers from
+      # cards/; the module graph has to resolve under the installed layout or
+      # the test below fails at import. Two levels deep by construction.
+      for f in cards/*.mjs cards/*/*.mjs; do
+        [ -f "$f" ] || continue
+        install -Dm644 "$f" "${{targets.destdir}}/usr/share/hud/$f"
+      done
       # The container's main(); see the header of that file for why the image
       # cannot simply exec server.mjs.
       install -Dm644 container-entry.mjs \

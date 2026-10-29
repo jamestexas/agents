@@ -40,6 +40,12 @@ import { execFile } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { lectioGraft, listSessions } from "./sessions.mjs";
+import { DEFAULT_REVIEWS_GLOB, expandHome } from "./cards/registry.mjs";
+import { parseGlob as parseReviewsGlob } from "./cards/kinds/fs.mjs";
+
+// The reviews layer's pieces now live under cards/; the names stay exported
+// from here so the tests and the CLI that import them keep working.
+export { DEFAULT_REVIEWS_GLOB, expandHome, parseReviewsGlob };
 
 // ---------------------------------------------------------------- config
 
@@ -247,12 +253,13 @@ const STRING_ESCAPES = { n: "\n", t: "\t", r: "\r", '"': '"', "\\": "\\" };
  * real parser would be a dependency. Same bargain, same forgiving posture.
  *
  * Supported: `[table]` and `[dotted.table]` headers, `key = "string"`,
- * `key = 123`, `key = true`/`false`, whole-line `#` comments, a trailing
- * `# comment` after a value or a header, blank lines, and whitespace anywhere
- * it is insignificant.
+ * `key = 123`, `key = true`/`false`, `key = ["a", "b"]` (one line, those
+ * three scalars, no nesting — a card's `columns`), whole-line `#` comments, a
+ * trailing `# comment` after a value or a header, blank lines, and whitespace
+ * anywhere it is insignificant.
  *
- * Outside the subset — a dotted bare key, an array, an inline table, a float,
- * a date, an unterminated string — the line is skipped and described in
+ * Outside the subset — a dotted bare key, a nested or multi-line array, an
+ * inline table, a float, a date, an unterminated string — the line is skipped and described in
  * `warns`. Never throws. This is the file the user hand-edits, so one bad line
  * must leave every good line around it readable; the alternative is a typo in
  * `ticket_url_template` silently emptying the panel switchboard.
@@ -330,14 +337,65 @@ function tomlValue(raw) {
     if (str === null) return MALFORMED;
     return trailingIsComment(str.rest) ? str.value : MALFORMED;
   }
+  if (q === "[") {
+    const arr = readTomlArray(v);
+    if (arr === null) return MALFORMED;
+    return trailingIsComment(arr.rest) ? arr.value : MALFORMED;
+  }
   // Unquoted, so the value is a bare scalar and the first `#` can only open a
   // comment — no quoted `#` to step around, unlike the frontmatter case.
   const hash = v.indexOf("#");
-  const bare = (hash === -1 ? v : v.slice(0, hash)).trim();
+  return bareScalar((hash === -1 ? v : v.slice(0, hash)).trim());
+}
+
+function bareScalar(bare) {
   if (bare === "true") return true;
   if (bare === "false") return false;
   if (/^[+-]?[0-9]+$/.test(bare)) return Number(bare);
   return MALFORMED;
+}
+
+/**
+ * Read the single-line array starting at `v[0]`: strings, integers and
+ * booleans, comma-separated, a trailing comma tolerated. A nested array or an
+ * inline table is a bare element that is not a scalar, so it fails the same
+ * way a float does — the whole line is refused, never half an array.
+ *
+ * @returns {{value: unknown[], rest: string}|null} null when unterminated or
+ *   holding an element outside the subset.
+ */
+function readTomlArray(v) {
+  const value = [];
+  let i = 1;
+  const skipSpace = () => {
+    while (i < v.length && (v[i] === " " || v[i] === "\t")) i++;
+  };
+  for (;;) {
+    skipSpace();
+    if (i >= v.length) return null;
+    if (v[i] === "]") return { value, rest: v.slice(i + 1) };
+    const c = v[i];
+    if (c === '"' || c === "'") {
+      const str = readTomlString(v.slice(i), c);
+      if (str === null) return null;
+      value.push(str.value);
+      i = v.length - str.rest.length;
+    } else {
+      let end = i;
+      while (end < v.length && v[end] !== "," && v[end] !== "]") end++;
+      const scalar = bareScalar(v.slice(i, end).trim());
+      if (scalar === MALFORMED) return null;
+      value.push(scalar);
+      i = end;
+    }
+    skipSpace();
+    if (i >= v.length) return null;
+    if (v[i] === ",") {
+      i++;
+      continue;
+    }
+    if (v[i] !== "]") return null;
+  }
 }
 
 /**
@@ -1106,17 +1164,6 @@ export function readPeersSnapshot(root) {
 // ---------------------------------------------------------- sessions layer
 
 /**
- * Expand a leading `~` in a configured path. Nothing else about the string is
- * interpreted — no env vars, no globs — so a config path stays a path.
- */
-export function expandHome(p) {
-  const s = String(p ?? "");
-  if (s === "~") return os.homedir();
-  if (s.startsWith("~/")) return path.join(os.homedir(), s.slice(2));
-  return s;
-}
-
-/**
  * Group rows by slug — the unambiguous identity — labelled with the readable
  * project name. `listSessions` hands rows back newest-first, so each group's
  * sessions already are, and a group is dated by its first row.
@@ -1585,9 +1632,6 @@ function serveLoadout(res, root) {
 // no verb but GET. Every "do" the panel offers is a link out (the PR, the
 // posted review) or a link into the tree (the note).
 
-/** Where a run's `state.json` is looked for when `glob` is not configured. */
-export const DEFAULT_REVIEWS_GLOB = "projects/*/raw/PR-*/state.json";
-
 export const REVIEWS_LIMITS = {
   // Rows one response may carry. The sort needs every file, so the walk is
   // bounded separately.
@@ -1598,35 +1642,6 @@ export const REVIEWS_LIMITS = {
   // A state file is a few hundred bytes; one that is not is not a state file.
   maxStateBytes: 256 * 1024,
 };
-
-/**
- * Split a glob into segments and refuse what the walker cannot honour: an
- * absolute path, an empty segment, `.` or `..`. `*` matches within one
- * segment only — this is not a globbing library, it is `readdirSync` plus a
- * per-name test, the same walk the tree uses, so a pattern can never reach
- * outside the root it is applied to.
- *
- * @returns {{segments: Array<{literal?: string, re?: RegExp}>}|{error: string}}
- */
-export function parseReviewsGlob(glob) {
-  const s = String(glob ?? "");
-  if (s === "" || s.startsWith("/") || /[\\\0]/.test(s)) {
-    return { error: "glob must be a relative path" };
-  }
-  const segments = [];
-  for (const seg of s.split("/")) {
-    if (seg === "" || seg === "." || seg === "..") {
-      return { error: "glob must not contain empty, '.' or '..' segments" };
-    }
-    if (!seg.includes("*")) {
-      segments.push({ literal: seg });
-      continue;
-    }
-    const parts = seg.split("*").map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-    segments.push({ re: new RegExp(`^${parts.join("[^/]*")}$`) });
-  }
-  return { segments };
-}
 
 /**
  * Every file the glob names, as `{rel, project}` — `project` being the name
