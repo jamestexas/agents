@@ -9,18 +9,22 @@
 // Three API groups:
 //   static   — /api/tree, /api/md, /api/config
 //                                          (walk HUD_ROOT, read files)
-//   dynamic  — /api/dyn/{board,digest,peers}, POST /api/refresh/peers
+//   dynamic  — /api/dyn/{digest,peers}, POST /api/refresh/peers
 //   sessions — /api/sessions               (read `~/.claude`, graft via lectio)
 //   loadout  — /api/loadout                (what skills/agents are installed,
 //                                           where from, and where that drifts)
-//   cards    — /api/card/<name>[?scope=…]  (any card the registry under
-//                                           cards/ holds: today `reviews`, each
-//                                           review run's state.json read out
-//                                           of the content tree; and, when the
-//                                           board is on too, joined onto each
-//                                           board row as `review`)
+//   cards    — /api/cards                  (every card the config declares,
+//                                           and the panel order)
+//              /api/card/<name>[?scope=…]  (any card the registry under
+//                                           cards/ holds: today `reviews`,
+//                                           each review run's state.json read
+//                                           out of the content tree, and
+//                                           `board`, the work-board over HTTP
+//                                           with each row's latest run joined
+//                                           on as `reviews`)
 //              /api/reviews[?scope=open]   (the reviews card under its old
-//                                           envelope, an alias for one release)
+//              /api/dyn/board               envelope; the board card under
+//                                           its — aliases for one release)
 //
 // Plus the shell routes: /, /ui/*, and the deep links /n/<path> and
 // /s/<group>/<id>, which all serve ui/index.html so a bookmarked view loads
@@ -46,7 +50,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { lectioGraft, listSessions } from "./sessions.mjs";
 import { errText } from "./errtext.mjs";
 import { DEFAULT_REVIEWS_GLOB, expandHome, getCard, loadCards } from "./cards/registry.mjs";
-import { LIMITS as FS_LIMITS, SKIP_NAMES, parseGlob as parseReviewsGlob } from "./cards/kinds/fs.mjs";
+import { SKIP_NAMES, parseGlob as parseReviewsGlob } from "./cards/kinds/fs.mjs";
 import {
   LIMITS as HTTP_LIMITS,
   legacySnapshotFile,
@@ -55,7 +59,7 @@ import {
 } from "./cards/kinds/http.mjs";
 import { forJoin } from "./cards/normalize/review-state.mjs";
 import { rowKey as boardRowKey } from "./cards/normalize/work-board.mjs";
-import { MAX_ROWS, collectRows, joinPayload, serveCard } from "./cards/serve.mjs";
+import { collectRows, joinPayload, serveCard } from "./cards/serve.mjs";
 
 // The reviews layer's pieces now live under cards/; the names stay exported
 // from here so the tests and the CLI that import them keep working.
@@ -1575,13 +1579,6 @@ function serveLoadout(res, root) {
 // sessions and loadout it is watch-only: read live on every request, cached
 // nowhere, reachable by no verb but GET. Every "do" the panel offers is a
 // link out (the PR, the posted review) or a link into the tree (the note).
-
-/** The budgets, under the names the reviews layer gave them; the values live with the `fs` kind and the serve path. */
-export const REVIEWS_LIMITS = Object.freeze({
-  maxReviews: MAX_ROWS,
-  maxScanned: FS_LIMITS.maxScanned,
-  maxStateBytes: FS_LIMITS.maxBytes,
-});
 
 /**
  * Every review run under `root`, sorted for the panel: the reviews card's

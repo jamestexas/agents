@@ -62,7 +62,7 @@ Verified by building the image and probing every route against a fixture tree.
 | Loadout — `/api/loadout` | Partly, and its drift is **not** trustworthy | See below. |
 | Peers — `/api/dyn/peers` | Cannot | Needs the `gh` CLI plus auth. A distroless image has neither, so the refresh fails (`command not found: gh`) and the route 503s — unless a previously written `.generated/peers.json` is in the mounted tree, in which case it serves that snapshot, correctly flagged stale. |
 | Digest — `/api/dyn/digest` | Cannot | Runs `sources.digest.cmd`, i.e. the `lectio` CLI, which is not in the image. 503s with `command not found: lectio`. |
-| Board — `/api/dyn/board` | Works only with host networking | Fetches `sources.board.url` over HTTP. The work-board runs on the host, so the URL must be reachable from inside the container — on macOS that means `host.docker.internal`, not `127.0.0.1`. |
+| Board — `/api/card/board`, alias `/api/dyn/board` | Works only with host networking | Fetches the board card's `url` (`sources.board.url` in a legacy config) over HTTP. The work-board runs on the host, so the URL must be reachable from inside the container — on macOS that means `host.docker.internal`, not `127.0.0.1`. |
 
 Adding `gh` and `lectio` to the image would not fix peers or digest. Both need
 *your* credentials, and a HUD image that carried them would stop being

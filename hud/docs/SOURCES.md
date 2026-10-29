@@ -33,7 +33,7 @@ rather than the whole switchboard.
 
 | Table / key | Type | Enabled by | Panel when absent |
 | --- | --- | --- | --- |
-| `[sources.board]` `url` | string | anything serving that URL | `/api/dyn/board` → **503**, `{error: "board is not configured in hud.toml"}` |
+| `[sources.board]` `url` | string | anything serving that URL | `/api/dyn/board` → **503**, `{error: "board is not configured in hud.toml"}`; synthesised into `[cards.board]`, see [CARDS.md](CARDS.md) |
 | `[sources.digest]` `cmd` | string | the first token being a command on `PATH` | `/api/dyn/digest` → **503**, same shape |
 | `[sources.sessions]` `root` | string, leading `~` expanded | a directory of agent sessions | `/api/sessions` → **404**; the panel does not exist |
 | `[sources.sessions]` `lectio` | string URL | the graft daemon answering | sessions stay **200** with `graft: "off"` — tier 1 intact |
@@ -140,23 +140,21 @@ nothing — not a snapshot, not a cache. The budgets are the same shape as the
 other filesystem panels: at most 200 rows served, at most 2000 files looked
 at, and a state file larger than 256 KiB treated as unreadable.
 
-**Joined into MY PRS when both sources are present.** A board row and a
-review run name the same pull request, so with `[sources.board]` and
-`[sources.reviews]` both on, `/api/dyn/board` attaches each row's latest run
-under one key, `review`, holding `phase`, `verdict`, `gates`,
+**Joined into MY PRS when both sources are present.** Both tables are
+synthesised into cards — `[cards.board]` with `[cards.board.join.reviews]`,
+and `[cards.reviews]` — and the join is the card join described in
+[CARDS.md](CARDS.md): a board row and a review run meet on the PR's canonical
+URL, the row carries the run's `phase`, `verdict`, `gates`,
 `probes.unavailable`, `findings`, `note_url`, `posted`, `review_state`,
-`running` and `elapsed_s` — nothing else from the state file. Rows meet runs
-on the PR's canonical URL: a row carrying `repo` and `number` is keyed
-directly, one carrying only a GitHub `url` is read for the same parts, and a
-row that is not a PR, or has a PR no run has seen, comes back without a
-`review` key at all. The join is applied to a **live** board only and never
-to the snapshot, which stays the upstream's own bytes; a board that is down
-degrades exactly as before, and a reviews tree that cannot be read leaves
-the board as the upstream sent it. The runs panel then asks for
-`/api/reviews?scope=open` — runs still running or whose `posted` is null,
-the ones no board row can stand in for — and is titled **REVIEW RUNS**;
-`?scope=all` (the default with no query) is every run, as before, and any
-other value is a **400**.
+`running` and `elapsed_s` and nothing else from the state file, a row that is
+not a PR or whose PR no run has seen carries nothing, and the join rides the
+**live** path only — never the snapshot, which stays the upstream's own bytes
+under `.generated/cards/board.json`. `/api/dyn/board` keeps the old envelope
+with the block under `review`; `/api/card/board` names it `reviews`. The runs
+panel shows the reviews card with its declared scope, `open` — runs still
+running or whose `posted` is null, the ones no board row can stand in for —
+and is titled **REVIEW RUNS**; `/api/reviews` keeps `all` as its default with
+no query, and any other value is a **400** on both routes.
 
 ## Top level
 
