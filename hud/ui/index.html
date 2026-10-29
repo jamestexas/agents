@@ -762,6 +762,9 @@
       .prgrid .v-comment {
         color: var(--yellow);
       }
+      .prgrid .v-preliminary {
+        color: var(--muted);
+      }
       .prgrid .findings.hot,
       .prgrid .early.hot {
         color: var(--hot);
@@ -2261,8 +2264,16 @@
       // The cells a board row and a run row share. Each takes the fact, not
       // the row, so the two tables cannot drift on what a verdict looks like.
 
+      // PRELIMINARY is a --fast run's verdict: it stopped after the early
+      // signal, nothing in it was refuted, and the gates refuse to post it.
+      // It takes the muted colour so it never reads as a decision.
       function verdictCell(tr, verdict) {
-        cell(tr, verdict, "verdict v-" + String(verdict || "none").toLowerCase());
+        cell(
+          tr,
+          verdict,
+          "verdict v-" + String(verdict || "none").toLowerCase(),
+          verdict === "PRELIMINARY" ? "fast run, unrefuted" : "",
+        );
       }
 
       function noteCell(tr, url, note) {
@@ -2406,7 +2417,7 @@
         ["mode", "mode", "default, light, deep, or engage"],
         ["phase", "phase", "where the run is; while it runs, with its elapsed time"],
         ["phases", "phases", "minutes per phase: ev q se re tr te; … marks the phase still running"],
-        ["verdict", "verdict", "APPROVE, REQUEST_CHANGES, or COMMENT once settled"],
+        ["verdict", "verdict", "APPROVE, REQUEST_CHANGES, or COMMENT once settled; PRELIMINARY for a fast run"],
         ["mine", "mine", "my own review of this PR; † marks one that predates the current head"],
         ["humans", "humans", "human reviews: approved / commented / changes requested"],
         ["bots", "bots", "bot reviews, and the findings they reported"],

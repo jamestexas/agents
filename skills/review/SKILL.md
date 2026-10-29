@@ -12,7 +12,7 @@ description: >
   PR review, own or peer's; replaces the hand-composed explain-work +
   structural-pr-review chain.
 allowed-tools: "Bash,Read,Glob,Grep,Agent,Skill,mcp__modmap__*,mcp__mache__*"
-argument-hint: "<PR number | owner/repo#N | path> [--light|--deep] [--engage] [--post] [--beads]"
+argument-hint: "<PR number | owner/repo#N | path> [--fast|--light|--deep] [--engage] [--post] [--beads]"
 ---
 
 # /review
@@ -112,6 +112,22 @@ itself, as pass-throughs, and the gates run unchanged:
 No model is dispatched for either file. A light run can never produce a
 Blocking finding; if a candidate reads like one, rerun without `--light`.
 
+**`--fast`** is a first look, not a review: phases 1–3 and the early signal
+run, then the orchestrator stops. It writes `work/summary.md` with the one
+line `**Verdict** PRELIMINARY — <N> early signal(s), <M> candidate(s)
+unrefuted` (N from `early.json`, M the line count of `candidates.md`) and a
+TL;DR that says refute and triage did not run; the same pass-through
+`triage.md` as light with disposition `question (fast)`; `findings.json`
+with every candidate tagged `Question` and `blast` `not assessed (fast)`;
+then renders, runs `check.mjs` and `state.mjs finish`. Pass `mode=fast`
+to `state.mjs init` at phase 1; `finish` reads PRELIMINARY from the
+summary, so the HUD row shows `fast` and PRELIMINARY. `check.mjs` prints a fourth line, `fast: PRELIMINARY — not
+postable`, and exits 1 for any run whose state says `fast` or whose
+summary verdict is PRELIMINARY, even when the three gates pass: a fast
+artifact can never be posted, and `--post` with `--fast` stops at that
+line. Never use it for an approval; its only output worth acting on is the
+early signal, and every other candidate on it is unrefuted.
+
 ## Phase 2 — Questions (one sub-agent)
 
 `state.mjs <run> phase questions`. Dispatch one `general-purpose` agent with
@@ -176,16 +192,21 @@ untouched, so refute and triage see the same list they would have without
 it, and the rendered artifact carries it as "Early signal (unrefuted)" only
 while it is non-empty.
 
+Under `--fast`, stop after the count line: write the summary, triage and
+findings pass-throughs described under Mode, then go to the render and
+check commands of phase 6 (no teach agent is dispatched; `teach.md` is
+absent and renders as "not produced").
+
 ## Phase 4 — Refute (one sub-agent, fresh)
 
-Skip under `--light`. `state.mjs <run> phase refute`. Dispatch
+Skip under `--light` and `--fast`. `state.mjs <run> phase refute`. Dispatch
 `prompts/refute.md` with `{{CANDIDATES}}` = `work/candidates.md`. Drop any
 `falls` row with no citation.
 
 ## Phase 5 — Triage (one sub-agent)
 
-Skip under `--light` (the orchestrator writes the pass-through `triage.md`
-and `findings.json` described under Mode). `state.mjs <run> phase triage`. Dispatch
+Skip under `--light` and `--fast` (the orchestrator writes the pass-through
+`triage.md` and `findings.json` described under Mode). `state.mjs <run> phase triage`. Dispatch
 `prompts/triage.md` with `{{CANDIDATES}}` = `work/candidates.md` (the same
 list refute received). It invokes
 `finding-triage`.
@@ -212,8 +233,10 @@ ledger footer `Questions asked: N.` must equal the row count, no Decision
 may be empty, not every row may be Unresolved, the triage header counts must
 match its table, and a Blocking finding must cite at least one RAN/READ
 claim, no ASSUMED claim, and no claim id missing from `work/claims.jsonl`.
+A `--fast` run gets a fourth line, `fast: PRELIMINARY — not postable`, and
+a non-zero exit regardless of the three.
 
-Print the notes path and the three check lines. Append one line to
+Print the notes path and the check lines (three, four under `--fast`). Append one line to
 `$HUD_ROOT/log.md`. Stop here unless `--post`.
 
 ## Phase 7 — Post (`--post` only)

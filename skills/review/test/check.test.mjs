@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const check = path.join(here, '..', 'scripts', 'check.mjs');
@@ -97,4 +99,30 @@ test('an escaped pipe inside a cell is not a column break in either table', () =
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /ledger: 3 asked, 3 decided\+unresolved — ok/);
   assert.match(r.stdout, /triage: 2 in, 2 out — ok/);
+});
+
+test('a --fast run fails with a fourth line even though the three gates pass', () => {
+  const r = run('fast-run');
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /ledger: 3 asked, 3 decided\+unresolved — ok/);
+  assert.match(r.stdout, /triage: 3 in, 3 out — ok/);
+  assert.match(r.stdout, /blocking: 0 finding\(s\), evidence-backed — ok/);
+  assert.match(r.stdout, /^fast: PRELIMINARY — not postable$/m);
+  assert.equal(r.stdout.trim().split('\n').length, 4, 'exactly four lines');
+});
+
+test('a PRELIMINARY summary alone, with no state.json, is enough for the fast line', () => {
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rv-check-')), 'run');
+  fs.cpSync(path.join(here, 'fixtures', 'fast-run'), dir, { recursive: true });
+  fs.rmSync(path.join(dir, 'state.json'));
+  const r = spawnSync('node', [check, dir], { encoding: 'utf8' });
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /^fast: PRELIMINARY — not postable$/m);
+  // and a state.json saying fast is enough on its own, whatever the summary says
+  fs.writeFileSync(path.join(dir, 'work', 'summary.md'), '**Verdict** — COMMENT.\n');
+  assert.equal(spawnSync('node', [check, dir], { encoding: 'utf8' }).status, 0, 'no fast marker left: postable');
+  fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ mode: 'fast' }));
+  const again = spawnSync('node', [check, dir], { encoding: 'utf8' });
+  assert.equal(again.status, 1);
+  assert.match(again.stdout, /^fast: PRELIMINARY — not postable$/m);
 });

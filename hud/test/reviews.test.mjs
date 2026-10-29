@@ -663,6 +663,13 @@ test("reviews panel is wired and only links", () => {
   assert.match(block, /function earlyCell\b/);
   assert.match(block, /r\.running && r\.early/, "a finished row shows nothing here");
   assert.match(block, /e\.count > 0 \? " hot"/, "lit when there is one");
+  // A --fast run's PRELIMINARY verdict is muted and says why, in both tables.
+  const verdictFn = block.slice(block.indexOf("function verdictCell("), block.indexOf("function noteCell("));
+  assert.match(verdictFn, /verdict === "PRELIMINARY" \? "fast run, unrefuted"/, "the tooltip names the run kind");
+  assert.match(verdictFn, /"verdict v-" \+ String\(verdict \|\| "none"\)\.toLowerCase\(\)/, "the class is the verdict, lowercased");
+  const cssAt = html.indexOf(".prgrid .v-preliminary {");
+  assert.ok(cssAt !== -1, "v-preliminary has a style");
+  assert.match(html.slice(cssAt, html.indexOf("}", cssAt)), /color:\s*var\(--muted\)/, "in the muted colour");
   assert.match(block, /function reviewStateCells\b/, "the block renders the review_state block");
   assert.match(block, /head_matches === false/, "a review behind the head is marked");
   assert.match(block, /awaiting_me > 0/, "a thread waiting on the reader is highlighted");

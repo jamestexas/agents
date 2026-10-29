@@ -13,7 +13,8 @@
 //          review_state: who has reviewed, and who is waiting on whom.
 //   phase  <name>        close the open phase, open <name>
 //   finish note=<rel> [gates=-]
-//          ended=now, phase "rendered", verdict from work/summary.md, finding
+//          ended=now, phase "rendered", verdict from work/summary.md (APPROVE,
+//          REQUEST_CHANGES, COMMENT, or PRELIMINARY for a --fast run), finding
 //          counts from work/findings.json, gates from check.mjs output: read
 //          from stdin when gates=- (pipe `check.mjs <run> | state.mjs ...`),
 //          otherwise check.mjs is re-run here. Explicit rather than "stdin if
@@ -141,7 +142,9 @@ const ops = {
     s.phase = 'rendered';
     if (args.note !== undefined) s.note = relNote(args.note);
     const summary = readIf(work('summary.md')) ?? '';
-    const v = summary.match(/\*\*Verdict\*\*[^A-Z]*(APPROVE|REQUEST_CHANGES|COMMENT)\b/);
+    // PRELIMINARY is what a --fast run writes: it stopped before refute and
+    // triage, and check.mjs refuses to call it postable.
+    const v = summary.match(/\*\*Verdict\*\*[^A-Z]*(APPROVE|REQUEST_CHANGES|COMMENT|PRELIMINARY)\b/);
     s.verdict = v ? v[1] : null;
     s.findings = countFindings(jsonIf(work('findings.json')));
     s.gates = parseGates(args.gates === '-' ? fs.readFileSync(0, 'utf8') : runCheck());

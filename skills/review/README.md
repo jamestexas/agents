@@ -25,6 +25,17 @@ could not check.
 select it, the binaries it needs, and its probes. Set the env vars the
 example names in your shell profile.
 
+**`--fast`, and the early signal.** `/review <pr> --fast` is a first look
+in about a quarter of an hour: evidence, questions and settle run, then the
+early signal names every candidate that already rests on hard evidence (a
+failed build it cites, or a reader's `[Blocking]` tag backed by something
+that ran), and the run stops with a PRELIMINARY verdict. Nothing in it has
+been refuted or triaged, so `check.mjs` refuses to call it postable and it
+is never the basis for an approval; when the early signal is empty, rerun
+without the flag before deciding anything. The early signal itself is on in
+every mode — fast, light, default, deep — and appears in the artifact as an
+open "Early signal (unrefuted)" section only while it has something to say.
+
 **Replaying.** The *Replay* block holds the exact evidence command and the
 manifest hash. Re-run it; a different hash means the evidence moved.
 

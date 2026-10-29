@@ -12,6 +12,12 @@
 //                no claim id missing from claims.jsonl, and >=1 ledger row that
 //                exists and is not Unresolved (an unresolved row demotes the
 //                finding to a Question)
+//
+// A fourth line, `fast: PRELIMINARY — not postable`, is printed and the exit
+// is 1 whenever state.json says mode "fast" or summary.md's verdict is
+// PRELIMINARY, even if the three gates pass: a --fast run stopped before
+// refute and triage, so its candidates are unrefuted and nothing in it may
+// reach a PR.
 import fs from 'node:fs';
 import path from 'node:path';
 import { splitCells } from './cells.mjs';
@@ -125,5 +131,15 @@ gate('blocking', (fail, pass) => {
   }
   if (!bad) pass(`${blocking.length} finding(s), evidence-backed`);
 });
+
+// Not a gate on the artifact's arithmetic but on what kind of run produced
+// it; reported last so the three gate lines keep their positions.
+const stateText = fs.existsSync(path.join(run, 'state.json')) ? fs.readFileSync(path.join(run, 'state.json'), 'utf8') : null;
+const stateMode = stateText === null ? undefined : tryJSON(stateText)?.mode;
+const summaryVerdict = (read('summary.md') ?? '').match(/\*\*Verdict\*\*[^A-Z]*(APPROVE|REQUEST_CHANGES|COMMENT|PRELIMINARY)\b/)?.[1];
+if (stateMode === 'fast' || summaryVerdict === 'PRELIMINARY') {
+  console.log('fast: PRELIMINARY — not postable');
+  results.push(false);
+}
 
 process.exit(results.every(Boolean) ? 0 : 1);

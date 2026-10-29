@@ -94,6 +94,19 @@ test('finish re-runs check.mjs, reads the verdict and counts findings', () => {
   assert.equal(s.note, 'projects/example/notes/PR-1-swap.md', 'absolute note under HUD_ROOT is stored relative');
 });
 
+test('finish accepts verdict=PRELIMINARY from a --fast run; the fast line is not a gate', () => {
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rv-state-')), 'run');
+  fs.cpSync(path.join(here, 'fixtures', 'fast-run'), dir, { recursive: true });
+  assert.equal(run(dir, ['init', 'mode=fast']).status, 0);
+  const r = run(dir, ['finish', 'note=projects/p/notes/PR-1.md']);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const s = read(dir);
+  assert.equal(s.mode, 'fast');
+  assert.equal(s.verdict, 'PRELIMINARY');
+  assert.deepEqual(s.gates, { ledger: 'ok', triage: 'ok', blocking: 'ok' }, 'the three gates passed; the fourth line is check.mjs\'s exit, not a gate');
+  assert.deepEqual(s.findings, { blocking: 0, non_blocking: 0, question: 3, observation: 0 });
+});
+
 test('finish gates=- parses check.mjs output from stdin; a failing gate is "fail"', () => {
   const dir = copyGood();
   run(dir, ['init']);
