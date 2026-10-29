@@ -47,10 +47,15 @@ import { lectioGraft, listSessions } from "./sessions.mjs";
 import { errText } from "./errtext.mjs";
 import { DEFAULT_REVIEWS_GLOB, expandHome, getCard, loadCards } from "./cards/registry.mjs";
 import { LIMITS as FS_LIMITS, SKIP_NAMES, parseGlob as parseReviewsGlob } from "./cards/kinds/fs.mjs";
-import { forJoin, isObject } from "./cards/normalize/review-state.mjs";
-import { prUrl } from "./cards/keys.mjs";
-import { joinRows } from "./cards/join.mjs";
-import { MAX_ROWS, collectRows, serveCard } from "./cards/serve.mjs";
+import {
+  LIMITS as HTTP_LIMITS,
+  legacySnapshotFile,
+  readSnapshotFile,
+  writeSnapshotFile,
+} from "./cards/kinds/http.mjs";
+import { forJoin } from "./cards/normalize/review-state.mjs";
+import { rowKey as boardRowKey } from "./cards/normalize/work-board.mjs";
+import { MAX_ROWS, collectRows, joinPayload, serveCard } from "./cards/serve.mjs";
 
 // The reviews layer's pieces now live under cards/; the names stay exported
 // from here so the tests and the CLI that import them keep working.
@@ -104,9 +109,9 @@ export const WRITABLE_STORE = "local";
 
 /** Dynamic-source budgets. Every outward call is bounded in time and size. */
 export const LIMITS = {
-  httpTimeoutMs: 4000,
+  httpTimeoutMs: HTTP_LIMITS.timeoutMs,
   cmdTimeoutMs: 8000,
-  maxUpstreamBytes: 2 * 1024 * 1024,
+  maxUpstreamBytes: HTTP_LIMITS.maxBytes,
   maxCmdBytes: 4 * 1024 * 1024,
   maxPeers: 32,
   maxPrsPerPeer: 20,
@@ -858,43 +863,19 @@ export function generatedDir(root) {
 }
 
 /**
- * @returns {{cached_at: string, data: unknown}|null} the snapshot, or null if
- * absent/unreadable/not a snapshot. Never throws: a corrupt snapshot is the
- * same as no snapshot.
+ * The per-source snapshot at `.generated/<name>.json`, for the sources still
+ * served per source (digest, peers). The file format and the write discipline
+ * — temp file + rename, a corrupt snapshot is no snapshot — live with the
+ * `http` kind, whose cards keep theirs under `.generated/cards/`.
+ *
+ * @returns {{cached_at: string, data: unknown}|null}
  */
 export function readSnapshot(root, name) {
-  try {
-    const snap = JSON.parse(fs.readFileSync(path.join(generatedDir(root), `${name}.json`), "utf8"));
-    if (!snap || typeof snap !== "object" || typeof snap.cached_at !== "string") return null;
-    return snap;
-  } catch {
-    return null;
-  }
+  return readSnapshotFile(legacySnapshotFile(root, name));
 }
 
-/**
- * Write `{cached_at, data}` to `generated/<name>.json` via a temp file +
- * rename, so a reader never sees a half-written snapshot. A failed write is
- * logged and swallowed: losing the cache must not lose the live response.
- */
 export function writeSnapshot(root, name, data) {
-  const snap = { cached_at: new Date().toISOString(), data };
-  const dir = generatedDir(root);
-  const final = path.join(dir, `${name}.json`);
-  const tmp = `${final}.${process.pid}.tmp`;
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(tmp, JSON.stringify(snap, null, 2));
-    fs.renameSync(tmp, final);
-  } catch (err) {
-    try {
-      fs.rmSync(tmp, { force: true });
-    } catch {
-      /* nothing further to do */
-    }
-    process.stderr.write(`hud: could not cache ${name}: ${errText(err)}\n`);
-  }
-  return snap;
+  return writeSnapshotFile(legacySnapshotFile(root, name), data);
 }
 
 /**
@@ -946,23 +927,6 @@ function run(file, args, opts) {
       (err, stdout) => (err ? reject(err) : resolve(stdout)),
     );
   });
-}
-
-/** GET the configured board URL and parse it as JSON. Throws on any failure. */
-async function fetchBoard(url, timeoutMs) {
-  const res = await fetch(url, {
-    cache: "no-store",
-    headers: { accept: "application/json" },
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  if (!res.ok) throw new Error(`upstream HTTP ${res.status}`);
-  const text = await res.text();
-  if (text.length > LIMITS.maxUpstreamBytes) throw new Error("upstream response too large");
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error("upstream response is not JSON");
-  }
 }
 
 /** Keys a digest command may wrap its array in. First match wins. */
@@ -1651,8 +1615,28 @@ function cardsOf(root) {
   return loadCards(loadConfig(root), { hudRoot: root, configFile: CONFIG_TOML });
 }
 
-function cardCtx(root, dyn) {
-  return { hudRoot: root, configFile: CONFIG_TOML, now: dyn.now, sendJson };
+function cardCtx(root, dyn, cards) {
+  return { hudRoot: root, configFile: CONFIG_TOML, now: dyn.now, httpTimeoutMs: dyn.httpTimeoutMs, cards, sendJson };
+}
+
+/** `/api/cards`: every card the config declares, by name, and the panel order. */
+function serveCardsList(res, root) {
+  const { cards, layout } = cardsOf(root);
+  return sendJson(res, 200, { cards: [...cards.keys()], layout });
+}
+
+/**
+ * An old per-source route, served as its card under the old envelope. The
+ * legacy name is both the card looked up and the envelope produced, so a
+ * tree that has moved to `[cards.*]` keeps its bookmarks.
+ */
+function serveLegacy(res, root, url, dyn, name) {
+  const { cards } = cardsOf(root);
+  return serveCard(res, cardCtx(root, dyn, cards), getCard(cards, name), {
+    name,
+    legacy: name,
+    scope: url.searchParams.get("scope"),
+  });
 }
 
 /**
@@ -1667,18 +1651,8 @@ function cardNameOf(pathname) {
 }
 
 function serveCardRoute(res, root, url, dyn, name) {
-  const card = getCard(cardsOf(root).cards, name);
-  return serveCard(res, cardCtx(root, dyn), card, { name, scope: url.searchParams.get("scope") });
-}
-
-/** The reviews card under the old `/api/reviews` envelope: `source`, `glob`, `scope`, default scope `all`. */
-function serveReviews(res, root, url, dyn) {
-  const card = getCard(cardsOf(root).cards, "reviews");
-  return serveCard(res, cardCtx(root, dyn), card, {
-    name: "reviews",
-    legacy: "reviews",
-    scope: url.searchParams.get("scope"),
-  });
+  const { cards } = cardsOf(root);
+  return serveCard(res, cardCtx(root, dyn, cards), getCard(cards, name), { name, scope: url.searchParams.get("scope") });
 }
 
 // ----------------------------------------------- reviews joined onto the board
@@ -1691,37 +1665,16 @@ function serveReviews(res, root, url, dyn) {
 // what remains here is the legacy payload shape around them.
 
 /**
- * The key a board row is joined on: the PR's canonical URL, from `repo` +
- * `number` or from a GitHub `url`. A row that says it is not a PR has no key
- * and is never joined, whatever its number.
- */
-function boardRowKey(row) {
-  if (typeof row.kind === "string" && row.kind !== "pr") return null;
-  return prUrl(row);
-}
-
-/**
- * The board payload with `review` on each row whose PR has a run. The payload
- * keeps whatever shape the upstream sent — an array, or an object holding one
- * under `items` or `prs`, the same three the page accepts — and any other
- * shape comes back untouched. A row with no run comes back as it came: no
- * `review` key, not a null one.
+ * The board payload with `review` on each row whose PR has a run: the join
+ * the `/api/dyn/board` alias applies, as a library call. The payload keeps
+ * whatever shape the upstream sent and a row with no run comes back as it
+ * came — no `review` key, not a null one.
  *
  * @param {unknown} data the upstream board payload
  * @param {object[]} runs `listReviews().items`
  */
 export function joinReviews(data, runs) {
-  const join = (rows) =>
-    joinRows(rows, runs, { key: "pr_url", latest: "started", into: "review", keyOf: boardRowKey, project: forJoin }).rows;
-  if (Array.isArray(data)) return join(data);
-  if (!isObject(data)) return data;
-  for (const k of ["items", "prs"]) {
-    if (Array.isArray(data[k])) {
-      const joined = join(data[k]);
-      return joined === data[k] ? data : { ...data, [k]: joined };
-    }
-  }
-  return data;
+  return joinPayload(data, runs, { key: "pr_url", latest: "started", into: "review", keyOf: boardRowKey, project: forJoin });
 }
 
 // -------------------------------------------------------------- deep links
@@ -1948,7 +1901,9 @@ function handle(req, res, root, uiDir, dyn, refresh) {
   // JSON; the browser has no TOML parser and must not grow a second copy of
   // this one. Exposes nothing new — /api/md still serves the file verbatim.
   if (pathname === "/api/config") return sendJson(res, 200, loadConfig(root));
-  if (pathname === "/api/dyn/board") return serveBoard(res, root, dyn);
+  // The board is the `board` card under its old envelope: `source`, `stale`,
+  // `cached_at`, `data` as the upstream sent it plus `review` on joined rows.
+  if (pathname === "/api/dyn/board") return serveLegacy(res, root, url, dyn, "board");
   if (pathname === "/api/dyn/digest") return serveDigest(res, root, dyn);
   if (pathname === "/api/dyn/peers") return servePeers(res, root, dyn);
   // Sessions is read-only by construction: this is its only route, and the
@@ -1960,9 +1915,10 @@ function handle(req, res, root, uiDir, dyn, refresh) {
   // Cards read and nothing else: one GET route per card, no POST case above,
   // so every mutating verb lands on the 405 arm. `/api/reviews` is the
   // reviews card under its old envelope.
+  if (pathname === "/api/cards") return serveCardsList(res, root);
   const cardName = cardNameOf(pathname);
   if (cardName !== null) return serveCardRoute(res, root, url, dyn, cardName);
-  if (pathname === "/api/reviews") return serveReviews(res, root, url, dyn);
+  if (pathname === "/api/reviews") return serveLegacy(res, root, url, dyn, "reviews");
   // Matched against the raw target rather than `url.pathname`: the URL parser
   // folds `..` away, and a traversal attempt must be refused outright rather
   // than quietly rewritten into whichever route it normalises to.
@@ -1980,11 +1936,10 @@ function handle(req, res, root, uiDir, dyn, refresh) {
  * verbatim; `stale` and `cached_at` are the envelope, so the client can tell
  * "now" from "as of" without the server reinterpreting anyone's schema.
  *
- * `decorate`, when given, is applied to a live payload after the snapshot is
- * written and never to a snapshot: what is cached is the upstream's own
- * bytes, and what is joined onto them is read fresh or not at all.
+ * The board walked this ladder too, until it became a card: the `http` kind
+ * is this ladder with the snapshot under `.generated/cards/`.
  */
-async function serveSource(res, root, name, source, produce, decorate) {
+async function serveSource(res, root, name, source, produce) {
   if (!source) {
     // Not configured ⇒ the source does not exist ⇒ the panel does not exist.
     // Deliberately not served from a snapshot: `sources` is the switchboard.
@@ -1993,8 +1948,7 @@ async function serveSource(res, root, name, source, produce, decorate) {
   try {
     const data = await produce();
     const { cached_at } = writeSnapshot(root, name, data);
-    const served = decorate ? decorate(data) : data;
-    return sendJson(res, 200, { source: name, stale: false, cached_at, data: served });
+    return sendJson(res, 200, { source: name, stale: false, cached_at, data });
   } catch (err) {
     const snap = readSnapshot(root, name);
     if (snap) {
@@ -2008,35 +1962,6 @@ async function serveSource(res, root, name, source, produce, decorate) {
     }
     return sendJson(res, 503, { source: name, stale: true, cached_at: null, error: errText(err) });
   }
-}
-
-function serveBoard(res, root, dyn) {
-  const cfg = loadConfig(root);
-  const source = sourceOf(cfg, "board");
-  const url = source && typeof source.url === "string" ? source.url : null;
-  // With the reviews card on too, each board row carries its latest review
-  // run. The join is best effort: a reviews tree that cannot be read leaves
-  // the board as the upstream sent it rather than turning a board answer into
-  // a fault.
-  const reviews = getCard(loadCards(cfg, { hudRoot: root, configFile: CONFIG_TOML }).cards, "reviews");
-  const decorate =
-    reviews && !reviews.error
-      ? (data) => {
-          try {
-            return joinReviews(data, collectRows(reviews, { now: dyn.now() }).items);
-          } catch {
-            return data;
-          }
-        }
-      : undefined;
-  return serveSource(
-    res,
-    root,
-    "board",
-    url ? source : null,
-    () => fetchBoard(url, dyn.httpTimeoutMs),
-    decorate,
-  );
 }
 
 function serveDigest(res, root, dyn) {

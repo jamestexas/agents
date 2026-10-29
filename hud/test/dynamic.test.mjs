@@ -171,7 +171,7 @@ test("proxy success writes snapshot", async (t) => {
   assert.deepEqual(upstream.hits, ["/api/board"], "the configured path is what got fetched");
 
   // …and the same bytes are on disk for the next time the upstream is down.
-  const snap = readGenerated(root, "board");
+  const snap = readGenerated(root, "cards/board");
   assert.deepEqual(Object.keys(snap).sort(), ["cached_at", "data"]);
   assert.equal(snap.cached_at, body.cached_at);
   assert.deepEqual(snap.data, board);
@@ -462,7 +462,7 @@ test("upstream errors and junk are failures, not passthrough", async (t) => {
   const bad = await get("/api/dyn/board");
   assert.equal(bad.status, 503);
   assert.match((await bad.json()).error, /HTTP 500/);
-  assert.equal(fs.existsSync(snapshotPath(root, "board")), false, "an error body is not cached");
+  assert.equal(fs.existsSync(snapshotPath(root, "cards/board")), false, "an error body is not cached");
 
   fs.writeFileSync(
     path.join(root, "hud.config.json"),

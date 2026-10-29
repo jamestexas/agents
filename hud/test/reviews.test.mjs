@@ -647,7 +647,7 @@ test("board rows carry their latest review run when both sources are on", async 
   assert.equal(body.data.generated_at, board.generated_at, "the envelope around the rows is kept");
 
   // The snapshot is the upstream's own bytes: the join is never cached.
-  const snap = JSON.parse(fs.readFileSync(path.join(hudRoot, ".generated", "board.json"), "utf8"));
+  const snap = JSON.parse(fs.readFileSync(path.join(hudRoot, ".generated", "cards", "board.json"), "utf8"));
   assert.deepEqual(snap.data, board);
   assert.ok(!JSON.stringify(snap).includes("note_url"));
 });

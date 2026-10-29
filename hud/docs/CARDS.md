@@ -7,10 +7,11 @@ The server owns sources and joins and serves one JSON shape per card at
 column list. Adding a card is a `hud.toml` stanza and, for a new source shape, a
 normaliser file in-tree — no route, no panel code.
 
-This is step 1 of the design: the registry, the `fs` kind, and the `reviews`
-card, with the old `/api/reviews` route kept as an alias. The per-source
-`[sources.*]` tables in [SOURCES.md](SOURCES.md) still drive every other panel
-and are synthesised into cards where a card exists for them (below).
+This is steps 1–2 of the design: the registry, the `fs` and `http` kinds, the
+`reviews` and `board` cards with the reviews join, and the old `/api/reviews`
+and `/api/dyn/board` routes kept as aliases. The per-source `[sources.*]`
+tables in [SOURCES.md](SOURCES.md) still drive every other panel and are
+synthesised into cards where a card exists for them (below).
 
 ## The schema
 
@@ -24,7 +25,7 @@ title   = "Review runs"
 scope   = "open"
 columns = ["pr", "project", "mode", "phase", "phases", "verdict", "mine", "humans", "bots", "threads", "early", "gates", "unavail", "findings", "note", "posted"]
 
-[cards.board]                      # next: the http kind
+[cards.board]
 kind    = "http"
 url     = "http://127.0.0.1:2000/board"
 shape   = "work-board"
@@ -32,7 +33,7 @@ key     = "pr_url"
 title   = "My PRs"
 columns = ["pr", "title", "why", "verdict", "gates", "note", "posted", "threads"]
 
-[cards.board.join.reviews]         # next: joins
+[cards.board.join.reviews]
 columns = ["verdict", "gates", "note", "posted", "threads"]
 latest  = "started"
 
@@ -54,8 +55,8 @@ booleans — which is what `columns` and `order` need and all they need.
 | `columns` | list of strings | no | Column ids the UI renders, through its cell registry. Defaults to the shape's own list. |
 | `root` | string, `~` expanded | `fs` only, no | Where the glob is applied. Defaults to `HUD_ROOT`. |
 | `glob` | string, `*` within one segment | `fs` only, yes | The files that are rows, relative to `root`. The same walk and refusals as `[sources.reviews] glob`. |
-| `url` | string | `http` only, yes | A loopback URL to GET. Next. |
-| `[cards.A.join.B]` | table | no | Attach B's row with the same key to each row of A. Next. |
+| `url` | string | `http` only, yes | An absolute http(s) URL to GET — loopback by intent, not enforced, because a HUD in a container reaches its board through the host's name. |
+| `[cards.A.join.B]` | table | no | Attach B's row with the same key to each row of A, under the field `B`. `latest` names the field that picks between several B rows (newest wins); `columns` lists the column ids the joined row contributes. B must be a declared card other than A, and both must declare the same `key`. |
 | `[layout] order` | list of strings | no | Panel order, top to bottom. Defaults to today's aside: `reviews, board, digest, sessions, loadout, peers`. |
 
 A card's name is its route segment: letters, digits, `_` and `-`.
@@ -71,7 +72,7 @@ and its required field is still checked. The table is generated from
 | kind | status | reads | rows from | degraded when |
 | --- | --- | --- | --- | --- |
 | `fs` | **now** | files under a root matched by a segment glob (`*` within one segment) | one row per file; a file that is not a JSON object is one `unreadable` row | bad glob → misconfigured; absent root → an empty card |
-| `http` | next | one GET of a loopback URL, JSON | the array the response carries (`items`, `prs`, or the top-level array) | non-2xx, timeout, bad JSON → last snapshot with `stale`, else 503 with the reason |
+| `http` | **now** | one GET of a loopback URL, JSON | the array the response carries (`items`, `prs`, or the top-level array) | non-2xx, timeout, bad JSON → last snapshot with `stale`, else 503 with the reason |
 | `cmd` | next | argv, no shell | one JSON object per line, or one JSON array | non-zero exit, bad JSON → 503 with the first stderr line |
 | `prometheus` | next | one PromQL instant or range query, bearer token from a `token_cmd` | one row per series (labels + value) | token command non-zero or 401 → 503 with the reason; query parse error → 503 with the API's text |
 | `mcp` | next | one read-only tool call on an MCP server already configured for this machine | the array in the tool's structured result, or one row per text item | server absent from config → card off; connect failure or tool error → 503 with the first error line |
@@ -94,6 +95,7 @@ dropped and counted in the response's `rejected`.
 | shape | rows are | derives | scopes | default columns |
 | --- | --- | --- | --- | --- |
 | `review-state` | a review run's `state.json` | `project`, `running`, `elapsed_s`, `phase_seconds`, `pr_url`, `note_url`; `phases`, `early` and `review_state` rebuilt field by field | `open` (running or not yet posted), `all` | the sixteen the REVIEW RUNS panel shows |
+| `work-board` | a row of the local work-board service | `pr_url` from `repo` + `number` or the row's `url` (null for a row whose `kind` is not `pr`); keeps `number`, `url`, `title`, `state`, `reason`, `kind`, `repo` | — | `pr`, `title`, `why`, `verdict`, `gates`, `note`, `posted`, `threads` |
 
 The field-by-field contract of `review-state` — what each key means, what is
 nulled, what is dropped — is written up under *reviews* in
@@ -102,6 +104,12 @@ nulled, what is dropped — is written up under *reviews* in
 file the glob names that is not a JSON object is still a row — `unreadable:
 true`, the path, the reason — because a run whose state cannot be read is a
 fact about the tree, not an absence from it. This shape rejects nothing.
+
+`work-board` rejects a row that is not an object (counted in `rejected`) and
+also reads the payload's **self-report** — `tick_status` and `degradations`,
+whitelisted to `{source, error}` — which the response carries as `health` so
+the page's banner can say "github: graphql 401" rather than "degraded".
+A shape without a self-report has no `health` key at all.
 
 ## Keys and joins
 
@@ -114,11 +122,17 @@ key, used by every card that declares it.
 `[cards.A.join.B]` attaches to each row of A the B row with the same key,
 keeping the newest by `latest` when several match, under the field `B`. Join is
 best effort: B unreachable or misconfigured leaves A's rows untouched and A's
-response says `joins: {B: "unavailable: <reason>"}`. Joins are applied on the
-live path only and never written into a snapshot. Joins land with the `http`
-kind; until then every card answers `joins: {}`. (The board's `review` field
-today comes from the stopgap join in `server.mjs`, which already reads the
-reviews card.)
+response says `joins: {B: "unavailable: <reason>"}`; so does a card served
+from its snapshot, because joins are applied on the live path only and never
+written into a snapshot. What a joined row carries is B's shape's projection
+(`forJoin`): for `review-state`, `phase`, `verdict`, `gates`,
+`probes.unavailable`, `findings`, `note_url`, `posted`, `review_state`,
+`running` and `elapsed_s` — every key present, null when the run has nothing
+for it. A card with no joins answers `joins: {}`.
+
+On the card route the field is named after the joined card: a board row's run
+sits under `reviews`. The old `/api/dyn/board` envelope spelt it `review`,
+singular, and keeps doing so — that is the one place the old name survives.
 
 ## The route
 
@@ -128,6 +142,7 @@ reviews card.)
 {
   "card": "reviews",
   "source": "fs",
+  "title": "Review runs",
   "stale": false,
   "generated_at": "2026-10-29T10:00:00.000Z",
   "root": "/path/to/hud",
@@ -140,7 +155,9 @@ reviews card.)
 }
 ```
 
-`root` is present for kinds that have one. `count` is the rows served;
+`root` is present for kinds that have one; `health` for shapes that read a
+self-report. `generated_at` is when the rows were produced — now for a live
+answer, the snapshot's own age when `stale`. `count` is the rows served;
 `truncated` is set when the kind stopped reading early (the `fs` walk looks at
 2000 files at most) or when more rows than one response carries (200) were
 kept. `items` is sorted by the shape's order — for `review-state`, running
@@ -151,14 +168,24 @@ first, then newest `started` first.
 | the config declares no card by that name (or there is no config) | **404**, `{card, error: "card <name> is not configured in hud.toml"}` — the panel does not exist |
 | the stanza was refused: unknown kind, a kind not served yet, a missing or unusable field | **503**, `{card, error: "misconfigured: <where>: <reason>"}` — the panel renders red with the reason; every other card is unaffected |
 | `?scope=` outside the shape's vocabulary, or a scope on a shape that has none | **400**, `{card, error}` |
+| the upstream is down and the card has no snapshot (`http`) | **503**, `{card, error}` with the upstream's reason |
+| the upstream is down and the card has a snapshot (`http`) | **200**, `stale: true`, `generated_at` the snapshot's age, joins `unavailable` |
 | any verb but GET or HEAD, on this or any path under `/api/card/` | **405** |
 
 `?scope=<value>` overrides the card's declared scope for one request. A card
 that declares none serves every row by default.
 
-A card request reads live and writes nothing: no snapshot, no cache, nothing
-under `.generated/`. (The `http` kind's snapshot tier, `stale: true`, comes
-with that kind.)
+An `fs` card reads live and writes nothing. An `http` card writes its
+snapshot — the upstream's own bytes, never a joined field — to
+`$HUD_ROOT/.generated/cards/<name>.json` on every live answer, and reads it
+back when the upstream is down; a tree from before cards still has its board
+snapshot at `.generated/board.json`, which is read until a live answer writes
+the new path and never written again.
+
+`GET /api/cards` answers `{cards: [names], layout}` — every card the config
+declares, misconfigured ones included (the page renders them red rather than
+losing them), and `[layout].order` or the default — so the UI can draw the
+aside without knowing any card's name in advance.
 
 ## Legacy config
 
@@ -168,17 +195,21 @@ into cards at load time, so nobody rewrites their config on day one:
 | Legacy table | Becomes | Notes |
 | --- | --- | --- |
 | `[sources.reviews]` (`root`, `glob`) | `[cards.reviews]` exactly as the schema above spells it | `root` and `glob` carry over; an empty string is the same as absent. A glob the walker refuses is a misconfigured card, worded `sources.reviews.glob in hud.toml: …`. |
-| `[sources.board]` | nothing yet | lands with the `http` kind; until then the board stays on `/api/dyn/board` |
+| `[sources.board]` (`url`) | `[cards.board]` as the schema above spells it, with `[cards.board.join.reviews]` when `[sources.reviews]` is on too | A board table with no `url` synthesises nothing, as the old route treated it as unconfigured. |
 
 A `[cards]` table present — even empty — is the answer: with one, `[sources.*]`
 is not synthesised. Mixing the two forms for the same panel is not supported.
 
-**`/api/reviews` is an alias** for the reviews card under its old envelope
-(`source: "reviews"`, `glob`, `scope`, default scope `all`, `items`) and reads
-the registry, so it answers from either config form. It is produced by the
-same code as the card route; `test/cards.parity.test.mjs` asserts the two
-return equal `items` and `count` for one tree, and degrade the same way. It
-goes after one release.
+**`/api/reviews` and `/api/dyn/board` are aliases** for the reviews and board
+cards under their old envelopes, read from the registry so they answer from
+either config form, and produced by the same code as the card route.
+`/api/reviews` keeps `source: "reviews"`, `glob`, `scope` (default `all`) and
+`items`; `/api/dyn/board` keeps `source: "board"`, `stale`, `cached_at` and
+`data` — the upstream payload as it came, with `review` on each joined row —
+and its old answer to "not configured", a **503** (reviews, which never had a
+snapshot tier, answers the panel-off 404). `test/cards.parity.test.mjs`
+asserts each alias and its card route agree on the rows and degrade the same
+way. Both go after one release.
 
 ## Adding a card
 

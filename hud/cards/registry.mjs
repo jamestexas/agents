@@ -13,7 +13,9 @@
 // renders exactly what it rendered then, through the one code path.
 
 import * as fsKind from "./kinds/fs.mjs";
+import * as httpKind from "./kinds/http.mjs";
 import * as reviewState from "./normalize/review-state.mjs";
+import * as workBoard from "./normalize/work-board.mjs";
 
 export { expandHome } from "./kinds/fs.mjs";
 
@@ -48,8 +50,9 @@ export const KINDS = Object.freeze({
     degraded: "bad glob → misconfigured; absent root → an empty card",
   }),
   http: Object.freeze({
-    status: "next",
+    status: "now",
     required: ["url"],
+    module: httpKind,
     reads: "one GET of a loopback URL, JSON",
     rows: "the array the response carries (`items`, `prs`, or the top-level array)",
     degraded: "non-2xx, timeout, bad JSON → last snapshot with `stale`, else 503 with the reason",
@@ -82,7 +85,7 @@ export const KINDS = Object.freeze({
  * place that knows a source's field names; it also declares the card's
  * default columns and, when the shape has one, its scope vocabulary.
  */
-export const SHAPES = Object.freeze({ "review-state": reviewState });
+export const SHAPES = Object.freeze({ "review-state": reviewState, "work-board": workBoard });
 
 const NAME_RE = /^[A-Za-z0-9_-]+$/;
 
@@ -129,6 +132,14 @@ export function loadCards(cfg, env = {}) {
       cards.set(name, built.card);
     }
   }
+  for (const [name, card] of cards) {
+    if (card.error) continue;
+    const reason = checkJoins(card, cards, legacy ? `sources.${name}` : `cards.${name}`);
+    if (reason) {
+      errors.push(reason);
+      cards.set(name, { name, error: reason });
+    }
+  }
 
   return { cards, layout: loadLayout(conf.layout, errors), errors, warnings };
 }
@@ -159,9 +170,20 @@ export function synthesizeLegacy(cfg) {
     };
     if (nonEmpty(reviews.root)) out.reviews.root = reviews.root;
   }
-  // `sources.board` → `[cards.board]` (kind http, shape work-board, joined on
-  // reviews) belongs with the http kind: synthesising it before that kind is
-  // served would turn a working board route into a misconfigured card.
+  // A board table with no url is what the old route treated as unconfigured,
+  // so it synthesises nothing and the alias keeps answering "not configured".
+  if (isObject(sources.board) && nonEmpty(sources.board.url)) {
+    out.board = {
+      kind: "http",
+      url: sources.board.url,
+      shape: "work-board",
+      key: "pr_url",
+      title: "My PRs",
+    };
+    if (out.reviews) {
+      out.board.join = { reviews: { columns: [...workBoard.REVIEW_COLUMNS], latest: "started" } };
+    }
+  }
   return out;
 }
 
@@ -198,6 +220,7 @@ function buildCard(name, raw, ctx) {
   if (raw.title !== undefined && nonEmpty(raw.title) === undefined) return fail("title must be a string");
   card.title = raw.title ?? name;
 
+  if (raw.shape === undefined) return fail("shape is required");
   const shape = SHAPES[raw.shape];
   if (!shape) return fail(`unknown shape "${raw.shape}"`);
   card.shape = raw.shape;
@@ -220,7 +243,47 @@ function buildCard(name, raw, ctx) {
 
   const err = spec.module.validate(raw, card, ctx);
   if (err) return failField(err.field, err.reason);
+
+  // `[cards.X.join.Y]`: what can be checked against this stanza alone. That
+  // Y exists and shares the key is checked once every card is built.
+  if (raw.join !== undefined) {
+    if (!isObject(raw.join)) return fail("join must be a table of cards to join");
+    card.join = {};
+    for (const [other, spec] of Object.entries(raw.join)) {
+      if (!isObject(spec)) return fail(`join.${other}: not a table`);
+      const entry = {};
+      if (spec.columns !== undefined) {
+        if (!isStringList(spec.columns)) return fail(`join.${other}: columns must be a list of strings`);
+        entry.columns = [...spec.columns];
+      }
+      if (spec.latest !== undefined) {
+        if (nonEmpty(spec.latest) === undefined) return fail(`join.${other}: latest must be a string`);
+        entry.latest = spec.latest;
+      }
+      card.join[other] = entry;
+    }
+  }
   return { card };
+}
+
+/**
+ * The join checks that need every card: Y must be declared and not X, X must
+ * declare a key, and Y's key — when Y itself was built — must be the same.
+ * A join onto a card the registry refused is left standing: the join goes
+ * unavailable at serve time with that card's reason, which is more useful
+ * than two misconfigured cards for one typo.
+ *
+ * @returns {string|null} the reason the card cannot stand, or null
+ */
+function checkJoins(card, cards, where) {
+  for (const other of Object.keys(card.join ?? {})) {
+    if (other === card.name) return `${where}.join.${other}: a card cannot join itself`;
+    const b = cards.get(other);
+    if (!b) return `${where}.join.${other}: no card named "${other}"`;
+    if (card.key === undefined) return `${where}.join.${other}: the card declares no key`;
+    if (!b.error && b.key !== card.key) return `${where}.join.${other}: keys differ (${card.key} vs ${b.key})`;
+  }
+  return null;
 }
 
 function loadLayout(raw, errors) {

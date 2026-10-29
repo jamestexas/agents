@@ -112,14 +112,15 @@ test("a kind the design names but this release does not serve is told apart from
   // The plan marks these "next": declaring one is not a typo, so the error
   // says "not served yet" rather than "unknown", and a required field is
   // still checked so the stanza is right when the kind lands.
-  for (const kind of ["http", "cmd", "prometheus", "mcp"]) {
+  for (const kind of ["cmd", "prometheus", "mcp"]) {
     assert.equal(KINDS[kind].status, "next", kind);
   }
   assert.equal(KINDS.fs.status, "now");
-  const { cards } = fromToml('[cards.board]\nkind = "http"\nurl = "http://127.0.0.1:2000/board"\n');
-  assert.match(cards.get("board").error, /kind "http" is not served yet/);
-  const noUrl = fromToml('[cards.board]\nkind = "http"\n');
-  assert.match(noUrl.cards.get("board").error, /url/, "the missing field is named first");
+  assert.equal(KINDS.http.status, "now");
+  const { cards } = fromToml('[cards.digest]\nkind = "cmd"\ncmd = "example-digest --since 24h"\n');
+  assert.match(cards.get("digest").error, /kind "cmd" is not served yet/);
+  const noCmd = fromToml('[cards.digest]\nkind = "cmd"\n');
+  assert.match(noCmd.cards.get("digest").error, /cmd/, "the missing field is named first");
 });
 
 test("a card name that cannot be a route segment is refused", () => {
@@ -178,17 +179,20 @@ test("no [cards] but [sources.reviews] synthesises the reviews card the TOML abo
   assert.match(bad.cards.get("reviews").error, /reviews\.glob in hud\.toml/);
 });
 
-test("legacy synthesis is only for sources this release serves as cards", () => {
-  // The board is the next card; until its kind is served, a legacy board
-  // source stays on its old route and synthesises nothing here.
-  const { cards, errors } = loadCards({ sources: { board: { url: "http://127.0.0.1:1/b" } } }, ENV);
+test("legacy synthesis covers only the sources this release serves as cards", () => {
+  // digest, sessions, loadout and peers stay on their own routes until their
+  // kinds land; nothing is synthesised for them, and nothing is an error.
+  const { cards, errors } = loadCards(
+    { sources: { digest: { cmd: "example-digest" }, sessions: { root: "/x" }, loadout: { claude_root: "/y" } } },
+    ENV,
+  );
   assert.equal(cards.size, 0);
   assert.deepEqual(errors, []);
-  assert.deepEqual(synthesizeLegacy({ sources: { board: { url: "http://127.0.0.1:1/b" }, reviews: {} } }), {
+  assert.deepEqual(synthesizeLegacy({}), {});
+  assert.deepEqual(synthesizeLegacy({ sources: { reviews: "yes", board: "no" } }), {}, "a source that is not a table is not a source");
+  assert.deepEqual(synthesizeLegacy({ sources: { reviews: {} } }), {
     reviews: { kind: "fs", glob: "projects/*/raw/PR-*/state.json", shape: "review-state", key: "pr_url", title: "Review runs", scope: "open" },
   });
-  assert.deepEqual(synthesizeLegacy({}), {});
-  assert.deepEqual(synthesizeLegacy({ sources: { reviews: "yes" } }), {}, "a source that is not a table is not a source");
 });
 
 test("a [cards] table present means [sources.*] is not synthesised", () => {
@@ -287,4 +291,112 @@ test("an array outside the subset is skipped like any other bad line", () => {
   );
   assert.deepEqual(Object.keys(data), ["ok"]);
   assert.equal(warns.length, 6, warns.join("; "));
+});
+
+// ------------------------------------------------- http, joins, the board
+
+const BOARD_TOML = `
+[cards.reviews]
+kind    = "fs"
+glob    = "projects/*/raw/PR-*/state.json"
+shape   = "review-state"
+key     = "pr_url"
+title   = "Review runs"
+scope   = "open"
+
+[cards.board]
+kind    = "http"
+url     = "http://127.0.0.1:2000/board"
+shape   = "work-board"
+key     = "pr_url"
+title   = "My PRs"
+columns = ["pr", "title", "why", "verdict", "gates", "note", "posted", "threads"]
+
+[cards.board.join.reviews]
+columns = ["verdict", "gates", "note", "posted", "threads"]
+latest  = "started"
+`;
+
+const BOARD_CARD = {
+  name: "board",
+  kind: "http",
+  url: "http://127.0.0.1:2000/board",
+  shape: "work-board",
+  key: "pr_url",
+  title: "My PRs",
+  columns: ["pr", "title", "why", "verdict", "gates", "note", "posted", "threads"],
+  join: { reviews: { columns: ["verdict", "gates", "note", "posted", "threads"], latest: "started" } },
+};
+
+test("[cards.board] with kind http and a join on reviews parses to the card the plan names", () => {
+  const { cards, errors, warnings } = fromToml(BOARD_TOML);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(warnings, []);
+  assert.equal(KINDS.http.status, "now");
+  assert.deepEqual(cards.get("board"), BOARD_CARD);
+  assert.equal(cards.get("reviews").error, undefined);
+});
+
+test("an http card needs an absolute http(s) url; a work-board card defaults its columns", () => {
+  for (const [toml, re] of [
+    ['[cards.b]\nkind = "http"\nshape = "work-board"\n', /http needs url/],
+    ['[cards.b]\nkind = "http"\nurl = "127.0.0.1:2000/board"\nshape = "work-board"\n', /cards\.b\.url in hud\.toml: url must be an absolute http\(s\) URL/],
+    ['[cards.b]\nkind = "http"\nurl = "ftp://127.0.0.1/board"\nshape = "work-board"\n', /absolute http\(s\) URL/],
+    ['[cards.b]\nkind = "http"\nurl = "http://127.0.0.1:2000/board"\n', /shape is required/],
+  ]) {
+    assert.match(fromToml(toml).cards.get("b").error, re, toml);
+  }
+  const { cards } = fromToml('[cards.b]\nkind = "http"\nurl = "http://127.0.0.1:2000/board"\nshape = "work-board"\n');
+  assert.deepEqual(cards.get("b").columns, BOARD_CARD.columns);
+  assert.equal("join" in cards.get("b"), false, "no join declared, no join key");
+});
+
+test("a join must name a declared card, other than itself, with the same key", () => {
+  const base = BOARD_TOML.replace(/\[cards\.board\.join\.reviews\][^]*$/, "");
+  const cases = [
+    [`${base}[cards.board.join.digest]\nlatest = "started"\n`, /join\.digest: no card named "digest"/],
+    [`${base}[cards.board.join.board]\n`, /join\.board: a card cannot join itself/],
+    [`${base.replace('key     = "pr_url"\ntitle   = "Review runs"', 'key = "sha"\ntitle = "Review runs"')}[cards.board.join.reviews]\n`, /join\.reviews: keys differ \(pr_url vs sha\)/],
+    [`${base.replace('key     = "pr_url"\ntitle   = "My PRs"', 'title = "My PRs"')}[cards.board.join.reviews]\n`, /join\.reviews: the card declares no key/],
+    [`${base}[cards.board.join.reviews]\ncolumns = "verdict"\n`, /join\.reviews: columns must be a list of strings/],
+    [`${base}[cards.board.join.reviews]\nlatest = 3\n`, /join\.reviews: latest must be a string/],
+  ];
+  for (const [toml, re] of cases) {
+    const { cards, errors } = fromToml(toml);
+    assert.match(cards.get("board").error, re, toml);
+    assert.equal(errors.length, 1, toml);
+    assert.equal(cards.get("reviews").error, undefined, "the joined card is unaffected");
+  }
+  // A join onto a card that is itself misconfigured is declared fine: it is
+  // the join that goes unavailable at serve time, not the card.
+  const onBroken = fromToml(BOARD_TOML.replace('glob    = "projects/*/raw/PR-*/state.json"', 'glob = "../x"'));
+  assert.equal(onBroken.cards.get("board").error, undefined);
+  assert.ok(onBroken.cards.get("reviews").error);
+  // Optional parts default: no columns, no latest.
+  const bare = fromToml(`${base}[cards.board.join.reviews]\n`);
+  assert.deepEqual(bare.cards.get("board").join, { reviews: {} });
+});
+
+test("legacy [sources.board] with a url synthesises the board card, joined on reviews when that is on too", () => {
+  const both = loadCards({ sources: { board: { url: "http://127.0.0.1:2000/board" }, reviews: {} } }, ENV);
+  assert.deepEqual(both.errors, []);
+  assert.deepEqual([...both.cards.keys()], ["reviews", "board"]);
+  assert.deepEqual(both.cards.get("board"), BOARD_CARD, "identical to the declared form");
+
+  const alone = loadCards({ sources: { board: { url: "http://127.0.0.1:2000/board" } } }, ENV);
+  assert.deepEqual([...alone.cards.keys()], ["board"]);
+  assert.equal("join" in alone.cards.get("board"), false, "nothing to join onto");
+
+  // A board table with no url is what the old route treated as unconfigured:
+  // no card, so the alias keeps answering "not configured".
+  assert.equal(loadCards({ sources: { board: {} } }, ENV).cards.size, 0);
+  assert.equal(loadCards({ sources: { board: { url: "" } } }, ENV).cards.size, 0);
+  assert.deepEqual(synthesizeLegacy({ sources: { board: { url: "http://127.0.0.1:1/b" }, reviews: {} } }).board, {
+    kind: "http",
+    url: "http://127.0.0.1:1/b",
+    shape: "work-board",
+    key: "pr_url",
+    title: "My PRs",
+    join: { reviews: { columns: ["verdict", "gates", "note", "posted", "threads"], latest: "started" } },
+  });
 });
