@@ -449,6 +449,12 @@
         opacity: 0.6;
         border-style: dashed;
       }
+      /* A card whose stanza the server refused: the reason, in the warning
+         colour, where the rows would be. The panel stays, so a typo in
+         hud.toml reads as a fault and never as "nothing to show". */
+      .panel .misconfigured {
+        color: var(--accent);
+      }
       /* One line across the top when the page is NOT showing live data.
          Per-panel staleness is deliberately quiet — dashed and dimmed — which
          is right for one panel and wrong for the whole page: a reader who
@@ -835,12 +841,12 @@
            source needs a block here plus a `renderPanel(id, env, build)` call
            in the script below. -->
       <aside>
-        <div class="panel" id="wrap-reviews" data-source="reviews" hidden>
-          <h2>Review runs<span class="sub">in flight or not yet posted</span><span class="stamp" id="stamp-reviews"></span></h2>
+        <div class="panel" id="wrap-reviews" data-source="reviews" data-card="reviews" hidden>
+          <h2><span class="title">Review runs</span><span class="sub">in flight or not yet posted</span><span class="stamp" id="stamp-reviews"></span></h2>
           <div class="body" id="panel-reviews"></div>
         </div>
-        <div class="panel" id="wrap-board" data-source="board" hidden>
-          <h2>My PRs<span class="stamp" id="stamp-board"></span></h2>
+        <div class="panel" id="wrap-board" data-source="board" data-card="board" hidden>
+          <h2><span class="title">My PRs</span><span class="stamp" id="stamp-board"></span></h2>
           <div class="body" id="panel-board"></div>
         </div>
         <div class="panel" id="wrap-peers" data-source="peers" hidden>
@@ -1805,56 +1811,6 @@
         body.appendChild(built || node("div", "empty", "nothing to show"));
       }
 
-      /** work-board's payload, tolerantly: an array or an object holding one. */
-      function boardItems(data) {
-        if (Array.isArray(data)) return data;
-        if (data && Array.isArray(data.items)) return data.items;
-        if (data && Array.isArray(data.prs)) return data.prs;
-        return [];
-      }
-
-      /**
-       * [column id, heading, tooltip]: the board row's own facts, then the
-       * five the server joins from the PR's latest review run. Without a
-       * `review` block those five are dashes: no run, not an empty one.
-       */
-      const BOARD_COLUMNS = [
-        ["pr", "PR", "the pull request, linked"],
-        ["title", "title", "its title"],
-        ["why", "why", "why it is on the board"],
-        ["verdict", "verdict", "the latest review run's verdict"],
-        ["gates", "gates", "ledger · triage · blocking"],
-        ["note", "note", "the run's note, in the tree"],
-        ["posted", "posted", "the review as posted, linked"],
-        ["threads", "threads", "review threads awaiting me · awaiting the author"],
-      ];
-
-      function boardRow(item) {
-        const tr = document.createElement("tr");
-        const num = item.number === undefined || item.number === null ? DASH : "#" + item.number;
-        cell(tr, linkOut(item.url, num, "text"), "pr", item.repo || "");
-        cell(tr, linkOut(item.url, item.title || item.url || "(untitled)", "text"), "title");
-        const reason = item.reason || item.state;
-        cell(
-          tr,
-          reason ? node("span", item.state === "needs_you" ? "needs-you" : null, String(reason)) : undefined,
-          "why",
-        );
-        const rv = item.review && typeof item.review === "object" ? item.review : null;
-        verdictCell(tr, rv ? rv.verdict : undefined);
-        cell(tr, rv ? gatesNode(rv.gates) : undefined, "gates");
-        noteCell(tr, rv ? rv.note_url : undefined);
-        postedCell(tr, rv ? rv.posted : undefined);
-        threadsCell(tr, rv && rv.review_state ? rv.review_state.threads : undefined, true);
-        return tr;
-      }
-
-      function buildBoard(env) {
-        const items = boardItems(env.data);
-        if (!items.length) return node("div", "empty", "nothing needs you");
-        return gridNode(BOARD_COLUMNS, items.map(boardRow));
-      }
-
       function setDial(env) {
         const dial = el("dial");
         if (!env) {
@@ -1867,7 +1823,7 @@
           dial.title = "work-board unavailable";
           return;
         }
-        const n = boardItems(env.data).filter((i) => i && i.state === "needs_you").length;
+        const n = (Array.isArray(env.items) ? env.items : []).filter((i) => i && i.state === "needs_you").length;
         dial.textContent = "◉ needs-you: " + n;
         // Colour encodes the count, not the freshness. It used to encode
         // freshness, which meant `needs-you: 0` and `needs-you: 7` rendered in
@@ -1880,7 +1836,7 @@
         // colour. Dashed and dimmed, so a stale zero cannot read as a
         // confident zero.
         dial.classList.toggle("stale", Boolean(env.stale));
-        dial.title = env.stale ? "from the snapshot of " + fmtTime(env.cached_at) : "live";
+        dial.title = env.stale ? "from the snapshot of " + fmtTime(env.generated_at) : "live";
       }
 
       function buildPeers(env) {
@@ -2088,18 +2044,15 @@
         return wrap;
       }
 
-      // ------------------------------------------------------ reviews panel
+      // ------------------------------------------------------------- cards
       //
-      // One row per review run, read from the state.json each run writes into
-      // its project's raw/ directory. Running rows lead and are marked; every
-      // other cell is a fact or a link — out to GitHub for the PR and the
-      // posted review, into the tree for the note. Nothing here starts,
-      // stops, or posts anything.
-      //
-      // The panel asks for `scope=open`: runs in flight or not yet posted.
-      // Every other run's answer already sits on its board row, joined by the
-      // server, through the same cell helpers below — so a verdict reads the
-      // same in both places.
+      // One renderer for every card: REVIEW RUNS, MY PRS, and any card a
+      // stanza in hud.toml declares. The server serves `/api/card/<name>` —
+      // rows, the column ids to show, the joins it applied — and the page
+      // draws a table through the cell registry below, so a verdict reads
+      // the same wherever it appears. Every cell is a fact or a link — out to
+      // GitHub for the PR and the posted review, into the tree for the note.
+      // Nothing here starts, stops, or posts anything.
 
       const DASH = "—";
 
@@ -2309,57 +2262,6 @@
         );
       }
 
-      function reviewRow(r) {
-        const tr = document.createElement("tr");
-        if (r.unreadable) {
-          tr.className = "unreadable";
-          cell(tr, "unreadable", "warn", r.error || "");
-          cell(tr, r.path, "path").colSpan = REVIEW_COLUMNS.length - 1;
-          return tr;
-        }
-        if (r.running) tr.className = "running";
-        const prText = r.pr === undefined || r.pr === null ? DASH : "#" + r.pr;
-        cell(
-          tr,
-          r.pr_url ? linkOut(r.pr_url, prText, "text") : prText,
-          "pr",
-          [r.repo, r.title].filter(Boolean).join(": "),
-        );
-        cell(tr, r.project, "project");
-        cell(tr, r.mode, "mode");
-        cell(
-          tr,
-          r.running ? (r.phase || DASH) + " · " + fmtElapsed(r.elapsed_s) : r.phase,
-          "phase",
-          (r.running ? "running for " : "took ") + fmtElapsed(r.elapsed_s),
-        );
-        phasesCell(tr, r);
-        verdictCell(tr, r.verdict);
-        reviewStateCells(tr, r.review_state);
-        cell(tr, gatesNode(r.gates), "gates");
-        const p = r.probes && typeof r.probes === "object" ? r.probes : null;
-        cell(
-          tr,
-          p ? p.unavailable : undefined,
-          "unavail",
-          p
-            ? "probes: " + p.ran + " ran, " + p.failed + " failed, " + p.unavailable + " unavailable of " + p.total
-            : "",
-        );
-        earlyCell(tr, r);
-        const f = r.findings && typeof r.findings === "object" ? r.findings : null;
-        const n = (k) => (f && typeof f[k] === "number" ? f[k] : DASH);
-        cell(
-          tr,
-          f ? [n("blocking"), n("non_blocking"), n("question"), n("observation")].join("/") : undefined,
-          "findings" + (f && f.blocking > 0 ? " hot" : ""),
-          "findings: blocking / non-blocking / question / observation",
-        );
-        noteCell(tr, r.note_url, r.note);
-        postedCell(tr, r.posted);
-        return tr;
-      }
-
       /** Short for a review state: APPROVED → A, COMMENTED → C, CHANGES_REQUESTED → R. */
       const STATE_LETTER = { APPROVED: "A", COMMENTED: "C", CHANGES_REQUESTED: "R" };
 
@@ -2374,16 +2276,13 @@
       }
 
       /**
-       * The four who-waits-on-whom cells: mine, humans, bots, threads. Without
-       * the block every one is a dash; the state file predates it, and a dash
-       * says "not recorded" where a zero would say "nobody".
+       * The who-waits-on-whom cells: mine, humans, bots (threads is below,
+       * shared with the board). Without the block every one is a dash; the
+       * state file predates it, and a dash says "not recorded" where a zero
+       * would say "nobody".
        */
-      function reviewStateCells(tr, rs) {
-        if (!rs || typeof rs !== "object") {
-          for (const k of ["mine", "humans", "bots", "threads"]) cell(tr, undefined, k);
-          return;
-        }
-        const mine = rs.mine && typeof rs.mine === "object" ? rs.mine : null;
+      function mineCell(tr, rs) {
+        const mine = rs && rs.mine && typeof rs.mine === "object" ? rs.mine : null;
         if (mine && mine.state) {
           const span = node("span", "rs-" + mine.state.toLowerCase(), mine.state.toLowerCase());
           if (mine.head_matches === false) {
@@ -2391,69 +2290,209 @@
             mark.title = "my review predates the current head";
             span.appendChild(mark);
           }
-          cell(tr, span, "mine", mine.at ? "reviewed " + fmtTime(mine.at) : "");
-        } else {
-          cell(tr, undefined, "mine", mine && mine.at ? fmtTime(mine.at) : "");
+          return cell(tr, span, "mine", mine.at ? "reviewed " + fmtTime(mine.at) : "");
         }
-        const humans = Array.isArray(rs.humans) ? rs.humans : null;
-        if (humans) {
-          const count = { A: 0, C: 0, R: 0 };
-          for (const h of humans) if (STATE_LETTER[h.state]) count[STATE_LETTER[h.state]]++;
-          cell(tr, "A" + count.A + " C" + count.C + " R" + count.R, "humans", reviewerList(humans));
-        } else cell(tr, undefined, "humans");
-        const bots = Array.isArray(rs.bots) ? rs.bots : null;
-        if (bots) {
-          const found = bots.filter((b) => typeof b.findings === "number");
-          const sum = found.reduce((acc, b) => acc + b.findings, 0);
-          cell(tr, bots.length + (found.length ? " · " + sum + "f" : ""), "bots", reviewerList(bots));
-        } else cell(tr, undefined, "bots");
-        threadsCell(tr, rs.threads, false);
+        return cell(tr, undefined, "mine", mine && mine.at ? fmtTime(mine.at) : "");
       }
 
-      /** [column id, heading, tooltip]; the id is the class every cell in that column carries. */
-      const REVIEW_COLUMNS = [
-        ["pr", "PR", "the pull request, linked"],
-        ["project", "project", "the project directory the run wrote into"],
-        ["mode", "mode", "default, light, deep, or engage"],
-        ["phase", "phase", "where the run is; while it runs, with its elapsed time"],
-        ["phases", "phases", "minutes per phase: ev q se re tr te; … marks the phase still running"],
-        ["verdict", "verdict", "APPROVE, REQUEST_CHANGES, or COMMENT once settled; PRELIMINARY for a fast run"],
-        ["mine", "mine", "my own review of this PR; † marks one that predates the current head"],
-        ["humans", "humans", "human reviews: approved / commented / changes requested"],
-        ["bots", "bots", "bot reviews, and the findings they reported"],
-        ["threads", "threads", "unresolved review threads · awaiting me · awaiting the author"],
-        ["gates", "gates", "ledger · triage · blocking"],
-        ["unavail", "unavail", "probes that could not run"],
-        ["early", "early", "while the run is in flight: candidates with hard evidence not yet refuted"],
-        ["findings", "B/N/Q/O", "findings: blocking / non-blocking / question / observation"],
-        ["note", "note", "the run's note, in the tree"],
-        ["posted", "posted", "the review as posted, linked"],
-      ];
+      function humansCell(tr, rs) {
+        const humans = rs && Array.isArray(rs.humans) ? rs.humans : null;
+        if (!humans) return cell(tr, undefined, "humans");
+        const count = { A: 0, C: 0, R: 0 };
+        for (const h of humans) if (STATE_LETTER[h.state]) count[STATE_LETTER[h.state]]++;
+        return cell(tr, "A" + count.A + " C" + count.C + " R" + count.R, "humans", reviewerList(humans));
+      }
 
-      function buildReviews(env) {
-        const items = Array.isArray(env.items) ? env.items : [];
-        if (!items.length) {
-          return node(
-            "div",
-            "empty",
-            env.scope === "open" ? "no run in flight or waiting to post" : "no review runs recorded",
+      function botsCell(tr, rs) {
+        const bots = rs && Array.isArray(rs.bots) ? rs.bots : null;
+        if (!bots) return cell(tr, undefined, "bots");
+        const found = bots.filter((b) => typeof b.findings === "number");
+        const sum = found.reduce((acc, b) => acc + b.findings, 0);
+        return cell(tr, bots.length + (found.length ? " · " + sum + "f" : ""), "bots", reviewerList(bots));
+      }
+
+      /**
+       * The cell registry: every column id a card may name, as [heading,
+       * tooltip, draw(tr, row, joined)]. `joined` is the block a row's shared
+       * cells read — the row itself on a run, the run joined onto it on a
+       * board row, null on a board row no run has seen — so the verdict,
+       * gates, note, posted and threads cells are one piece of code wherever
+       * they appear. A column no entry knows renders the row's field of that
+       * name as text, so a new card needs no entry here to show a plain fact.
+       */
+      const CELLS = {
+        pr: ["PR", "the pull request, linked", (tr, r) => {
+          const n = r.pr !== undefined && r.pr !== null ? r.pr : r.number;
+          const text = n === undefined || n === null ? DASH : "#" + n;
+          const url = r.pr_url || r.url;
+          cell(tr, url ? linkOut(url, text, "text") : text, "pr", [r.repo, r.title].filter(Boolean).join(": "));
+        }],
+        title: ["title", "its title", (tr, r) => {
+          cell(tr, linkOut(r.url, r.title || r.url || "(untitled)", "text"), "title");
+        }],
+        why: ["why", "why it is on the board", (tr, r) => {
+          const reason = r.reason || r.state;
+          cell(tr, reason ? node("span", r.state === "needs_you" ? "needs-you" : null, String(reason)) : undefined, "why");
+        }],
+        project: ["project", "the project directory the run wrote into", (tr, r) => cell(tr, r.project, "project")],
+        mode: ["mode", "default, light, deep, or engage", (tr, r) => cell(tr, r.mode, "mode")],
+        phase: ["phase", "where the run is; while it runs, with its elapsed time", (tr, r) => {
+          cell(
+            tr,
+            r.running ? (r.phase || DASH) + " · " + fmtElapsed(r.elapsed_s) : r.phase,
+            "phase",
+            (r.running ? "running for " : "took ") + fmtElapsed(r.elapsed_s),
           );
+        }],
+        phases: ["phases", "minutes per phase: ev q se re tr te; … marks the phase still running", (tr, r) => phasesCell(tr, r)],
+        verdict: ["verdict", "APPROVE, REQUEST_CHANGES, or COMMENT once settled; PRELIMINARY for a fast run", (tr, r, j) => verdictCell(tr, j ? j.verdict : undefined)],
+        mine: ["mine", "my own review of this PR; † marks one that predates the current head", (tr, r, j) => mineCell(tr, j ? j.review_state : null)],
+        humans: ["humans", "human reviews: approved / commented / changes requested", (tr, r, j) => humansCell(tr, j ? j.review_state : null)],
+        bots: ["bots", "bot reviews, and the findings they reported", (tr, r, j) => botsCell(tr, j ? j.review_state : null)],
+        threads: ["threads", "unresolved review threads · awaiting me · awaiting the author", (tr, r, j) => {
+          threadsCell(tr, j && j.review_state ? j.review_state.threads : undefined, j !== r);
+        }],
+        gates: ["gates", "ledger · triage · blocking", (tr, r, j) => cell(tr, j ? gatesNode(j.gates) : undefined, "gates")],
+        unavail: ["unavail", "probes that could not run", (tr, r, j) => {
+          const p = j && j.probes && typeof j.probes === "object" ? j.probes : null;
+          cell(
+            tr,
+            p ? p.unavailable : undefined,
+            "unavail",
+            p && typeof p.total === "number"
+              ? "probes: " + p.ran + " ran, " + p.failed + " failed, " + p.unavailable + " unavailable of " + p.total
+              : "",
+          );
+        }],
+        early: ["early", "while the run is in flight: candidates with hard evidence not yet refuted", (tr, r) => earlyCell(tr, r)],
+        findings: ["B/N/Q/O", "findings: blocking / non-blocking / question / observation", (tr, r, j) => {
+          const f = j && j.findings && typeof j.findings === "object" ? j.findings : null;
+          const n = (k) => (f && typeof f[k] === "number" ? f[k] : DASH);
+          cell(
+            tr,
+            f ? [n("blocking"), n("non_blocking"), n("question"), n("observation")].join("/") : undefined,
+            "findings" + (f && f.blocking > 0 ? " hot" : ""),
+            "findings: blocking / non-blocking / question / observation",
+          );
+        }],
+        note: ["note", "the run's note, in the tree", (tr, r, j) => noteCell(tr, j ? j.note_url : undefined, j ? j.note : undefined)],
+        posted: ["posted", "the review as posted, linked", (tr, r, j) => postedCell(tr, j ? j.posted : undefined)],
+      };
+
+      /** The text an empty card shows; a card not named here says "nothing to show". */
+      const EMPTY_TEXT = {
+        reviews: "no run in flight or waiting to post",
+        board: "nothing needs you",
+      };
+
+      /** Lines under a card's table that only that card can say; a card not named here has none. */
+      const FOOTERS = {
+        reviews: (items) => {
+          const out = [];
+          const medians = phaseMedians(items.filter((r) => !r.unreadable));
+          if (medians) out.push(node("div", "row-sub greyed medians", medians));
+          const running = items.filter((r) => r.running && !r.unreadable).length;
+          out.push(
+            node(
+              "div",
+              "footnote",
+              (running ? running + " running · " : "") +
+                items.length +
+                " run(s) · each row is one run's state.json; the HUD reads it and changes nothing.",
+            ),
+          );
+          return out;
+        },
+      };
+
+      /**
+       * How a row's shared cells find the block they read. A card that joins
+       * nothing reads the row itself; a card with joins reads the joined
+       * block, named after the card it came from, or null when the row has
+       * none — so a board row no run has seen shows dashes, never the row's
+       * own fields under a run's headings.
+       */
+      function joinedReader(resp) {
+        const names = resp && resp.joins && typeof resp.joins === "object" ? Object.keys(resp.joins) : [];
+        if (!names.length) return (r) => r;
+        return (r) => {
+          for (const name of names) if (r[name] && typeof r[name] === "object") return r[name];
+          return null;
+        };
+      }
+
+      function cardRow(columns, joined, r) {
+        const tr = document.createElement("tr");
+        if (r.unreadable) {
+          tr.className = "unreadable";
+          cell(tr, "unreadable", "warn", r.error || "");
+          cell(tr, r.path, "path").colSpan = Math.max(1, columns.length - 1);
+          return tr;
         }
-        const wrap = gridNode(REVIEW_COLUMNS, items.map(reviewRow));
-        if (env.truncated) wrap.appendChild(node("div", "row-sub greyed", "older runs not shown"));
-        const medians = phaseMedians(items.filter((r) => !r.unreadable));
-        if (medians) wrap.appendChild(node("div", "row-sub greyed medians", medians));
-        const running = items.filter((r) => r.running && !r.unreadable).length;
-        wrap.appendChild(
-          node(
-            "div",
-            "footnote",
-            (running ? running + " running · " : "") +
-              items.length +
-              " run(s) · each row is one run's state.json; the HUD reads it and changes nothing.",
-          ),
-        );
-        return wrap;
+        if (r.running) tr.className = "running";
+        const j = joined(r);
+        for (const id of columns) {
+          const spec = CELLS[id];
+          if (spec) spec[2](tr, r, j);
+          else cell(tr, r[id], id);
+        }
+        return tr;
+      }
+
+      /**
+       * One renderer for every card. `resp` is `/api/card/<name>`'s body on a
+       * 200, `{card, error}` when it answered anything else, or null for a
+       * card that does not exist; `mount` is the panel element. The heading
+       * takes the card's title; the table takes its columns, drawn through
+       * the registry; the degraded states take the body in place of rows —
+       * misconfigured in the warning colour with the reason, stale greyed and
+       * stamped "as of" the snapshot's age. Every "do" in here is a link.
+       */
+      function renderCard(resp, mount) {
+        const h2 = mount.querySelector("h2");
+        const title = h2 ? h2.querySelector(".title") : null;
+        const stamp = h2 ? h2.querySelector(".stamp") : null;
+        const body = mount.querySelector(".body");
+        body.textContent = "";
+        if (!resp) {
+          mount.hidden = true;
+          if (stamp) stamp.textContent = "";
+          return;
+        }
+        mount.hidden = false;
+        if (title && typeof resp.title === "string" && resp.title) title.textContent = resp.title;
+        if (resp.error) {
+          mount.classList.remove("stale");
+          if (stamp) stamp.textContent = "";
+          body.appendChild(node("div", "empty misconfigured", resp.error));
+          return;
+        }
+        mount.classList.toggle("stale", !!resp.stale);
+        if (stamp) stamp.textContent = resp.stale ? "as of " + fmtTime(resp.generated_at) : "";
+        const items = Array.isArray(resp.items) ? resp.items : [];
+        const columns = Array.isArray(resp.columns) ? resp.columns : [];
+        RENDER_STALE = !!resp.stale;
+        try {
+          if (!items.length) {
+            body.appendChild(node("div", "empty", EMPTY_TEXT[resp.card] || "nothing to show"));
+            return;
+          }
+          const joined = joinedReader(resp);
+          const headings = columns.map((id) => (CELLS[id] ? [id, CELLS[id][0], CELLS[id][1]] : [id, id, id]));
+          const wrap = gridNode(headings, items.map((r) => cardRow(columns, joined, r)));
+          if (resp.truncated) wrap.appendChild(node("div", "row-sub greyed", "older rows not shown"));
+          if (resp.rejected > 0) {
+            wrap.appendChild(node("div", "row-sub greyed", resp.rejected + " row(s) the server could not read as rows"));
+          }
+          const unavailable = Object.entries(resp.joins || {}).filter(([, status]) => status !== "ok");
+          if (unavailable.length) {
+            wrap.appendChild(node("div", "row-sub greyed", unavailable.map(([name, status]) => name + ": " + status).join(" · ")));
+          }
+          for (const line of FOOTERS[resp.card] ? FOOTERS[resp.card](items) : []) wrap.appendChild(line);
+          body.appendChild(wrap);
+        } finally {
+          RENDER_STALE = false;
+        }
       }
 
       // ------------------------------------------------------ loadout panel
@@ -2617,12 +2656,6 @@
         }
       }
 
-      async function loadBoard() {
-        const env = await loadDyn("board");
-        setDial(env);
-        renderPanel("board", env, buildBoard);
-      }
-
       async function loadDigest() {
         renderPanel("digest", await loadDyn("digest"), buildDigest);
       }
@@ -2669,43 +2702,106 @@
       }
 
       /**
-       * Reviews reads the content tree, so like sessions and loadout it has no
-       * snapshot tier and a 404 is the panel-off contract. A 503 is the one
-       * other answer it gives — a glob the walker cannot honour — and that is
-       * a configuration fault worth the banner, not a panel to hide quietly.
+       * Every card the server declares, in the layout's order. A card with no
+       * panel in the shell gets one, so a stanza added to hud.toml renders
+       * without a UI change; the shell's own panels keep today's order unless
+       * `[layout].order` says otherwise. Each card then loads through one path.
        */
-      async function loadReviews() {
-        let env = null;
+      async function loadCards() {
+        let names = [];
+        let order = [];
         try {
-          const res = await fetch("/api/reviews?scope=open", { cache: "no-store" });
+          const res = await fetch("/api/cards", { cache: "no-store" });
           const body = await res.json().catch(() => null);
-          if (res.ok && body && Array.isArray(body.items)) {
-            env = body;
-            noteSource("reviews", "live");
-          } else if (res.status === 404) {
-            SOURCE_STATE.delete("reviews");
-            paintConnState();
-          } else {
-            noteSource("reviews", "absent", body && body.error);
+          if (res.ok && body && Array.isArray(body.cards)) {
+            names = body.cards.filter((n) => typeof n === "string");
+            order = body.layout && Array.isArray(body.layout.order) ? body.layout.order : [];
           }
         } catch {
           /* the HUD server itself is gone; hide rather than shout */
         }
-        renderPanel("reviews", env, buildReviews);
+        for (const name of names) ensurePanel(name);
+        orderPanels(order);
+        // A shell panel whose card is gone — its stanza removed — is hidden,
+        // not left showing its last rows.
+        for (const wrap of document.querySelectorAll("aside .panel[data-card]")) {
+          if (!names.includes(wrap.dataset.card)) {
+            renderCard(null, wrap);
+            SOURCE_STATE.delete(wrap.dataset.card);
+          }
+        }
+        if (!names.includes("board")) setDial(null);
+        paintConnState();
+        await Promise.all(names.map(loadCard));
       }
 
-      /** ⟳ : the tree, the two proxied sources, and a real peers re-poll. */
+      /** The panel for a card: the shell's when it has one, else one made in the aside. */
+      function ensurePanel(name) {
+        let wrap = el("wrap-" + name);
+        if (wrap) return wrap;
+        wrap = node("div", "panel");
+        wrap.id = "wrap-" + name;
+        wrap.dataset.card = name;
+        wrap.hidden = true;
+        const h2 = node("h2");
+        h2.appendChild(node("span", "title", name));
+        h2.appendChild(node("span", "stamp"));
+        wrap.appendChild(h2);
+        wrap.appendChild(node("div", "body"));
+        document.querySelector("aside").appendChild(wrap);
+        return wrap;
+      }
+
+      /** Panels the layout names move to the top in that order; the rest keep today's order after them. */
+      function orderPanels(order) {
+        const aside = document.querySelector("aside");
+        const named = order.map((name) => el("wrap-" + name)).filter((wrap) => wrap && wrap.parentElement === aside);
+        const rest = [...aside.children].filter((child) => !named.includes(child));
+        for (const wrap of [...named, ...rest]) aside.appendChild(wrap);
+      }
+
+      /**
+       * One card. 404 is the panel-off contract — the stanza is absent, so the
+       * panel does not exist. Anything else but 200 is configured and failing
+       * to answer, which is a fault worth the banner and a body that says why.
+       * What the payload says about itself (`health`) outranks how old it is.
+       */
+      async function loadCard(name) {
+        const wrap = ensurePanel(name);
+        let resp = null;
+        try {
+          const res = await fetch("/api/card/" + encodeURIComponent(name), { cache: "no-store" });
+          const body = await res.json().catch(() => null);
+          if (res.ok && body && Array.isArray(body.items)) {
+            resp = body;
+            const health = payloadHealth(body.health);
+            if (health) noteSource(name, health.state, health.why);
+            else noteSource(name, body.stale ? "stale" : "live");
+          } else if (res.status === 404) {
+            SOURCE_STATE.delete(name);
+            paintConnState();
+          } else {
+            resp = { card: name, error: (body && body.error) || "HTTP " + res.status };
+            noteSource(name, "absent", resp.error);
+          }
+        } catch {
+          /* the HUD server itself is gone; hide rather than shout */
+        }
+        if (name === "board") setDial(resp && !resp.error ? resp : null);
+        renderCard(resp, wrap);
+      }
+
+      /** ⟳ : the tree, the cards, the two remaining proxied sources, and a real peers re-poll. */
       async function refreshAll() {
         const button = el("refresh");
         button.disabled = true;
         try {
           await Promise.all([
             loadTree(),
-            loadBoard(),
+            loadCards(),
             loadDigest(),
             loadSessions(),
             loadLoadout(),
-            loadReviews(),
             // POST first: peers are generated here, so a GET alone would only
             // re-serve the snapshot the server already has.
             fetch("/api/refresh/peers", { method: "POST", cache: "no-store" })
@@ -2764,11 +2860,10 @@
       // have answered — the tree for /n/, the sessions panel for /s/. The
       // remaining panels are not addressable, so nothing waits on them.
       Promise.all([loadTree(), loadSessions()]).then(applyLocation);
-      loadBoard();
+      loadCards();
       loadDigest();
       loadPeers();
       loadLoadout();
-      loadReviews();
     </script>
   </body>
 </html>

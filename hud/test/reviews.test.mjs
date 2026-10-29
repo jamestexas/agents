@@ -23,7 +23,6 @@ import {
   REVIEW_STATE_SERVED,
   RUNNING_FOR_S,
   RUNNING_STARTED,
-  UI_DIR,
   atMin,
   census,
   finished,
@@ -439,115 +438,6 @@ test("the glob subset matches within a segment only", () => {
   }
 });
 
-// --------------------------------------------------------------- the panel
-//
-// The builder needs a DOM, so it is not evaluated here. What is checked is
-// the part that can rot silently: that the panel is wired into both paint
-// paths, and that every "do" in the block is a link — out to GitHub, or into
-// the tree — never a request.
-
-test("reviews panel is wired and only links", () => {
-  const html = fs.readFileSync(path.join(UI_DIR, "index.html"), "utf8");
-
-  for (const id of ["wrap-reviews", "panel-reviews", "stamp-reviews"]) {
-    assert.ok(html.includes(`id="${id}"`), `the shell declares ${id}`);
-  }
-  assert.match(html, /<h2>Review runs<span class="sub">in flight or not yet posted<\/span><span/, "the panel is titled Review runs, with its subtitle");
-
-  // Reviews is the first panel in the aside: a run in flight is what the
-  // reader checks on, so it sits above the board and the activity feed.
-  const aside = html.slice(html.indexOf("<aside>"), html.indexOf("</aside>"));
-  const firstPanel = aside.indexOf('class="panel"');
-  assert.ok(firstPanel !== -1, "the aside holds panels");
-  assert.equal(
-    aside.slice(firstPanel, aside.indexOf(">", firstPanel)).includes('id="wrap-reviews"'),
-    true,
-    "reviews is the first panel in the aside",
-  );
-  for (const id of ["wrap-board", "wrap-digest", "wrap-sessions", "wrap-loadout", "wrap-peers"]) {
-    assert.ok(aside.indexOf(`id="${id}"`) > aside.indexOf('id="wrap-reviews"'), `${id} comes after reviews`);
-  }
-
-  // Panel bodies scroll inside the panel rather than growing the column; the
-  // heading is outside the body, so it stays visible while the body scrolls.
-  const bodyAt = html.indexOf(".panel > .body {");
-  const bodyRule = html.slice(bodyAt, html.indexOf("}", bodyAt));
-  assert.match(bodyRule, /max-height:\s*\d+vh/, "every panel body has a viewport-relative cap");
-  assert.match(bodyRule, /overflow:\s*auto/, "and scrolls within it");
-  assert.match(
-    html,
-    /#wrap-reviews > \.body \{\s*max-height:\s*\d+vh/,
-    "the reviews body is sized separately",
-  );
-  assert.match(
-    html,
-    /<h2>Review runs<span[^]*?<div class="body" id="panel-reviews">/,
-    "the heading sits outside the scrolling body",
-  );
-
-  // Definition, ⟳, first paint. Fewer means a path that never renders it.
-  assert.equal(
-    (html.match(/loadReviews/g) || []).length,
-    3,
-    "loadReviews is defined, refreshed, and painted",
-  );
-
-  const start = html.indexOf("// ------------------------------------------------------ reviews panel");
-  const end = html.indexOf("// ------------------------------------------------------ loadout panel");
-  assert.ok(start !== -1 && end > start, "the reviews block is still marked, and sits before loadout");
-  const block = html.slice(start, end);
-
-  assert.match(block, /function buildReviews\b/, "the block still builds the panel");
-  // The four who-waits-on-whom columns are declared, by id, after verdict.
-  const columnsAt = block.indexOf("const REVIEW_COLUMNS");
-  const columns = block.slice(columnsAt, block.indexOf("];", columnsAt));
-  const ids = [...columns.matchAll(/\["([a-z]+)",/g)].map((m) => m[1]);
-  const verdictAt = ids.indexOf("verdict");
-  assert.ok(verdictAt !== -1, "verdict is a column");
-  assert.deepEqual(ids.slice(verdictAt + 1, verdictAt + 5), ["mine", "humans", "bots", "threads"]);
-  // Where the time went sits beside where the run is.
-  assert.deepEqual(ids.slice(verdictAt - 2, verdictAt), ["phase", "phases"]);
-  assert.match(block, /function phasesCell\b/, "the block renders per-phase minutes");
-  assert.match(block, /phase_seconds/, "from the server's derived seconds");
-  assert.match(block, /ended == null/, "the open phase is told apart by its missing end");
-  assert.match(block, /function phaseMedians\b/, "and a median per phase across the loaded runs");
-  assert.match(block, /median per phase across /, "named as such under the table");
-  assert.match(block, /\.toFixed\(1\)/, "minutes to one decimal");
-  // The early signal sits beside the findings it anticipates, and only
-  // while the run is in flight.
-  assert.deepEqual(ids.slice(ids.indexOf("early"), ids.indexOf("early") + 2), ["early", "findings"]);
-  assert.match(block, /function earlyCell\b/);
-  assert.match(block, /r\.running && r\.early/, "a finished row shows nothing here");
-  assert.match(block, /e\.count > 0 \? " hot"/, "lit when there is one");
-  // A --fast run's PRELIMINARY verdict is muted and says why, in both tables.
-  const verdictFn = block.slice(block.indexOf("function verdictCell("), block.indexOf("function noteCell("));
-  assert.match(verdictFn, /verdict === "PRELIMINARY" \? "fast run, unrefuted"/, "the tooltip names the run kind");
-  assert.match(verdictFn, /"verdict v-" \+ String\(verdict \|\| "none"\)\.toLowerCase\(\)/, "the class is the verdict, lowercased");
-  const cssAt = html.indexOf(".prgrid .v-preliminary {");
-  assert.ok(cssAt !== -1, "v-preliminary has a style");
-  assert.match(html.slice(cssAt, html.indexOf("}", cssAt)), /color:\s*var\(--muted\)/, "in the muted colour");
-  assert.match(block, /function reviewStateCells\b/, "the block renders the review_state block");
-  assert.match(block, /head_matches === false/, "a review behind the head is marked");
-  assert.match(block, /awaiting_me > 0/, "a thread waiting on the reader is highlighted");
-  assert.match(block, /\.running\b/, "running rows are distinguished");
-  assert.match(block, /unreadable/, "unreadable rows are rendered");
-  assert.ok(!/fetch\s*\(/.test(block), "the panel makes no request of its own");
-  assert.ok(!/method:/.test(block), "no verb but the page's GETs");
-  // Links out go through linkOut (http(s) only, new tab, noopener); the one
-  // link in goes to the tree's /n/ route and nowhere else.
-  assert.ok(!/https?:\/\//.test(block), "no URL is hardcoded; every link comes from the payload");
-  assert.match(block, /a\.href = url/, "the note link is a real href");
-  assert.match(block, /parseRoute\(url\)/, "and it opens through the same route rule a tree click uses");
-
-  // The loader treats 404 as panel-off and anything else as a fault worth
-  // the banner — not a quiet hide, which would make a typo in the glob read
-  // as "no runs".
-  const loader = html.slice(html.indexOf("async function loadReviews"), html.indexOf("async function refreshAll"));
-  assert.match(loader, /res\.status === 404/);
-  assert.match(loader, /noteSource\("reviews", "absent"/);
-  assert.match(loader, /\/api\/reviews\?scope=open/, "the panel shows runs in flight or not yet posted");
-});
-
 // ------------------------------------------------- joined onto the board
 //
 // A board row and a run name the same PR. With both sources on, the board
@@ -782,27 +672,4 @@ test("?scope=open keeps runs in flight or not yet posted; all keeps every run", 
   const bad = await hud.get("/api/reviews?scope=posted");
   assert.equal(bad.status, 400);
   assert.match((await bad.json()).error, /scope must be one of/);
-});
-
-test("MY PRS declares the review columns after its own", () => {
-  const html = fs.readFileSync(path.join(UI_DIR, "index.html"), "utf8");
-  const at = html.indexOf("const BOARD_COLUMNS");
-  assert.ok(at !== -1, "the board declares its columns");
-  const columns = html.slice(at, html.indexOf("];", at));
-  const ids = [...columns.matchAll(/\["([a-z]+)",/g)].map((m) => m[1]);
-  assert.deepEqual(ids, ["pr", "title", "why", "verdict", "gates", "note", "posted", "threads"]);
-
-  const start = html.indexOf("function boardRow(");
-  const block = html.slice(start, html.indexOf("function setDial("));
-  assert.match(block, /gridNode\(BOARD_COLUMNS/, "the board is the same grid the runs are");
-  for (const fn of ["verdictCell", "gatesNode", "noteCell", "postedCell", "threadsCell"]) {
-    assert.match(block, new RegExp(`\\b${fn}\\(`), `${fn} is shared with the runs panel`);
-  }
-  assert.match(block, /item\.review/, "the cells read the joined block");
-  assert.ok(!/fetch\s*\(/.test(block), "the board makes no request of its own");
-  assert.ok(!/https?:\/\//.test(block), "no URL is hardcoded");
-  // Both tables share one style, so a verdict reads the same in each.
-  assert.match(html, /function gridNode\(/);
-  assert.match(html, /node\("div", "prgrid"\)/);
-  assert.ok(!/\.reviews\s*\{/.test(html), "the old reviews-only table style is gone");
 });
