@@ -26,7 +26,14 @@
 //          not a TTY", so a harness with an open-but-silent stdin cannot hang.
 //   early                copy work/early.json (early-signal.mjs's list) to
 //                        `early`; an absent or unreadable file is []
+//   output <phase>       record that questions|settle|refute|triage|teach left
+//                        its file (ledger.md, candidates.md, refutations.md,
+//                        findings.json, summary.md) and how many rows it has;
+//                        zero candidates makes refute and triage skipped
 //   posted url=<u> state=<s>   phase "posted"
+//   abandon|fail [reason=<r>]  end the run from any open phase; the SessionEnd
+//                        hook (abandon-session.mjs) abandons a dead session's
+//                        open runs
 //
 // Every op appends one event to <run>/events.jsonl and rebuilds state.json
 // as runstate.mjs's fold of the whole log, so state.json is never edited in
@@ -53,7 +60,7 @@ import { fileURLToPath } from 'node:url';
 import { eventId, eventKey, fold, checkTransition } from './runstate.mjs';
 
 const [run, op, ...rest] = process.argv.slice(2);
-const usage = () => { console.error('usage: state.mjs <run> init|phase <name>|early|finish|posted [k=v ...]'); process.exit(2); };
+const usage = () => { console.error('usage: state.mjs <run> init [--pending pr=<owner/repo#N>]|phase <name>|output <phase>|early|finish|posted|abandon|fail [k=v ...]'); process.exit(2); };
 if (!run || !op) usage();
 
 const statePath = path.join(run, 'state.json');
@@ -117,6 +124,15 @@ const transition = (s, target) => {
   if (!t.ok) { console.error(`state.mjs ${op}: ${t.reason}`); process.exit(1); }
   return t;
 };
+// abandon and fail end a run from any open phase; the same call again is a
+// replay, and nothing follows either.
+const terminal = (opName, target) => {
+  const { reason = 'unknown' } = kv(['reason']);
+  const s = current();
+  if (replayed(opName, { reason })) return;
+  transition(s, target);
+  append(opName, { reason });
+};
 // A run directory is per PR (raw/PR-N), so a second review of the same PR
 // starts in the first one's directory. A run that ended is set aside under a
 // name the HUD's state.json glob does not match, and the new run gets a fresh
@@ -135,6 +151,23 @@ const startOver = () => {
     process.exit(1);
   }
   fs.renameSync(eventsPath, path.join(run, `events.superseded-${stamp}.jsonl`));
+};
+
+// A row of a markdown table body: a `|` line that is neither the header (the
+// line above a separator) nor the separator itself.
+const bodyRows = (t) => {
+  const lines = t.split('\n');
+  const sep = (l) => /^\|[\s:|-]+\|?\s*$/.test(l ?? '');
+  return lines.filter((l, i) => l.startsWith('|') && !sep(l) && !sep(lines[i + 1])).length;
+};
+// What each phase leaves behind, and how to count it. A phase is complete
+// when this file exists; the row count is what the next phase is gated on.
+const PHASE_OUTPUT = {
+  questions: ['work/ledger.md', (t) => t.split('\n').filter((l) => /^\|\s*\d+\s*\|/.test(l)).length],
+  settle: ['work/candidates.md', (t) => t.split('\n').filter((l) => l.trim()).length],
+  refute: ['work/refutations.md', bodyRows],
+  triage: ['work/findings.json', (t) => { try { const a = JSON.parse(t); return Array.isArray(a) ? a.length : 0; } catch { return 0; } }],
+  teach: ['work/summary.md', (t) => (t.trim() ? 1 : 0)],
 };
 
 const ops = {
@@ -220,6 +253,21 @@ const ops = {
       ? list.filter((e) => e && typeof e === 'object').map(({ row, title, basis }) => ({ row, title, basis })) : [] });
   },
 
+  output() {
+    const name = rest.shift();
+    kv([]);
+    const spec = PHASE_OUTPUT[name];
+    if (!spec) { console.error(`state.mjs output: no output is defined for ${name}; known: ${Object.keys(PHASE_OUTPUT).join(', ')}`); process.exit(2); }
+    current();
+    const [rel, count] = spec;
+    const text = readIf(path.join(run, rel));
+    if (text === null) { console.error(`state.mjs output ${name}: ${rel} does not exist`); process.exit(1); }
+    append('output', { phase: name, file: rel, rows: count(text) });
+  },
+
+  abandon() { terminal('abandon', 'abandoned'); },
+  fail() { terminal('fail', 'failed'); },
+
   posted() {
     const args = kv(['url', 'state']);
     if (!args.url || !args.state) { console.error('state.mjs posted: need url= and state='); process.exit(2); }
@@ -251,10 +299,12 @@ function countFindings(findings) {
 
 // check.mjs prints one line per gate: `<gate>: <detail> — ok` on a pass and
 // `<gate>: <reason>` on a failure. A gate that printed nothing stays null.
+// `outputs` is printed only for a run with events.jsonl, so it is a key only
+// when check.mjs printed it.
 function parseGates(text) {
   const g = { ledger: null, triage: null, blocking: null };
   for (const line of String(text).split('\n')) {
-    const m = line.match(/^(ledger|triage|blocking):\s*(.*)$/);
+    const m = line.match(/^(ledger|triage|blocking|outputs):\s*(.*)$/);
     if (!m) continue;
     const ok = /— ok\s*$/.test(m[2]);
     // Several lines may name one gate (gate 3 reports per finding); one

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// check.mjs <run-dir> — the three arithmetic gates from the spec. Exit 0 means
+// check.mjs <run-dir> — the arithmetic gates from the spec. Exit 0 means
 // the artifact may be posted. Every failure names the row or finding, so a
 // reader can fix the one thing instead of re-running the review. Each gate
 // reports on its own, so one failure does not hide what the others found.
@@ -12,15 +12,20 @@
 //                no claim id missing from claims.jsonl, and >=1 ledger row that
 //                exists and is not Unresolved (an unresolved row demotes the
 //                finding to a Question)
+//   4. outputs:  only for a run with events.jsonl — every phase the run
+//                entered recorded an output (state.mjs output) or was skipped
 //
-// A fourth line, `fast: PRELIMINARY — not postable`, is printed and the exit
+// A last line, `fast: PRELIMINARY — not postable`, is printed and the exit
 // is 1 whenever state.json says mode "fast" or summary.md's verdict is
-// PRELIMINARY, even if the three gates pass: a --fast run stopped before
+// PRELIMINARY, even if the gates pass: a --fast run stopped before
 // refute and triage, so its candidates are unrefuted and nothing in it may
 // reach a PR.
 import fs from 'node:fs';
 import path from 'node:path';
 import { splitCells } from './cells.mjs';
+import { fold } from './runstate.mjs';
+
+const OUTPUT_PHASES = ['questions', 'settle', 'refute', 'triage', 'teach'];
 
 const run = process.argv[2];
 if (!run) { console.error('usage: check.mjs <run-dir>'); process.exit(2); }
@@ -131,6 +136,24 @@ gate('blocking', (fail, pass) => {
   }
   if (!bad) pass(`${blocking.length} finding(s), evidence-backed`);
 });
+
+// 4. outputs: every phase the run entered left its output, or was recorded
+// as skipped. Only for a run with events.jsonl; an older run has no record
+// of outputs to check.
+const eventsPath = path.join(run, 'events.jsonl');
+if (fs.existsSync(eventsPath)) {
+  gate('outputs', (fail, pass) => {
+    let events;
+    try { events = fs.readFileSync(eventsPath, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); }
+    catch { return fail('events.jsonl is not JSON lines'); }
+    const s = fold(events);
+    const skipped = new Set((s.skipped ?? []).map((x) => x.phase));
+    const ran = OUTPUT_PHASES.filter((p) => s.phases[p]);
+    const missing = ran.filter((p) => !s.outputs?.[p] && !skipped.has(p));
+    for (const p of missing) fail(`${p} has no output and was not skipped`);
+    if (!missing.length) pass(`${ran.length} phase(s) with output, ${skipped.size} skipped`);
+  });
+}
 
 // Not a gate on the artifact's arithmetic but on what kind of run produced
 // it; reported last so the three gate lines keep their positions.

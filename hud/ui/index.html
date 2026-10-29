@@ -2163,12 +2163,16 @@
         return td;
       }
 
-      /** Three dots, one per gate, in order: ledger · triage · blocking. */
+      /**
+       * One dot per gate, in order: ledger · triage · blocking, then outputs
+       * when the run recorded it (only a run with an event log has one).
+       */
       function gatesNode(gates) {
         const g = gates && typeof gates === "object" ? gates : {};
         const wrap = node("span", "gates");
         const words = [];
-        for (const name of ["ledger", "triage", "blocking"]) {
+        const names = ["ledger", "triage", "blocking"].concat("outputs" in g ? ["outputs"] : []);
+        for (const name of names) {
           const v = g[name] === "ok" || g[name] === "fail" ? g[name] : "null";
           wrap.appendChild(node("span", "gate g-" + v, "●"));
           words.push(name + " " + (v === "null" ? DASH : v));

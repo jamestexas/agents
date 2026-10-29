@@ -28,10 +28,15 @@ const run = (dir, args, input) => spawnSync(process.execPath, [state, dir, ...ar
 const read = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8'));
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
 // Phases only move forward and a default run skips none, so a test that
-// finishes walks every phase between evidence and the one it needs.
+// finishes walks every phase between evidence and the one it needs, and
+// records each phase's output as the orchestrator does.
 const DEFAULT_PHASES = ['questions', 'settle', 'refute', 'triage', 'teach'];
 const walk = (dir, phases = DEFAULT_PHASES) => {
-  for (const p of phases) assert.equal(run(dir, ['phase', p]).status, 0, `phase ${p}`);
+  for (const p of phases) {
+    assert.equal(run(dir, ['phase', p]).status, 0, `phase ${p}`);
+    const r = run(dir, ['output', p]);
+    assert.equal(r.status, 0, `output ${p}: ${r.stderr}`);
+  }
 };
 
 test('init writes the HUD schema from target.json and manifest.json', () => {
@@ -101,7 +106,7 @@ test('finish re-runs check.mjs, reads the verdict and counts findings', () => {
   assert.match(s.ended, ISO);
   assert.match(s.phases.teach.ended, ISO);
   assert.equal(s.verdict, 'REQUEST_CHANGES');
-  assert.deepEqual(s.gates, { ledger: 'ok', triage: 'ok', blocking: 'ok' });
+  assert.deepEqual(s.gates, { ledger: 'ok', triage: 'ok', blocking: 'ok', outputs: 'ok' });
   assert.deepEqual(s.findings, { blocking: 1, non_blocking: 0, question: 0, observation: 0 });
   assert.equal(s.note, 'projects/example/notes/PR-1-swap.md', 'absolute note under HUD_ROOT is stored relative');
 });
@@ -116,7 +121,7 @@ test('finish accepts verdict=PRELIMINARY from a --fast run; the fast line is not
   const s = read(dir);
   assert.equal(s.mode, 'fast');
   assert.equal(s.verdict, 'PRELIMINARY');
-  assert.deepEqual(s.gates, { ledger: 'ok', triage: 'ok', blocking: 'ok' }, 'the three gates passed; the fourth line is check.mjs\'s exit, not a gate');
+  assert.deepEqual(s.gates, { ledger: 'ok', triage: 'ok', blocking: 'ok', outputs: 'ok' }, 'the gates passed; the fast line is check.mjs\'s exit, not a gate');
   assert.deepEqual(s.findings, { blocking: 0, non_blocking: 0, question: 3, observation: 0 });
 });
 
@@ -381,4 +386,61 @@ test('pending then the evidence init closes pending and keeps the owner', () => 
   assert.equal(s.phase, 'evidence');
   assert.notEqual(s.phases.pending.ended, null);
   assert.equal(s.owner.session_id, 'sess-2');
+});
+
+test('output counts the phase file itself', () => {
+  const dir = copyGood();
+  run(dir, ['init', 'viewer=v']);
+  run(dir, ['phase', 'questions']);
+  assert.equal(run(dir, ['output', 'questions']).status, 0);
+  const s = read(dir);
+  assert.equal(s.outputs.questions.file, 'work/ledger.md');
+  assert.equal(s.outputs.questions.rows, 3, 'fixtures/good has three ledger rows');
+  run(dir, ['phase', 'settle']);
+  run(dir, ['output', 'settle']);
+  run(dir, ['phase', 'refute']);
+  run(dir, ['output', 'refute']);
+  assert.deepEqual(read(dir).outputs.refute, { file: 'work/refutations.md', rows: 1 }, 'table body rows, not the header');
+});
+
+test('output of a missing file or an unknown phase is refused and records nothing', () => {
+  const dir = copyGood();
+  run(dir, ['init', 'viewer=v']);
+  fs.rmSync(path.join(dir, 'work', 'ledger.md'));
+  const r = run(dir, ['output', 'questions']);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /work\/ledger\.md does not exist/);
+  assert.equal(run(dir, ['output', 'evidence']).status, 2);
+  assert.deepEqual(events(dir).map((e) => e.op), ['init']);
+});
+
+test('zero candidates: refute is refused, teach skips refute and triage by rule', () => {
+  const dir = copyGood();
+  run(dir, ['init', 'viewer=v']);
+  walk(dir, ['questions']);
+  run(dir, ['phase', 'settle']);
+  fs.writeFileSync(path.join(dir, 'work', 'candidates.md'), '');
+  run(dir, ['output', 'settle']);
+  const r = run(dir, ['phase', 'refute']);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /zero candidates/);
+  assert.equal(run(dir, ['phase', 'teach']).status, 0);
+  assert.deepEqual(read(dir).skipped.map((x) => x.reason), ['zero-candidates', 'zero-candidates']);
+});
+
+test('abandon and fail are terminal', () => {
+  const dir = copyGood();
+  run(dir, ['init', 'viewer=v']);
+  assert.equal(run(dir, ['abandon', 'reason=session-ended']).status, 0);
+  const s = read(dir);
+  assert.equal(s.phase, 'abandoned');
+  assert.equal(s.abandoned, 'session-ended');
+  assert.match(s.ended, ISO);
+  assert.notEqual(run(dir, ['phase', 'questions']).status, 0);
+  assert.equal(run(dir, ['abandon', 'reason=session-ended']).status, 0, 'the same abandon again is a replay');
+  const other = copyGood();
+  run(other, ['init', 'viewer=v']);
+  assert.equal(run(other, ['fail', 'reason=evidence-script']).status, 0);
+  assert.equal(read(other).phase, 'failed');
+  assert.notEqual(run(other, ['abandon']).status, 0, 'nothing follows a terminal state');
 });

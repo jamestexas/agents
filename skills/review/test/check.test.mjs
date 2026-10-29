@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
+import { eventId } from '../scripts/runstate.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const check = path.join(here, '..', 'scripts', 'check.mjs');
@@ -125,4 +126,32 @@ test('a PRELIMINARY summary alone, with no state.json, is enough for the fast li
   const again = spawnSync('node', [check, dir], { encoding: 'utf8' });
   assert.equal(again.status, 1);
   assert.match(again.stdout, /^fast: PRELIMINARY — not postable$/m);
+});
+
+test('outputs gate: printed only with events.jsonl; fails when a run phase left no output and was not skipped', () => {
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rv-check-')), 'run');
+  fs.cpSync(path.join(here, 'fixtures', 'good'), dir, { recursive: true });
+  const check1 = spawnSync('node', [check, dir], { encoding: 'utf8' });
+  assert.equal(check1.status, 0, check1.stdout + check1.stderr);
+  assert.doesNotMatch(check1.stdout, /^outputs:/m, 'a run with no events.jsonl gets no outputs line');
+
+  const line = (op, data, at) => JSON.stringify({ id: eventId(op, data), at, op, data }) + '\n';
+  const log = path.join(dir, 'events.jsonl');
+  fs.writeFileSync(log, [
+    line('init', { mode: 'default', evidence_started: '2026-01-01T00:00:00.000Z' }, '2026-01-01T00:00:01.000Z'),
+    line('phase', { name: 'questions', skipped: [] }, '2026-01-01T00:00:02.000Z'),
+    line('output', { phase: 'questions', file: 'work/ledger.md', rows: 3 }, '2026-01-01T00:00:03.000Z'),
+    line('phase', { name: 'settle', skipped: [] }, '2026-01-01T00:00:04.000Z'),
+  ].join(''));
+  const missing = spawnSync('node', [check, dir], { encoding: 'utf8' });
+  assert.equal(missing.status, 1);
+  assert.match(missing.stdout, /^outputs: settle has no output and was not skipped$/m);
+  assert.match(missing.stdout, /^blocking: .* — ok$/m, 'the other gates still report');
+
+  fs.appendFileSync(log, line('output', { phase: 'settle', file: 'work/candidates.md', rows: 0 }, '2026-01-01T00:00:05.000Z')
+    + line('phase', { name: 'teach', skipped: [{ phase: 'refute', reason: 'zero-candidates' }, { phase: 'triage', reason: 'zero-candidates' }] }, '2026-01-01T00:00:06.000Z')
+    + line('output', { phase: 'teach', file: 'work/summary.md', rows: 1 }, '2026-01-01T00:00:07.000Z'));
+  const ok = spawnSync('node', [check, dir], { encoding: 'utf8' });
+  assert.equal(ok.status, 0, ok.stdout);
+  assert.match(ok.stdout, /^outputs: 3 phase\(s\) with output, 2 skipped — ok$/m);
 });

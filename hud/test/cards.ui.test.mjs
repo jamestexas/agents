@@ -169,3 +169,16 @@ test("refresh and first paint load the cards through one path", () => {
   assert.match(paint, /loadCards\(\);/);
   assert.equal((html.match(/loadCards\(\)/g) || []).length, 3, "defined, refreshed, painted");
 });
+
+test("gates: three dots, and a fourth for outputs when the run recorded it", () => {
+  const src = between("function gatesNode(gates) {", "/**\n       * A link into the tree.");
+  const stub = (tag, cls, text) => {
+    const kids = [];
+    return { cls, text, kids, appendChild: (k) => kids.push(k), setAttribute() {} };
+  };
+  const gatesNode = new Function("node", "DASH", `${src}\nreturn gatesNode;`)(stub, "-");
+  assert.equal(gatesNode({ ledger: "ok", triage: "ok", blocking: "fail" }).kids.length, 3);
+  const four = gatesNode({ ledger: "ok", triage: "ok", blocking: "ok", outputs: "fail" });
+  assert.deepEqual(four.kids.map((k) => k.cls), ["gate g-ok", "gate g-ok", "gate g-ok", "gate g-fail"]);
+  assert.match(four.title, /outputs fail$/);
+});
