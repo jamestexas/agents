@@ -43,7 +43,7 @@ test("the check actually fails when a doc drifts", () => {
     for (const rel of ["docs", "skills/hud", "templates"]) {
       fs.mkdirSync(path.join(dir, rel), { recursive: true });
     }
-    for (const rel of ["docs/CLI.md", "docs/SOURCES.md", "skills/hud/SKILL.md", "templates/HUD.md"]) {
+    for (const rel of ["docs/CARDS.md", "docs/CLI.md", "docs/SOURCES.md", "skills/hud/SKILL.md", "templates/HUD.md"]) {
       fs.copyFileSync(path.join(MACHINERY, rel), path.join(dir, rel));
     }
     assert.deepEqual(check(dir).findings, [], "the copy should start clean");

@@ -97,6 +97,9 @@ expose the HUD. Which component consumes each key:
 
 - [docs/SOURCES.md](docs/SOURCES.md) — every `hud.toml` key, what tool or
   service enables it, and what each panel does when its source is absent
+- [docs/CARDS.md](docs/CARDS.md) — `[cards.*]`: a panel as a declared source,
+  key and join; `GET /api/card/<name>`, the kinds, and how a legacy
+  `[sources.*]` config is synthesised into cards
 - [docs/CLI.md](docs/CLI.md) — what each verb refuses to do, `link` vs
   `install` vs `sync`, the XDG reasoning, and what `hud sync` pre-decides
 - [docs/STATUS-JSON.md](docs/STATUS-JSON.md) — the `hud-status/v1` document,

@@ -7,7 +7,8 @@ is written against the server's **consumers** — the lines in `server.mjs` that
 actually read each key — not against any particular person's config.
 
 Read [CLI.md](CLI.md) for the verbs and [STATUS-JSON.md](STATUS-JSON.md) for the
-machine-readable state contract.
+machine-readable state contract. `[cards.*]` — the declared-source schema that
+is replacing these per-source tables, panel by panel — is [CARDS.md](CARDS.md).
 
 ## Which file, and what a bad line costs
 
