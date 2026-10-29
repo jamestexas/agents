@@ -57,6 +57,7 @@ stated; else `inbox`.
 
 ```bash
 SKILL=~/.claude/skills/review
+node $SKILL/scripts/state.mjs <run> init --pending pr=<owner/repo#N> mode=<light|default|deep|fast>
 bash $SKILL/scripts/review-evidence.sh --pr <owner/repo#N> --repo-dir <local clone> --out <run>
 jq -r '.probes[] | "\(.status)\t\(.name)"' <run>/evidence/manifest.json
 ```
@@ -66,13 +67,18 @@ CODEOWNERS are both read at its BASE ref, never from the PR worktree, and
 the script writes `evidence/manifest.sha256` from a timestamp-free hash so a
 replay can tell whether the evidence moved.
 
+`init --pending` goes first, so the run's HUD row appears at dispatch
+and stays visible while evidence runs (about a minute). It records the
+session that owns the run, which is how a reader tells a live run from a
+dead one (see Run state).
+
 Read the manifest before anything else. Every UNAVAILABLE row becomes a
 ledger question in phase 2. Do not re-fetch what the script fetched.
 
 Authorship: compare `pr/context.json`'s author login to `gh api user --jq
 .login`. Record `own` or `peer` for phase 6; tell no reader.
 
-Then open the run's state file, which the HUD reviews panel reads:
+Then record the evidence in the run's state file, which the HUD reviews panel reads:
 
 ```bash
 node $SKILL/scripts/state.mjs <run> init mode=<light|default|deep>
@@ -83,8 +89,10 @@ runs it. With `pr/context.json` present the file also carries
 `review_state`: authorship, the viewer's latest review, the latest review
 per human, bot reviews (by flag or login pattern), and how many unresolved
 threads wait on the viewer versus the author. Every later phase starts with
-`node $SKILL/scripts/state.mjs <run> phase <name>`; phase 6 ends with
-`finish`, Post with `posted`. `state.json` is a progress file, not evidence:
+`node $SKILL/scripts/state.mjs <run> phase <name>` and, once its file is
+written, ends with `node $SKILL/scripts/state.mjs <run> output <name>`
+(questions, settle, refute, triage, teach); phase 6 ends with `finish`,
+Post with `posted`. `state.json` is a progress file, not evidence:
 no phase reads it.
 
 ## Mode
@@ -147,7 +155,8 @@ lists are empty or the file is absent. Thread rows do not count toward
 
 Pass nothing else: not the PR title, not your hunches, not this
 conversation. When it returns, read `work/ledger.md` and confirm every
-row's **Settled by** is non-empty and **Decision** is empty.
+row's **Settled by** is non-empty and **Decision** is empty. Then
+`state.mjs <run> output questions`.
 
 ## Phase 3 — Settle (N sub-agents in parallel)
 
@@ -173,7 +182,8 @@ clause whose text is not empty, `none`, or `n/a` (case-insensitive). A
 settled-clean row carries no clause, so those three are reader slips, not
 candidates; refute and triage count only what is in `work/candidates.md`.
 Read its three count lines; resolve a `conflict:` row yourself from the two
-cited files before phase 4, and rewrite that cell.
+cited files before phase 4, and rewrite that cell. Then `state.mjs <run>
+output settle`, which counts `candidates.md`.
 
 Then the early signal, by script, in every mode:
 
@@ -199,9 +209,16 @@ absent and renders as "not produced").
 
 ## Phase 4 — Refute (one sub-agent, fresh)
 
-Skip under `--light` and `--fast`. `state.mjs <run> phase refute`. Dispatch
+Skip under `--light` and `--fast`. **Zero candidates:** if `output settle`
+recorded 0 rows, skip phases 4 and 5. Write the light pass-throughs
+(`triage.md` with `0 candidates in, 0 dispositions out`, `findings.json`
+`[]`), dispatch no model, and go to `state.mjs <run> phase teach`, which
+records refute and triage as skipped (`zero-candidates`) by rule. `phase
+refute` is refused on such a run.
+
+`state.mjs <run> phase refute`. Dispatch
 `prompts/refute.md` with `{{CANDIDATES}}` = `work/candidates.md`. Drop any
-`falls` row with no citation.
+`falls` row with no citation. Then `state.mjs <run> output refute`.
 
 ## Phase 5 — Triage (one sub-agent)
 
@@ -209,7 +226,7 @@ Skip under `--light` and `--fast` (the orchestrator writes the pass-through
 `triage.md` and `findings.json` described under Mode). `state.mjs <run> phase triage`. Dispatch
 `prompts/triage.md` with `{{CANDIDATES}}` = `work/candidates.md` (the same
 list refute received). It invokes
-`finding-triage`.
+`finding-triage`. Then `state.mjs <run> output triage`.
 
 ## Phase 6 — Teach and render (one sub-agent, then scripts)
 
@@ -218,6 +235,7 @@ list refute received). It invokes
 the literal `(none)` when there is no project. Then:
 
 ```bash
+node $SKILL/scripts/state.mjs <run> output teach
 node $SKILL/scripts/render.mjs <run> --title "PR N — <title>" --out <notes path>
 node $SKILL/scripts/check.mjs <run>
 node $SKILL/scripts/state.mjs <run> finish note=<notes path relative to $HUD_ROOT>
@@ -233,11 +251,40 @@ ledger footer `Questions asked: N.` must equal the row count, no Decision
 may be empty, not every row may be Unresolved, the triage header counts must
 match its table, and a Blocking finding must cite at least one RAN/READ
 claim, no ASSUMED claim, and no claim id missing from `work/claims.jsonl`.
-A `--fast` run gets a fourth line, `fast: PRELIMINARY — not postable`, and
-a non-zero exit regardless of the three.
+A run with `events.jsonl` gets a fourth gate, `outputs:`: every phase the
+run entered recorded an `output`, or was recorded as skipped. A `--fast`
+run gets a last line, `fast: PRELIMINARY — not postable`, and a non-zero
+exit regardless of the gates.
 
-Print the notes path and the check lines (three, four under `--fast`). Append one line to
+Print the notes path and the check lines. Append one line to
 `$HUD_ROOT/log.md`. Stop here unless `--post`.
+
+## Run state
+
+`<run>/events.jsonl` is the truth and `state.json` is folded from it by
+`scripts/runstate.mjs`; every `state.mjs` op appends one event and rebuilds
+the file. Ops are idempotent: the same call with the same result is a
+replay and adds nothing. Phases only move forward, in the order
+`pending, evidence, questions, settle, refute, triage, teach, rendered,
+posted`. A jump is legal only over the phases the mode skips (light:
+refute, triage; fast: refute, triage, teach) or the zero-candidate rule
+skips, and is recorded as `skipped`. A backward or unknown phase exits 1,
+names the allowed next phases, and writes nothing. `abandon` and `fail`
+end a run from any open phase. A second review of the same PR in the same
+`raw/PR-N/` sets the ended run's log aside; a run still open there is
+refused until it finishes or is abandoned.
+
+A run whose session dies would otherwise read "running" forever. Install
+the hook once, in `~/.claude/settings.json`:
+
+```json
+{ "hooks": { "SessionEnd": [ { "hooks": [ { "type": "command", "command": "node ~/.claude/skills/review/scripts/abandon-session.mjs" } ] } ] } }
+```
+
+Use SessionEnd only, never Stop: Stop fires at the end of every turn and
+would abandon live runs. Without the hook the HUD still shows a dead
+owner's run as `abandoned` and a quiet one as `stale`, but nothing records
+it.
 
 ## Phase 7 — Post (`--post` only)
 
