@@ -37,3 +37,210 @@ export function inScope(item, scope) {
   if (scope === "all") return true;
   return item.running === true || item.posted == null;
 }
+
+/** The state fields the panel reads, copied by name. */
+export const FIELDS = Object.freeze([
+  "version",
+  "repo",
+  "pr",
+  "title",
+  "author",
+  "mode",
+  "head",
+  "base",
+  "phase",
+  "phases",
+  "started",
+  "ended",
+  "verdict",
+  "gates",
+  "probes",
+  "findings",
+  "note",
+  "posted",
+  "early",
+]);
+
+/**
+ * `review_state` — who has reviewed and who is waited on — is the one block
+ * the panel reads below the top level, so it is copied field by field too.
+ * A value that is not the shape named here is dropped, not passed along:
+ * this is the only place the page's trust in the file is decided.
+ */
+const REVIEW_STATES = new Set(["APPROVED", "COMMENTED", "CHANGES_REQUESTED"]);
+const THREAD_COUNTS = ["total", "unresolved", "awaiting_me", "awaiting_author"];
+
+export const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+export const strOrNull = (v) => (typeof v === "string" ? v : null);
+export const intOrNull = (v) => (Number.isInteger(v) ? v : null);
+
+/** One reviewer entry: a string `login` and `state`, an ISO `at`; bots add `findings`. */
+function reviewer(v, withFindings) {
+  if (!isObject(v) || typeof v.login !== "string" || v.login === "") return null;
+  const out = { login: v.login, state: strOrNull(v.state), at: strOrNull(v.at) };
+  if (withFindings) out.findings = intOrNull(v.findings);
+  return out;
+}
+
+function reviewers(v, withFindings) {
+  if (!Array.isArray(v)) return undefined;
+  return v.map((e) => reviewer(e, withFindings)).filter(Boolean);
+}
+
+/** The block the panel may see, or undefined when the file carries none worth showing. */
+export function sanitizeReviewState(v) {
+  if (!isObject(v)) return undefined;
+  const out = {};
+  if (v.authorship === "own" || v.authorship === "peer") out.authorship = v.authorship;
+  if (isObject(v.mine)) {
+    out.mine = {
+      state: REVIEW_STATES.has(v.mine.state) ? v.mine.state : null,
+      at: strOrNull(v.mine.at),
+      head_matches: typeof v.mine.head_matches === "boolean" ? v.mine.head_matches : null,
+    };
+  }
+  const humans = reviewers(v.humans, false);
+  if (humans) out.humans = humans;
+  const bots = reviewers(v.bots, true);
+  if (bots) out.bots = bots;
+  if (isObject(v.threads)) {
+    out.threads = {};
+    for (const k of THREAD_COUNTS) {
+      const n = intOrNull(v.threads[k]);
+      if (n !== null) out.threads[k] = n;
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+/**
+ * `https://github.com/<repo>/pull/<pr>`, or null when either half is not what
+ * it claims. The `pr_url` key: a derived field, never raw input.
+ */
+export function prUrl(repo, pr) {
+  if (typeof repo !== "string" || !REPO_RE.test(repo)) return null;
+  const n = typeof pr === "string" && /^\d+$/.test(pr) ? Number(pr) : pr;
+  if (!Number.isInteger(n) || n <= 0) return null;
+  return `https://github.com/${repo}/pull/${n}`;
+}
+
+/**
+ * The tree route for a note path: `/n/<path>` with the trailing `.md`
+ * dropped, which is the rule the UI's `entryUrl` applies. A path the deep-link
+ * resolver would refuse is not turned into a link at all.
+ */
+function noteUrl(note) {
+  if (typeof note !== "string" || note === "" || note.startsWith("/")) return null;
+  const segments = note.replace(/\.md$/i, "").split("/");
+  if (segments.some((s) => s === "" || s === "." || s === ".." || /[\\\0]/.test(s))) return null;
+  return `/n/${segments.map(encodeURIComponent).join("/")}`;
+}
+
+/** Whole seconds from `started` to `ended`, or to now while `ended` is null. */
+function elapsedSeconds(started, ended, now) {
+  const a = Date.parse(started);
+  if (Number.isNaN(a)) return null;
+  const b = ended == null ? now : Date.parse(ended);
+  if (Number.isNaN(b)) return null;
+  return Math.max(0, Math.round((b - a) / 1000));
+}
+
+/**
+ * `phases` as the panel may see it: `{<name>: {started, ended}}` with each
+ * time a string or null. An entry that is not an object, or whose `started`
+ * is not a string, is dropped; a block that is not an object is no block.
+ */
+export function sanitizePhases(v) {
+  if (!isObject(v)) return undefined;
+  const out = {};
+  for (const [name, p] of Object.entries(v)) {
+    if (!isObject(p) || typeof p.started !== "string") continue;
+    out[name] = { started: p.started, ended: strOrNull(p.ended) };
+  }
+  return out;
+}
+
+/**
+ * The early signal as the panel may see it: `{count, items}` where each item
+ * is `{row, title, basis}` with an integer row and string title and basis.
+ * An entry of another shape is dropped and `count` is what survived, so the
+ * number shown is the number of lines the page could show. A value that is
+ * not an array is no block.
+ */
+function sanitizeEarly(v) {
+  if (!Array.isArray(v)) return undefined;
+  const items = [];
+  for (const e of v) {
+    if (!isObject(e) || !Number.isInteger(e.row)) continue;
+    if (typeof e.title !== "string" || typeof e.basis !== "string") continue;
+    items.push({ row: e.row, title: e.title, basis: e.basis });
+  }
+  return { count: items.length, items };
+}
+
+/**
+ * Whole seconds per phase, in the file's order: `ended` minus `started`, or
+ * now minus `started` for the phase still open. A phase whose times do not
+ * parse is left out rather than shown as zero, so a missing number reads as
+ * "not timed", never as "instant".
+ */
+export function phaseSeconds(phases, now) {
+  const out = {};
+  for (const [name, p] of Object.entries(phases ?? {})) {
+    const s = elapsedSeconds(p.started, p.ended, now);
+    if (s !== null) out[name] = s;
+  }
+  return out;
+}
+
+/**
+ * One item for one row. The item carries the named state fields and the
+ * derived ones — `running`, `elapsed_s`, `phase_seconds`, `pr_url`,
+ * `note_url` — and nothing else from the file. An unreadable row is the item,
+ * as it came: a run whose state cannot be read is shown in place, not
+ * rejected, so this shape never returns null.
+ *
+ * @param {{path: string, project: string|null, data?: object, unreadable?: true, error?: string}} row
+ * @param {{now: number}} ctx
+ */
+export function normalize(row, ctx) {
+  if (row.unreadable) return row;
+  const now = ctx.now;
+  const state = row.data;
+  const item = { path: row.path, project: row.project };
+  for (const k of FIELDS) if (state[k] !== undefined) item[k] = state[k];
+  // `phases` is nested, so like `review_state` it is rebuilt rather than copied.
+  const phases = sanitizePhases(state.phases);
+  if (phases) item.phases = phases;
+  else delete item.phases;
+  const early = sanitizeEarly(state.early);
+  if (early) item.early = early;
+  else delete item.early;
+  const rs = sanitizeReviewState(state.review_state);
+  if (rs) item.review_state = rs;
+  // The contract spells a run that has not finished as `ended: null`.
+  item.running = item.ended == null;
+  item.elapsed_s = elapsedSeconds(item.started, item.ended, now);
+  item.phase_seconds = phaseSeconds(phases, now);
+  item.pr_url = prUrl(item.repo, item.pr);
+  item.note_url = noteUrl(item.note);
+  return item;
+}
+
+const startedMs = (item) => {
+  const t = Date.parse(item.started);
+  return Number.isNaN(t) ? -Infinity : t;
+};
+
+/** Running first, then newest `started` first; the path breaks ties so the order is stable. */
+export function compare(a, b) {
+  const ra = a.running && !a.unreadable ? 0 : 1;
+  const rb = b.running && !b.unreadable ? 0 : 1;
+  if (ra !== rb) return ra - rb;
+  const sa = startedMs(a);
+  const sb = startedMs(b);
+  if (sa !== sb) return sb - sa;
+  return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+}

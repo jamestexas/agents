@@ -40,12 +40,15 @@ import { execFile } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { lectioGraft, listSessions } from "./sessions.mjs";
+import { errText } from "./errtext.mjs";
 import { DEFAULT_REVIEWS_GLOB, expandHome } from "./cards/registry.mjs";
-import { parseGlob as parseReviewsGlob } from "./cards/kinds/fs.mjs";
+import { LIMITS as FS_LIMITS, SKIP_NAMES, parseGlob as parseReviewsGlob } from "./cards/kinds/fs.mjs";
+import { intOrNull, isObject, prUrl, strOrNull } from "./cards/normalize/review-state.mjs";
+import { MAX_ROWS, collectRows } from "./cards/serve.mjs";
 
 // The reviews layer's pieces now live under cards/; the names stay exported
 // from here so the tests and the CLI that import them keep working.
-export { DEFAULT_REVIEWS_GLOB, expandHome, parseReviewsGlob };
+export { DEFAULT_REVIEWS_GLOB, errText, expandHome, parseReviewsGlob };
 
 // ---------------------------------------------------------------- config
 
@@ -113,7 +116,6 @@ export const LIMITS = {
 export const SESSIONS_WINDOW_DAYS = 30;
 
 /** Never walked: machinery and vcs. Dot-prefixed names are skipped separately. */
-const SKIP_NAMES = new Set(["_hud", ".git"]);
 
 // ------------------------------------------------------- frontmatter parse
 
@@ -890,36 +892,6 @@ export function writeSnapshot(root, name, data) {
 }
 
 /**
- * Render an error for a log line or a JSON body.
- *
- * ENOENT means two unrelated things, and which one is not the caller's to
- * assume: a spawn whose binary is not installed, or a filesystem call whose
- * path is not there. Both reach here — `serveSource` catches `produce()` (a
- * spawned digest command *or* an HTTP fetch) and `writeSnapshot` (pure fs) in
- * the same `try`, so no per-call-site flag could separate them.
- *
- * Node labels them distinguishably on the error itself: a spawn failure
- * carries `syscall: "spawn <binary>"`, a filesystem failure carries the
- * syscall that failed (`mkdir`, `open`, …). Keying on that is why this needs
- * no parameter.
- *
- * Mapping every ENOENT to "command not found" is what this replaces. It sent
- * a read-only bind mount to the container log as `command not found:
- * /hud/.generated` — a real condition reported as a missing binary, pointing
- * whoever read it at the wrong subsystem entirely.
- */
-export function errText(err) {
-  if (!err) return "unknown error";
-  if (err.code === "ENOENT") {
-    const where = err.path || err.syscall || "?";
-    return String(err.syscall || "").startsWith("spawn")
-      ? `command not found: ${where}`
-      : `no such file or directory: ${where}`;
-  }
-  return err.message || String(err);
-}
-
-/**
  * Split a config command string into argv. Handles quoted segments; there is
  * deliberately no shell, no globbing and no substitution, so a command string
  * cannot grow into a shell injection.
@@ -1627,291 +1599,36 @@ function serveLoadout(res, root) {
 //
 // One row per review run. A run writes `state.json` into the content tree
 // itself — under `raw/`, so the tree walker lists the file and never opens
-// it — and this layer is the one reader that does. Like sessions and loadout
-// it is watch-only: read live on every request, cached nowhere, reachable by
-// no verb but GET. Every "do" the panel offers is a link out (the PR, the
-// posted review) or a link into the tree (the note).
+// it — and the reviews card is the one reader that does: the `fs` kind in
+// cards/kinds/fs.mjs walks, the `review-state` normaliser in
+// cards/normalize/review-state.mjs decides what the page may see. Like
+// sessions and loadout it is watch-only: read live on every request, cached
+// nowhere, reachable by no verb but GET. Every "do" the panel offers is a
+// link out (the PR, the posted review) or a link into the tree (the note).
 
-export const REVIEWS_LIMITS = {
-  // Rows one response may carry. The sort needs every file, so the walk is
-  // bounded separately.
-  maxReviews: 200,
-  // Files the walk looks at before stopping. A tree with more runs than this
-  // is an archive, and the HUD is not the tool for one.
-  maxScanned: 2000,
-  // A state file is a few hundred bytes; one that is not is not a state file.
-  maxStateBytes: 256 * 1024,
-};
+/** The budgets, under the names the reviews layer gave them; the values live with the `fs` kind and the serve path. */
+export const REVIEWS_LIMITS = Object.freeze({
+  maxReviews: MAX_ROWS,
+  maxScanned: FS_LIMITS.maxScanned,
+  maxStateBytes: FS_LIMITS.maxBytes,
+});
 
 /**
- * Every file the glob names, as `{rel, project}` — `project` being the name
- * the first wildcard segment matched, which with the default glob is the
- * project directory. Dot-prefixed names and symlinks are skipped, as the tree
- * walk skips them; a directory that cannot be read contributes nothing.
- */
-function walkGlob(root, segments, budget) {
-  const out = [];
-  const step = (dir, i, project) => {
-    const seg = segments[i];
-    const last = i === segments.length - 1;
-    let dirents;
-    try {
-      dirents = fs.readdirSync(path.join(root, dir), { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const d of dirents) {
-      if (out.length >= budget) return;
-      if (d.name.startsWith(".") || SKIP_NAMES.has(d.name)) continue;
-      if (seg.literal !== undefined ? d.name !== seg.literal : !seg.re.test(d.name)) continue;
-      const childRel = dir ? `${dir}/${d.name}` : d.name;
-      const p = project ?? (seg.re ? d.name : null);
-      if (last) {
-        if (d.isFile()) out.push({ rel: childRel, project: p });
-      } else if (d.isDirectory()) {
-        step(childRel, i + 1, p);
-      }
-    }
-  };
-  step("", 0, null);
-  return out;
-}
-
-/**
- * The state fields the panel reads, copied by name. The file is written by a
- * tool and read by a page; naming the contract here is what keeps a key that
- * tool adds tomorrow from reaching the page untested.
- */
-const REVIEW_FIELDS = [
-  "version",
-  "repo",
-  "pr",
-  "title",
-  "author",
-  "mode",
-  "head",
-  "base",
-  "phase",
-  "phases",
-  "started",
-  "ended",
-  "verdict",
-  "gates",
-  "probes",
-  "findings",
-  "note",
-  "posted",
-  "early",
-];
-
-/**
- * `review_state` — who has reviewed and who is waited on — is the one block
- * the panel reads below the top level, so it is copied field by field too.
- * A value that is not the shape named here is dropped, not passed along:
- * this is the only place the page's trust in the file is decided.
- */
-const REVIEW_STATES = new Set(["APPROVED", "COMMENTED", "CHANGES_REQUESTED"]);
-const THREAD_COUNTS = ["total", "unresolved", "awaiting_me", "awaiting_author"];
-
-const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
-const strOrNull = (v) => (typeof v === "string" ? v : null);
-const intOrNull = (v) => (Number.isInteger(v) ? v : null);
-
-/** One reviewer entry: a string `login` and `state`, an ISO `at`; bots add `findings`. */
-function reviewer(v, withFindings) {
-  if (!isObject(v) || typeof v.login !== "string" || v.login === "") return null;
-  const out = { login: v.login, state: strOrNull(v.state), at: strOrNull(v.at) };
-  if (withFindings) out.findings = intOrNull(v.findings);
-  return out;
-}
-
-function reviewers(v, withFindings) {
-  if (!Array.isArray(v)) return undefined;
-  return v.map((e) => reviewer(e, withFindings)).filter(Boolean);
-}
-
-/** The block the panel may see, or undefined when the file carries none worth showing. */
-function sanitizeReviewState(v) {
-  if (!isObject(v)) return undefined;
-  const out = {};
-  if (v.authorship === "own" || v.authorship === "peer") out.authorship = v.authorship;
-  if (isObject(v.mine)) {
-    out.mine = {
-      state: REVIEW_STATES.has(v.mine.state) ? v.mine.state : null,
-      at: strOrNull(v.mine.at),
-      head_matches: typeof v.mine.head_matches === "boolean" ? v.mine.head_matches : null,
-    };
-  }
-  const humans = reviewers(v.humans, false);
-  if (humans) out.humans = humans;
-  const bots = reviewers(v.bots, true);
-  if (bots) out.bots = bots;
-  if (isObject(v.threads)) {
-    out.threads = {};
-    for (const k of THREAD_COUNTS) {
-      const n = intOrNull(v.threads[k]);
-      if (n !== null) out.threads[k] = n;
-    }
-  }
-  return Object.keys(out).length ? out : undefined;
-}
-
-const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
-
-/** `https://github.com/<repo>/pull/<pr>`, or null when either half is not what it claims. */
-function prUrl(repo, pr) {
-  if (typeof repo !== "string" || !REPO_RE.test(repo)) return null;
-  const n = typeof pr === "string" && /^\d+$/.test(pr) ? Number(pr) : pr;
-  if (!Number.isInteger(n) || n <= 0) return null;
-  return `https://github.com/${repo}/pull/${n}`;
-}
-
-/**
- * The tree route for a note path: `/n/<path>` with the trailing `.md`
- * dropped, which is the rule the UI's `entryUrl` applies. A path the deep-link
- * resolver would refuse is not turned into a link at all.
- */
-function noteUrl(note) {
-  if (typeof note !== "string" || note === "" || note.startsWith("/")) return null;
-  const segments = note.replace(/\.md$/i, "").split("/");
-  if (segments.some((s) => s === "" || s === "." || s === ".." || /[\\\0]/.test(s))) return null;
-  return `/n/${segments.map(encodeURIComponent).join("/")}`;
-}
-
-/** Whole seconds from `started` to `ended`, or to now while `ended` is null. */
-function elapsedSeconds(started, ended, now) {
-  const a = Date.parse(started);
-  if (Number.isNaN(a)) return null;
-  const b = ended == null ? now : Date.parse(ended);
-  if (Number.isNaN(b)) return null;
-  return Math.max(0, Math.round((b - a) / 1000));
-}
-
-/**
- * `phases` as the panel may see it: `{<name>: {started, ended}}` with each
- * time a string or null. An entry that is not an object, or whose `started`
- * is not a string, is dropped; a block that is not an object is no block.
- */
-function sanitizePhases(v) {
-  if (!isObject(v)) return undefined;
-  const out = {};
-  for (const [name, p] of Object.entries(v)) {
-    if (!isObject(p) || typeof p.started !== "string") continue;
-    out[name] = { started: p.started, ended: strOrNull(p.ended) };
-  }
-  return out;
-}
-
-/**
- * The early signal as the panel may see it: `{count, items}` where each item
- * is `{row, title, basis}` with an integer row and string title and basis.
- * An entry of another shape is dropped and `count` is what survived, so the
- * number shown is the number of lines the page could show. A value that is
- * not an array is no block.
- */
-function sanitizeEarly(v) {
-  if (!Array.isArray(v)) return undefined;
-  const items = [];
-  for (const e of v) {
-    if (!isObject(e) || !Number.isInteger(e.row)) continue;
-    if (typeof e.title !== "string" || typeof e.basis !== "string") continue;
-    items.push({ row: e.row, title: e.title, basis: e.basis });
-  }
-  return { count: items.length, items };
-}
-
-/**
- * Whole seconds per phase, in the file's order: `ended` minus `started`, or
- * now minus `started` for the phase still open. A phase whose times do not
- * parse is left out rather than shown as zero, so a missing number reads as
- * "not timed", never as "instant".
- */
-function phaseSeconds(phases, now) {
-  const out = {};
-  for (const [name, p] of Object.entries(phases ?? {})) {
-    const s = elapsedSeconds(p.started, p.ended, now);
-    if (s !== null) out[name] = s;
-  }
-  return out;
-}
-
-/**
- * One item for one file. A file that is not a JSON object is still a row —
- * `unreadable: true` with the path and the reason — because a run whose state
- * cannot be read is a fact about the tree, not an absence from it.
- */
-function readReviewState(root, rel, project, now) {
-  const abs = path.join(root, rel);
-  const base = { path: rel, project };
-  let stat;
-  try {
-    stat = fs.statSync(abs);
-  } catch (err) {
-    return { ...base, unreadable: true, error: errText(err) };
-  }
-  if (stat.size > REVIEWS_LIMITS.maxStateBytes) {
-    const error = `larger than ${REVIEWS_LIMITS.maxStateBytes} bytes`;
-    return { ...base, unreadable: true, error };
-  }
-  let state;
-  try {
-    state = JSON.parse(fs.readFileSync(abs, "utf8"));
-  } catch (err) {
-    return { ...base, unreadable: true, error: errText(err) };
-  }
-  if (!state || typeof state !== "object" || Array.isArray(state)) {
-    return { ...base, unreadable: true, error: "not a JSON object" };
-  }
-  const item = { ...base };
-  for (const k of REVIEW_FIELDS) if (state[k] !== undefined) item[k] = state[k];
-  // `phases` is nested, so like `review_state` it is rebuilt rather than copied.
-  const phases = sanitizePhases(state.phases);
-  if (phases) item.phases = phases;
-  else delete item.phases;
-  const early = sanitizeEarly(state.early);
-  if (early) item.early = early;
-  else delete item.early;
-  const rs = sanitizeReviewState(state.review_state);
-  if (rs) item.review_state = rs;
-  // The contract spells a run that has not finished as `ended: null`.
-  item.running = item.ended == null;
-  item.elapsed_s = elapsedSeconds(item.started, item.ended, now);
-  item.phase_seconds = phaseSeconds(phases, now);
-  item.pr_url = prUrl(item.repo, item.pr);
-  item.note_url = noteUrl(item.note);
-  return item;
-}
-
-const startedMs = (item) => {
-  const t = Date.parse(item.started);
-  return Number.isNaN(t) ? -Infinity : t;
-};
-
-/** Running first, then newest `started` first; the path breaks ties so the order is stable. */
-function compareReviews(a, b) {
-  const ra = a.running && !a.unreadable ? 0 : 1;
-  const rb = b.running && !b.unreadable ? 0 : 1;
-  if (ra !== rb) return ra - rb;
-  const sa = startedMs(a);
-  const sb = startedMs(b);
-  if (sa !== sb) return sb - sa;
-  return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
-}
-
-/**
- * Every review run under `root`, sorted for the panel.
+ * Every review run under `root`, sorted for the panel: the reviews card's
+ * rows, read through the same `fs` kind and `review-state` normaliser the
+ * card route uses, so there is one reading of a state file.
  *
  * @param {string} root
  * @param {{glob?: string, now?: number}} [opts]
  * @returns {{items: object[], scanned: number, truncated: boolean}}
  */
 export function listReviews(root, opts = {}) {
-  const now = opts.now ?? Date.now();
-  const parsed = parseReviewsGlob(opts.glob ?? DEFAULT_REVIEWS_GLOB);
+  const glob = opts.glob ?? DEFAULT_REVIEWS_GLOB;
+  const parsed = parseReviewsGlob(glob);
   if (parsed.error) throw new Error(`reviews glob: ${parsed.error}`);
-  const found = walkGlob(root, parsed.segments, REVIEWS_LIMITS.maxScanned);
-  const items = found.map((f) => readReviewState(root, f.rel, f.project, now)).sort(compareReviews);
-  return { items, scanned: found.length, truncated: found.length >= REVIEWS_LIMITS.maxScanned };
+  const card = { name: "reviews", kind: "fs", root, glob, shape: "review-state" };
+  const { items, scanned, truncated } = collectRows(card, { now: opts.now ?? Date.now() });
+  return { items, scanned, truncated };
 }
 
 /**

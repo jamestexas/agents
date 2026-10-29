@@ -54,6 +54,7 @@ pipeline:
       # server.mjs or every static asset 404s with no other symptom.
       install -Dm644 server.mjs   "${{targets.destdir}}/usr/share/hud/server.mjs"
       install -Dm644 sessions.mjs "${{targets.destdir}}/usr/share/hud/sessions.mjs"
+      install -Dm644 errtext.mjs  "${{targets.destdir}}/usr/share/hud/errtext.mjs"
       # server.mjs imports the card registry, kinds and normalisers from
       # cards/; the module graph has to resolve under the installed layout or
       # the test below fails at import. Two levels deep by construction.
