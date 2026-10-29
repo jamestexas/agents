@@ -11,7 +11,8 @@
 //          viewer is the operator's login (`gh api user` when not given);
 //          with pr/context.json present, init and finish also write
 //          review_state: who has reviewed, and who is waiting on whom.
-//   phase  <name>        close the open phase, open <name>
+//   phase  <name>        close the open phase, open <name>; only forward, and
+//                        a jump only over phases the mode skips
 //   finish note=<rel> [gates=-]
 //          ended=now, phase "rendered", verdict from work/summary.md (APPROVE,
 //          REQUEST_CHANGES, COMMENT, or PRELIMINARY for a --fast run), finding
@@ -22,6 +23,12 @@
 //   early                copy work/early.json (early-signal.mjs's list) to
 //                        `early`; an absent or unreadable file is []
 //   posted url=<u> state=<s>   phase "posted"
+//
+// Every op appends one event to <run>/events.jsonl and rebuilds state.json
+// as runstate.mjs's fold of the whole log, so state.json is never edited in
+// place. Calling an op again with the same result is a replay and adds
+// nothing; an illegal transition exits 1 and writes nothing. An init over a
+// run that ended sets the old log aside and starts a new one.
 //
 // The schema is the HUD's contract (hud/server.mjs REVIEW_FIELDS):
 //   {version, repo, pr, title, author, mode, head, base, phase,
@@ -39,6 +46,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { eventId, eventKey, fold, checkTransition } from './runstate.mjs';
 
 const [run, op, ...rest] = process.argv.slice(2);
 const usage = () => { console.error('usage: state.mjs <run> init|phase <name>|early|finish|posted [k=v ...]'); process.exit(2); };
@@ -64,25 +72,70 @@ const kv = (allowed) => {
   return out;
 };
 
-const load = () => {
-  const s = jsonIf(statePath);
-  if (!s) { console.error(`state.mjs: ${statePath} missing or not JSON; run init first`); process.exit(1); }
-  return s;
-};
-const save = (s) => {
+const eventsPath = path.join(run, 'events.jsonl');
+const readEvents = () => (fs.existsSync(eventsPath)
+  ? fs.readFileSync(eventsPath, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+const writeState = (events) => {
   const tmp = `${statePath}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(s, null, 2) + '\n');
+  fs.writeFileSync(tmp, JSON.stringify(fold(events), null, 2) + '\n');
   fs.renameSync(tmp, statePath);
 };
-// Close whichever phase is still open before another starts; a phase that
-// was never opened (a skipped --light stage) has nothing to close.
-const closeOpen = (s, at) => {
-  for (const p of Object.values(s.phases)) if (p.ended === null) p.ended = at;
+// A call is a replay when the latest event under its key already has its id:
+// state.json is rewritten from the log (the same bytes) and nothing is added.
+const replayed = (opName, data) => {
+  const key = eventKey(opName, data);
+  const last = readEvents().filter((e) => eventKey(e.op, e.data) === key).at(-1);
+  if (last?.id !== eventId(opName, data)) return false;
+  writeState(readEvents());
+  return true;
+};
+// The one way state changes: append the event unless it is a replay, then
+// rebuild state.json from the whole log.
+const append = (opName, data) => {
+  if (replayed(opName, data)) return;
+  const e = { id: eventId(opName, data), at: now(), op: opName, data };
+  fs.appendFileSync(eventsPath, JSON.stringify(e) + '\n');
+  writeState(readEvents());
+};
+// The current folded state; refuses a run that predates the log rather than
+// overwriting a state.json nothing can rebuild.
+const current = () => {
+  const events = readEvents();
+  if (events.length === 0) {
+    const legacy = fs.existsSync(statePath) ? ' (it has a state.json but no events.jsonl; it predates the event log and is left as is)' : '';
+    console.error(`state.mjs: ${run} has no events.jsonl; run init first${legacy}`);
+    process.exit(1);
+  }
+  return fold(events);
+};
+const transition = (s, target) => {
+  const t = checkTransition(s, target);
+  if (!t.ok) { console.error(`state.mjs ${op}: ${t.reason}`); process.exit(1); }
+  return t;
+};
+// A run directory is per PR (raw/PR-N), so a second review of the same PR
+// starts in the first one's directory. A run that ended is set aside under a
+// name the HUD's state.json glob does not match, and the new run gets a fresh
+// log; a run still open is refused, since two writers on one log is the
+// corruption the log exists to prevent.
+const startOver = () => {
+  const stamp = now().replace(/[:.]/g, '-');
+  const events = readEvents();
+  if (events.length === 0) {
+    if (fs.existsSync(statePath)) fs.renameSync(statePath, path.join(run, `state.superseded-${stamp}.json`));
+    return;
+  }
+  const prior = fold(events);
+  if (prior.ended == null) {
+    console.error(`state.mjs ${op}: ${run} holds a run still open at ${prior.phase}; finish it, or \`state.mjs ${run} abandon\` it if its session is gone`);
+    process.exit(1);
+  }
+  fs.renameSync(eventsPath, path.join(run, `events.superseded-${stamp}.jsonl`));
 };
 
 const ops = {
   init() {
-    const { mode = 'default', viewer: viewerArg } = kv(['mode', 'viewer']);
+    const { mode, viewer: viewerArg } = kv(['mode', 'viewer']);
     const target = jsonIf(ev('target.json'));
     if (!target) { console.error(`state.mjs init: ${ev('target.json')} missing or not JSON`); process.exit(1); }
     const manifest = jsonIf(ev('manifest.json'));
@@ -91,87 +144,73 @@ const ops = {
     const shas = jsonIf(ev('probes/core/pr-shas.out'))?.data?.repository?.pullRequest ?? null;
     const context = jsonIf(ev('pr/context.json'));
     const ctx = context?.pr ?? null;
+    let prior = readEvents().length ? fold(readEvents()) : null;
     const viewer = viewerArg ?? ghViewer();
     const prNum = /^\d+$/.test(String(target.pr ?? '')) ? Number(target.pr) : null;
     // Evidence ran before init; its span is the manifest's, not "now".
     const starts = probes.map((p) => p.started).filter((t) => t && !Number.isNaN(Date.parse(t))).sort();
-    const at = now();
-    const started = starts[0] ?? at;
-    save({
-      version: 1,
-      repo: target.repo ?? null,
-      pr: prNum,
-      title: shas?.title ?? ctx?.title ?? null,
-      author: shas?.author?.login ?? ctx?.author ?? null,
-      mode,
-      head: target.head ?? null,
-      base: target.base ?? null,
-      phase: 'evidence',
-      phases: { evidence: { started, ended: at } },
-      started,
-      ended: null,
-      verdict: null,
-      gates: { ledger: null, triage: null, blocking: null },
+    const data = {
+      repo: target.repo ?? null, pr: prNum,
+      title: shas?.title ?? ctx?.title ?? null, author: shas?.author?.login ?? ctx?.author ?? null,
+      mode: mode ?? prior?.mode ?? 'default', head: target.head ?? null, base: target.base ?? null,
       probes: { total: probes.length, ran: count('RAN'), failed: count('FAILED'), unavailable: count('UNAVAILABLE') },
-      findings: { blocking: 0, non_blocking: 0, question: 0, observation: 0 },
-      note: null,
-      posted: null,
-      viewer,
+      viewer, evidence_started: starts[0] ?? null,
       ...(context ? { review_state: reviewState(context, viewer, target.head ?? null) } : {}),
-    });
+    };
+    if (replayed('init', data)) return;
+    if (prior === null || prior.ended != null) { startOver(); prior = null; data.mode = mode ?? 'default'; }
+    if (prior && prior.phase !== 'pending') transition(prior, 'evidence');
+    append('init', data);
   },
 
   phase() {
     const name = rest.shift();
     if (!name || name.includes('=')) usage();
     kv([]);
-    const s = load();
-    const at = now();
-    closeOpen(s, at);
-    s.phases[name] = { started: at, ended: null };
-    s.phase = name;
-    save(s);
+    const t = transition(current(), name);
+    if (t.noop) { writeState(readEvents()); return; }
+    append('phase', { name, skipped: t.skipped });
   },
 
   finish() {
     const args = kv(['note', 'gates']);
-    const s = load();
-    const at = now();
-    closeOpen(s, at);
-    s.ended = at;
-    s.phase = 'rendered';
-    if (args.note !== undefined) s.note = relNote(args.note);
-    const summary = readIf(work('summary.md')) ?? '';
+    const s = current();
     // PRELIMINARY is what a --fast run writes: it stopped before refute and
     // triage, and check.mjs refuses to call it postable.
+    const summary = readIf(work('summary.md')) ?? '';
     const v = summary.match(/\*\*Verdict\*\*[^A-Z]*(APPROVE|REQUEST_CHANGES|COMMENT|PRELIMINARY)\b/);
-    s.verdict = v ? v[1] : null;
-    s.findings = countFindings(jsonIf(work('findings.json')));
-    s.gates = parseGates(args.gates === '-' ? fs.readFileSync(0, 'utf8') : runCheck());
     const context = jsonIf(ev('pr/context.json'));
-    if (context) s.review_state = reviewState(context, s.viewer ?? null, s.head ?? null);
-    save(s);
+    const data = {
+      ...(args.note !== undefined ? { note: relNote(args.note) } : {}),
+      verdict: v ? v[1] : null,
+      findings: countFindings(jsonIf(work('findings.json'))),
+      gates: parseGates(args.gates === '-' ? fs.readFileSync(0, 'utf8') : runCheck()),
+      ...(context ? { review_state: reviewState(context, s.viewer ?? null, s.head ?? null) } : {}),
+    };
+    if (replayed('finish', data)) return;
+    // A finish re-run after a fix carries new data and appends; the fold
+    // keeps the last one. From rendered the transition is a no-op.
+    const t = transition(s, 'rendered');
+    if (t.skipped.length) append('skip', { skipped: t.skipped });
+    append('finish', data);
   },
 
   early() {
     kv([]);
-    const s = load();
+    current();
     const list = jsonIf(work('early.json'));
-    s.early = Array.isArray(list)
-      ? list.filter((e) => e && typeof e === 'object').map(({ row, title, basis }) => ({ row, title, basis }))
-      : [];
-    save(s);
+    append('early', { early: Array.isArray(list)
+      ? list.filter((e) => e && typeof e === 'object').map(({ row, title, basis }) => ({ row, title, basis })) : [] });
   },
 
   posted() {
     const args = kv(['url', 'state']);
     if (!args.url || !args.state) { console.error('state.mjs posted: need url= and state='); process.exit(2); }
-    const s = load();
-    const at = now();
-    closeOpen(s, at);
-    s.phase = 'posted';
-    s.posted = { url: args.url, state: args.state, at };
-    save(s);
+    const s = current();
+    const data = { url: args.url, state: args.state };
+    if (replayed('posted', data)) return;
+    transition(s, 'posted');
+    append('posted', data);
   },
 };
 

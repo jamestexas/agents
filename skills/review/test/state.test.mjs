@@ -21,6 +21,12 @@ const env = { ...process.env, HUD_ROOT: '/hud', PATH: '/nonexistent' };
 const run = (dir, args, input) => spawnSync(process.execPath, [state, dir, ...args], { encoding: 'utf8', input, env });
 const read = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8'));
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+// Phases only move forward and a default run skips none, so a test that
+// finishes walks every phase between evidence and the one it needs.
+const DEFAULT_PHASES = ['questions', 'settle', 'refute', 'triage', 'teach'];
+const walk = (dir, phases = DEFAULT_PHASES) => {
+  for (const p of phases) assert.equal(run(dir, ['phase', p]).status, 0, `phase ${p}`);
+};
 
 test('init writes the HUD schema from target.json and manifest.json', () => {
   const dir = copyGood();
@@ -81,7 +87,7 @@ test('phase closes the open phase and opens the named one', () => {
 test('finish re-runs check.mjs, reads the verdict and counts findings', () => {
   const dir = copyGood();
   run(dir, ['init']);
-  run(dir, ['phase', 'teach']);
+  walk(dir);
   const r = run(dir, ['finish', 'note=/hud/projects/example/notes/PR-1-swap.md']);
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const s = read(dir);
@@ -98,6 +104,7 @@ test('finish accepts verdict=PRELIMINARY from a --fast run; the fast line is not
   const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rv-state-')), 'run');
   fs.cpSync(path.join(here, 'fixtures', 'fast-run'), dir, { recursive: true });
   assert.equal(run(dir, ['init', 'mode=fast']).status, 0);
+  walk(dir, ['questions', 'settle']);
   const r = run(dir, ['finish', 'note=projects/p/notes/PR-1.md']);
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const s = read(dir);
@@ -110,6 +117,7 @@ test('finish accepts verdict=PRELIMINARY from a --fast run; the fast line is not
 test('finish gates=- parses check.mjs output from stdin; a failing gate is "fail"', () => {
   const dir = copyGood();
   run(dir, ['init']);
+  walk(dir);
   const out = ['ledger: 3 asked, 3 decided+unresolved — ok', 'triage: header says 4 in / 4 out, table has 3 rows',
     'blocking: "x" rests on ASSUMED claim c3', 'blocking: 1 finding(s), evidence-backed — ok', ''].join('\n');
   const r = run(dir, ['finish', 'note=projects/p/notes/PR-1.md', 'gates=-'], out);
@@ -122,6 +130,7 @@ test('finish gates=- parses check.mjs output from stdin; a failing gate is "fail
 test('posted records url, state and time, and moves the phase to posted', () => {
   const dir = copyGood();
   run(dir, ['init']);
+  walk(dir);
   run(dir, ['finish', 'note=projects/p/notes/PR-1.md']);
   const r = run(dir, ['posted', 'url=https://github.com/owner/repo/pull/1#pullrequestreview-1', 'state=CHANGES_REQUESTED']);
   assert.equal(r.status, 0, r.stdout + r.stderr);
@@ -162,7 +171,7 @@ test('phase before init is an error naming the missing file', () => {
   const dir = copyGood();
   const r = run(dir, ['phase', 'questions']);
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /state\.json missing or not JSON; run init first/);
+  assert.match(r.stderr, /no events\.jsonl; run init first/);
 });
 
 const withContext = () => {
@@ -221,10 +230,95 @@ test('own PR: authorship own; finish refreshes review_state and keeps the viewer
   const dir = withContext();
   run(dir, ['init', 'viewer=author-login']);
   assert.equal(read(dir).review_state.authorship, 'own');
+  walk(dir);
   const r = run(dir, ['finish', 'note=projects/p/notes/PR-1.md']);
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const s = read(dir);
   assert.equal(s.viewer, 'author-login');
   assert.equal(s.review_state.authorship, 'own');
   assert.equal(s.phase, 'rendered');
+});
+
+const events = (dir) => fs.readFileSync(path.join(dir, 'events.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+
+test('every op appends one event; state.json is the fold of them', () => {
+  const dir = copyGood();
+  assert.equal(run(dir, ['init', 'viewer=v']).status, 0);
+  assert.equal(run(dir, ['phase', 'questions']).status, 0);
+  const evs = events(dir);
+  assert.deepEqual(evs.map((e) => e.op), ['init', 'phase']);
+  for (const e of evs) { assert.match(e.id, /^[a-z-]+\/[0-9a-f]{12}$/); assert.match(e.at, ISO); }
+  assert.equal(read(dir).phase, 'questions');
+});
+
+test('replaying an op is a no-op: no new event, identical state.json', () => {
+  const dir = copyGood();
+  run(dir, ['init', 'viewer=v']);
+  run(dir, ['phase', 'questions']);
+  const before = fs.readFileSync(path.join(dir, 'state.json'), 'utf8');
+  assert.equal(run(dir, ['phase', 'questions']).status, 0);
+  assert.equal(run(dir, ['init', 'viewer=v']).status, 0, 'the same init again is a replay, not a step back to evidence');
+  assert.equal(events(dir).length, 2);
+  assert.equal(fs.readFileSync(path.join(dir, 'state.json'), 'utf8'), before);
+});
+
+test('a backward or unknown phase is refused with the allowed next phases', () => {
+  const dir = copyGood();
+  run(dir, ['init', 'viewer=v']);
+  run(dir, ['phase', 'questions']);
+  run(dir, ['phase', 'settle']);
+  for (const bad of ['questions', 'setle']) {
+    const r = run(dir, ['phase', bad]);
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /allowed next: refute/);
+  }
+  assert.equal(events(dir).length, 3, 'a refused transition appends nothing');
+});
+
+test('a jump over a phase this mode runs is refused', () => {
+  const dir = copyGood();
+  run(dir, ['init', 'viewer=v']);
+  const r = run(dir, ['phase', 'settle']);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /questions has not run/);
+});
+
+test('a run from before events.jsonl is still readable and is never rewritten', () => {
+  const dir = copyGood();
+  const legacy = { version: 1, phase: 'rendered', phases: {}, ended: '2026-01-01T00:00:00Z' };
+  fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify(legacy));
+  const r = run(dir, ['phase', 'posted']);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /no events\.jsonl/);
+  assert.deepEqual(read(dir), legacy);
+});
+
+test('a second review in the same run dir: an ended run is set aside, an open one is refused', () => {
+  const dir = copyGood();
+  run(dir, ['init', 'viewer=v']);
+  assert.equal(run(dir, ['init', 'viewer=w']).status, 0, 'still at evidence: a re-init corrects it');
+  assert.equal(read(dir).viewer, 'w');
+  walk(dir, ['questions']);
+  const open = run(dir, ['init', 'viewer=v']);
+  assert.notEqual(open.status, 0, 'past evidence, a different init is a step back');
+  assert.match(open.stderr, /evidence is behind questions/);
+  walk(dir, DEFAULT_PHASES.slice(1));
+  run(dir, ['finish', 'note=projects/p/notes/PR-1.md', 'gates=-'], 'ledger: x — ok\n');
+  assert.equal(run(dir, ['init', 'viewer=w', 'mode=light']).status, 0);
+  const s = read(dir);
+  assert.equal(s.phase, 'evidence');
+  assert.equal(s.mode, 'light');
+  assert.equal(s.ended, null);
+  assert.deepEqual(events(dir).map((e) => e.op), ['init']);
+  assert.equal(fs.readdirSync(dir).filter((f) => /^events\.superseded-.*\.jsonl$/.test(f)).length, 1);
+});
+
+test('init over a state.json from before the log keeps the old file beside the new run', () => {
+  const dir = copyGood();
+  fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ version: 1, phase: 'rendered' }));
+  assert.equal(run(dir, ['init', 'viewer=v']).status, 0);
+  assert.equal(read(dir).phase, 'evidence');
+  const kept = fs.readdirSync(dir).filter((f) => /^state\.superseded-.*\.json$/.test(f));
+  assert.equal(kept.length, 1);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, kept[0]), 'utf8')).phase, 'rendered');
 });
