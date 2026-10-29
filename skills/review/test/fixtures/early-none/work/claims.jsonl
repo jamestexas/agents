@@ -1,0 +1,2 @@
+{"id":"git-1","class":"READ","text":"helper body identical to other.go:40","source":"worktree other.go:40","row":1}
+{"id":"probes-1","class":"RAN","text":"go build exit 0","source":"probes/go-graph/build.out","row":2}

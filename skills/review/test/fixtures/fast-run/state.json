@@ -1,0 +1,1 @@
+{"version":1,"repo":"owner/repo","pr":1,"mode":"fast","phase":"settle","phases":{},"started":"2026-10-27T10:00:00Z","ended":null,"verdict":null,"gates":{"ledger":null,"triage":null,"blocking":null},"probes":{"total":2,"ran":1,"failed":0,"unavailable":1},"findings":{"blocking":0,"non_blocking":0,"question":0,"observation":0},"note":null,"posted":null}

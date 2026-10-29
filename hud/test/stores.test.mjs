@@ -280,20 +280,18 @@ test("an absent read-store path is reported, not silently skipped", (t) => {
 test("an array or array-of-tables in the config warns rather than being accepted", (t) => {
   const root = tree(t, "warr", { "inbox/a.md": note("a") });
 
-  // Both forms are outside the parser's subset. The requirement is that they
-  // are *reported*: silently ignoring a store the user believes they declared
-  // is the worst of the three outcomes.
+  // Neither form declares a store. The requirement is that they are
+  // *reported*: silently ignoring a store the user believes they declared is
+  // the worst of the three outcomes. The array parses (cards need one), so it
+  // reaches the store reader, which is where it is refused; the
+  // array-of-tables header is outside the parser's subset and is refused there.
   fs.writeFileSync(
     path.join(root, "hud.toml"),
     '[read]\npaths = ["/one", "/two"]\n\n[[read.work]]\npath = "/three"\n',
   );
 
   const detail = loadConfigDetail(root);
-  assert.ok(detail.warns.length >= 2, `expected warnings, got ${JSON.stringify(detail.warns)}`);
-  assert.ok(
-    detail.warns.some((w) => w.includes("paths")),
-    "the array value produced no warning",
-  );
+  assert.ok(detail.warns.length >= 1, `expected warnings, got ${JSON.stringify(detail.warns)}`);
   // `[[read.work]]` is line 4. The parser does not echo the offending text, so
   // the line number is what identifies it.
   assert.ok(
@@ -301,8 +299,14 @@ test("an array or array-of-tables in the config warns rather than being accepted
     `the array-of-tables header on line 4 produced no warning; got ${JSON.stringify(detail.warns)}`,
   );
 
-  // And nothing was silently mounted off the back of it.
-  assert.deepEqual(readStores(root).stores, []);
+  // Nothing was silently mounted off the back of either, and the array is
+  // named in the store reader's report.
+  const { stores, warns } = readStores(root);
+  assert.deepEqual(stores, []);
+  assert.ok(
+    warns.some((w) => w.includes("'paths'") && w.includes("no path")),
+    `the array value was not reported as a store without a path; got ${JSON.stringify(warns)}`,
+  );
 });
 
 test("a read store pointed at a file rather than a directory is ignored with a warning", (t) => {

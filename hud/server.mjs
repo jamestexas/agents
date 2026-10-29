@@ -9,10 +9,26 @@
 // Three API groups:
 //   static   — /api/tree, /api/md, /api/config
 //                                          (walk HUD_ROOT, read files)
-//   dynamic  — /api/dyn/{board,digest,peers}, POST /api/refresh/peers
+//   dynamic  — /api/dyn/{digest,peers}, POST /api/refresh/peers
 //   sessions — /api/sessions               (read `~/.claude`, graft via lectio)
 //   loadout  — /api/loadout                (what skills/agents are installed,
 //                                           where from, and where that drifts)
+//   cards    — /api/cards                  (every card the config declares,
+//                                           and the panel order)
+//              /api/card/<name>[?scope=…]  (any card the registry under
+//                                           cards/ holds: today `reviews`,
+//                                           each review run's state.json read
+//                                           out of the content tree, and
+//                                           `board`, the work-board over HTTP
+//                                           with each row's latest run joined
+//                                           on as `reviews`)
+//              /api/events                 (Server-Sent Events: the name of
+//                                           each fs card a tree change
+//                                           belongs to, for the page to
+//                                           refetch; GET only)
+//              /api/reviews[?scope=open]   (the reviews card under its old
+//              /api/dyn/board               envelope; the board card under
+//                                           its — aliases for one release)
 //
 // Plus the shell routes: /, /ui/*, and the deep links /n/<path> and
 // /s/<group>/<id>, which all serve ui/index.html so a bookmarked view loads
@@ -36,6 +52,22 @@ import { execFile } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { lectioGraft, listSessions } from "./sessions.mjs";
+import { errText } from "./errtext.mjs";
+import { DEFAULT_REVIEWS_GLOB, expandHome, getCard, loadCards } from "./cards/registry.mjs";
+import { SKIP_NAMES, covers as fsCovers, parseGlob as parseReviewsGlob } from "./cards/kinds/fs.mjs";
+import {
+  LIMITS as HTTP_LIMITS,
+  legacySnapshotFile,
+  readSnapshotFile,
+  writeSnapshotFile,
+} from "./cards/kinds/http.mjs";
+import { forJoin } from "./cards/normalize/review-state.mjs";
+import { rowKey as boardRowKey } from "./cards/normalize/work-board.mjs";
+import { collectRows, joinPayload, serveCard } from "./cards/serve.mjs";
+
+// The reviews layer's pieces now live under cards/; the names stay exported
+// from here so the tests and the CLI that import them keep working.
+export { DEFAULT_REVIEWS_GLOB, errText, expandHome, parseReviewsGlob };
 
 // ---------------------------------------------------------------- config
 
@@ -85,9 +117,9 @@ export const WRITABLE_STORE = "local";
 
 /** Dynamic-source budgets. Every outward call is bounded in time and size. */
 export const LIMITS = {
-  httpTimeoutMs: 4000,
+  httpTimeoutMs: HTTP_LIMITS.timeoutMs,
   cmdTimeoutMs: 8000,
-  maxUpstreamBytes: 2 * 1024 * 1024,
+  maxUpstreamBytes: HTTP_LIMITS.maxBytes,
   maxCmdBytes: 4 * 1024 * 1024,
   maxPeers: 32,
   maxPrsPerPeer: 20,
@@ -103,7 +135,6 @@ export const LIMITS = {
 export const SESSIONS_WINDOW_DAYS = 30;
 
 /** Never walked: machinery and vcs. Dot-prefixed names are skipped separately. */
-const SKIP_NAMES = new Set(["_hud", ".git"]);
 
 // ------------------------------------------------------- frontmatter parse
 
@@ -243,12 +274,13 @@ const STRING_ESCAPES = { n: "\n", t: "\t", r: "\r", '"': '"', "\\": "\\" };
  * real parser would be a dependency. Same bargain, same forgiving posture.
  *
  * Supported: `[table]` and `[dotted.table]` headers, `key = "string"`,
- * `key = 123`, `key = true`/`false`, whole-line `#` comments, a trailing
- * `# comment` after a value or a header, blank lines, and whitespace anywhere
- * it is insignificant.
+ * `key = 123`, `key = true`/`false`, `key = ["a", "b"]` (one line, those
+ * three scalars, no nesting — a card's `columns`), whole-line `#` comments, a
+ * trailing `# comment` after a value or a header, blank lines, and whitespace
+ * anywhere it is insignificant.
  *
- * Outside the subset — a dotted bare key, an array, an inline table, a float,
- * a date, an unterminated string — the line is skipped and described in
+ * Outside the subset — a dotted bare key, a nested or multi-line array, an
+ * inline table, a float, a date, an unterminated string — the line is skipped and described in
  * `warns`. Never throws. This is the file the user hand-edits, so one bad line
  * must leave every good line around it readable; the alternative is a typo in
  * `ticket_url_template` silently emptying the panel switchboard.
@@ -326,14 +358,65 @@ function tomlValue(raw) {
     if (str === null) return MALFORMED;
     return trailingIsComment(str.rest) ? str.value : MALFORMED;
   }
+  if (q === "[") {
+    const arr = readTomlArray(v);
+    if (arr === null) return MALFORMED;
+    return trailingIsComment(arr.rest) ? arr.value : MALFORMED;
+  }
   // Unquoted, so the value is a bare scalar and the first `#` can only open a
   // comment — no quoted `#` to step around, unlike the frontmatter case.
   const hash = v.indexOf("#");
-  const bare = (hash === -1 ? v : v.slice(0, hash)).trim();
+  return bareScalar((hash === -1 ? v : v.slice(0, hash)).trim());
+}
+
+function bareScalar(bare) {
   if (bare === "true") return true;
   if (bare === "false") return false;
   if (/^[+-]?[0-9]+$/.test(bare)) return Number(bare);
   return MALFORMED;
+}
+
+/**
+ * Read the single-line array starting at `v[0]`: strings, integers and
+ * booleans, comma-separated, a trailing comma tolerated. A nested array or an
+ * inline table is a bare element that is not a scalar, so it fails the same
+ * way a float does — the whole line is refused, never half an array.
+ *
+ * @returns {{value: unknown[], rest: string}|null} null when unterminated or
+ *   holding an element outside the subset.
+ */
+function readTomlArray(v) {
+  const value = [];
+  let i = 1;
+  const skipSpace = () => {
+    while (i < v.length && (v[i] === " " || v[i] === "\t")) i++;
+  };
+  for (;;) {
+    skipSpace();
+    if (i >= v.length) return null;
+    if (v[i] === "]") return { value, rest: v.slice(i + 1) };
+    const c = v[i];
+    if (c === '"' || c === "'") {
+      const str = readTomlString(v.slice(i), c);
+      if (str === null) return null;
+      value.push(str.value);
+      i = v.length - str.rest.length;
+    } else {
+      let end = i;
+      while (end < v.length && v[end] !== "," && v[end] !== "]") end++;
+      const scalar = bareScalar(v.slice(i, end).trim());
+      if (scalar === MALFORMED) return null;
+      value.push(scalar);
+      i = end;
+    }
+    skipSpace();
+    if (i >= v.length) return null;
+    if (v[i] === ",") {
+      i++;
+      continue;
+    }
+    if (v[i] !== "]") return null;
+  }
 }
 
 /**
@@ -788,73 +871,19 @@ export function generatedDir(root) {
 }
 
 /**
- * @returns {{cached_at: string, data: unknown}|null} the snapshot, or null if
- * absent/unreadable/not a snapshot. Never throws: a corrupt snapshot is the
- * same as no snapshot.
+ * The per-source snapshot at `.generated/<name>.json`, for the sources still
+ * served per source (digest, peers). The file format and the write discipline
+ * — temp file + rename, a corrupt snapshot is no snapshot — live with the
+ * `http` kind, whose cards keep theirs under `.generated/cards/`.
+ *
+ * @returns {{cached_at: string, data: unknown}|null}
  */
 export function readSnapshot(root, name) {
-  try {
-    const snap = JSON.parse(fs.readFileSync(path.join(generatedDir(root), `${name}.json`), "utf8"));
-    if (!snap || typeof snap !== "object" || typeof snap.cached_at !== "string") return null;
-    return snap;
-  } catch {
-    return null;
-  }
+  return readSnapshotFile(legacySnapshotFile(root, name));
 }
 
-/**
- * Write `{cached_at, data}` to `generated/<name>.json` via a temp file +
- * rename, so a reader never sees a half-written snapshot. A failed write is
- * logged and swallowed: losing the cache must not lose the live response.
- */
 export function writeSnapshot(root, name, data) {
-  const snap = { cached_at: new Date().toISOString(), data };
-  const dir = generatedDir(root);
-  const final = path.join(dir, `${name}.json`);
-  const tmp = `${final}.${process.pid}.tmp`;
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(tmp, JSON.stringify(snap, null, 2));
-    fs.renameSync(tmp, final);
-  } catch (err) {
-    try {
-      fs.rmSync(tmp, { force: true });
-    } catch {
-      /* nothing further to do */
-    }
-    process.stderr.write(`hud: could not cache ${name}: ${errText(err)}\n`);
-  }
-  return snap;
-}
-
-/**
- * Render an error for a log line or a JSON body.
- *
- * ENOENT means two unrelated things, and which one is not the caller's to
- * assume: a spawn whose binary is not installed, or a filesystem call whose
- * path is not there. Both reach here — `serveSource` catches `produce()` (a
- * spawned digest command *or* an HTTP fetch) and `writeSnapshot` (pure fs) in
- * the same `try`, so no per-call-site flag could separate them.
- *
- * Node labels them distinguishably on the error itself: a spawn failure
- * carries `syscall: "spawn <binary>"`, a filesystem failure carries the
- * syscall that failed (`mkdir`, `open`, …). Keying on that is why this needs
- * no parameter.
- *
- * Mapping every ENOENT to "command not found" is what this replaces. It sent
- * a read-only bind mount to the container log as `command not found:
- * /hud/.generated` — a real condition reported as a missing binary, pointing
- * whoever read it at the wrong subsystem entirely.
- */
-export function errText(err) {
-  if (!err) return "unknown error";
-  if (err.code === "ENOENT") {
-    const where = err.path || err.syscall || "?";
-    return String(err.syscall || "").startsWith("spawn")
-      ? `command not found: ${where}`
-      : `no such file or directory: ${where}`;
-  }
-  return err.message || String(err);
+  return writeSnapshotFile(legacySnapshotFile(root, name), data);
 }
 
 /**
@@ -906,23 +935,6 @@ function run(file, args, opts) {
       (err, stdout) => (err ? reject(err) : resolve(stdout)),
     );
   });
-}
-
-/** GET the configured board URL and parse it as JSON. Throws on any failure. */
-async function fetchBoard(url, timeoutMs) {
-  const res = await fetch(url, {
-    cache: "no-store",
-    headers: { accept: "application/json" },
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  if (!res.ok) throw new Error(`upstream HTTP ${res.status}`);
-  const text = await res.text();
-  if (text.length > LIMITS.maxUpstreamBytes) throw new Error("upstream response too large");
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error("upstream response is not JSON");
-  }
 }
 
 /** Keys a digest command may wrap its array in. First match wins. */
@@ -1100,17 +1112,6 @@ export function readPeersSnapshot(root) {
 }
 
 // ---------------------------------------------------------- sessions layer
-
-/**
- * Expand a leading `~` in a configured path. Nothing else about the string is
- * interpreted — no env vars, no globs — so a config path stays a path.
- */
-export function expandHome(p) {
-  const s = String(p ?? "");
-  if (s === "~") return os.homedir();
-  if (s.startsWith("~/")) return path.join(os.homedir(), s.slice(2));
-  return s;
-}
 
 /**
  * Group rows by slug — the unambiguous identity — labelled with the readable
@@ -1572,6 +1573,253 @@ function serveLoadout(res, root) {
   return sendJson(res, 200, buildLoadout({ claudeRoot, hudRoot: root }));
 }
 
+// ------------------------------------------------------------ reviews layer
+//
+// One row per review run. A run writes `state.json` into the content tree
+// itself — under `raw/`, so the tree walker lists the file and never opens
+// it — and the reviews card is the one reader that does: the `fs` kind in
+// cards/kinds/fs.mjs walks, the `review-state` normaliser in
+// cards/normalize/review-state.mjs decides what the page may see. Like
+// sessions and loadout it is watch-only: read live on every request, cached
+// nowhere, reachable by no verb but GET. Every "do" the panel offers is a
+// link out (the PR, the posted review) or a link into the tree (the note).
+
+/**
+ * Every review run under `root`, sorted for the panel: the reviews card's
+ * rows, read through the same `fs` kind and `review-state` normaliser the
+ * card route uses, so there is one reading of a state file.
+ *
+ * @param {string} root
+ * @param {{glob?: string, now?: number}} [opts]
+ * @returns {{items: object[], scanned: number, truncated: boolean}}
+ */
+export function listReviews(root, opts = {}) {
+  const glob = opts.glob ?? DEFAULT_REVIEWS_GLOB;
+  const parsed = parseReviewsGlob(glob);
+  if (parsed.error) throw new Error(`reviews glob: ${parsed.error}`);
+  const card = { name: "reviews", kind: "fs", root, glob, shape: "review-state" };
+  const { items, scanned, truncated } = collectRows(card, { now: opts.now ?? Date.now() });
+  return { items, scanned, truncated };
+}
+
+// ------------------------------------------------------------------- cards
+//
+// `GET /api/card/<name>` serves any card the registry holds: the declared
+// `[cards.*]`, or the ones synthesised from legacy `[sources.*]`. The registry
+// is rebuilt from the config on every request, as every other route re-reads
+// the config, so an edit to hud.toml is live on the next refresh. `/api/reviews`
+// is the reviews card under its old envelope, kept for one release so
+// bookmarks and tests keep working.
+
+/** The registry for this request. */
+function cardsOf(root) {
+  return loadCards(loadConfig(root), { hudRoot: root, configFile: CONFIG_TOML });
+}
+
+function cardCtx(root, dyn, cards) {
+  return { hudRoot: root, configFile: CONFIG_TOML, now: dyn.now, httpTimeoutMs: dyn.httpTimeoutMs, cards, sendJson };
+}
+
+/** `/api/cards`: every card the config declares, by name, and the panel order. */
+function serveCardsList(res, root) {
+  const { cards, layout } = cardsOf(root);
+  return sendJson(res, 200, { cards: [...cards.keys()], layout });
+}
+
+/**
+ * An old per-source route, served as its card under the old envelope. The
+ * legacy name is both the card looked up and the envelope produced, so a
+ * tree that has moved to `[cards.*]` keeps its bookmarks.
+ */
+function serveLegacy(res, root, url, dyn, name) {
+  const { cards } = cardsOf(root);
+  return serveCard(res, cardCtx(root, dyn, cards), getCard(cards, name), {
+    name,
+    legacy: name,
+    scope: url.searchParams.get("scope"),
+  });
+}
+
+/**
+ * `/api/card/<name>`: one path segment, nothing after it. The name is read
+ * off the parsed pathname, so `%2F` is already a slash here and is refused
+ * like one; a name the registry would not accept is simply not in it.
+ */
+function cardNameOf(pathname) {
+  if (!pathname.startsWith("/api/card/")) return null;
+  const name = pathname.slice("/api/card/".length);
+  return name !== "" && !name.includes("/") ? name : null;
+}
+
+function serveCardRoute(req, res, root, url, dyn, name) {
+  const { cards } = cardsOf(root);
+  return serveCard(res, cardCtx(root, dyn, cards), getCard(cards, name), {
+    name,
+    scope: url.searchParams.get("scope"),
+    ifNoneMatch: req.headers["if-none-match"],
+  });
+}
+
+// ------------------------------------------------------------------ events
+//
+// `GET /api/events` is a Server-Sent Events stream that says which card a
+// change in the tree belongs to, so an open page refetches that card within a
+// second instead of at its next poll. It carries names only — never rows —
+// so the card route stays the one place a card is read, with its ETag, and a
+// stream that drops costs nothing but latency: the page's polls go on.
+//
+// One `fs.watch` on HUD_ROOT, recursive, shared by every open stream, started
+// with the first and closed with the last. Changes are gathered for a short
+// window and then matched against every `fs` card whose root is HUD_ROOT or
+// under it, by the walk's own glob rules; a card rooted elsewhere, and every
+// `http` card, is polled only. The stream writes and never reads: no request
+// body, no write to the tree, and nothing a client sends changes what it says.
+
+/** How long changes are gathered before the cards they belong to are named. */
+export const EVENTS_DEBOUNCE_MS = 250;
+/** A comment line this often, so a proxy or the browser does not drop an idle stream. */
+export const EVENTS_PING_MS = 25 * 1000;
+
+/** The `fs` cards under the root, each with its root relative to the watched one. */
+function watchedCards(root) {
+  const out = [];
+  for (const card of cardsOf(root).cards.values()) {
+    if (card.error || card.kind !== "fs") continue;
+    const rel = path.relative(root, card.root);
+    if (rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))) out.push({ card, prefix: rel });
+  }
+  return out;
+}
+
+/** The cards a set of changed paths (relative to root, or null for "unknown") belong to. */
+function cardsTouched(root, changed) {
+  const names = [];
+  for (const { card, prefix } of watchedCards(root)) {
+    const hit = [...changed].some((rel) => {
+      if (rel === null) return true;
+      const under = prefix === "" ? rel : path.relative(prefix, rel);
+      if (under === "" || under.startsWith("..") || path.isAbsolute(under)) return false;
+      return fsCovers(card, under.split(path.sep).join("/"));
+    });
+    if (hit) names.push(card.name);
+  }
+  return names;
+}
+
+function eventFrame(event, data) {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
+/**
+ * The streams and the one watcher behind them. `closeAll` ends every stream,
+ * so closing the server does not wait on a page that never hangs up.
+ */
+function eventsHub(root, opts) {
+  const clients = new Set();
+  let watcher = null;
+  let watchError = null;
+  let pending = null;
+  let timer = null;
+
+  const flush = () => {
+    const changed = pending;
+    pending = null;
+    timer = null;
+    if (!changed || !clients.size) return;
+    let names;
+    try {
+      names = cardsTouched(root, changed);
+    } catch (err) {
+      process.stderr.write(`hud: events: ${errText(err)}\n`);
+      return;
+    }
+    for (const name of names) for (const res of clients) res.write(eventFrame("card", { name }));
+  };
+
+  const start = () => {
+    watchError = null;
+    try {
+      watcher = fs.watch(root, { recursive: true, persistent: false }, (_type, filename) => {
+        if (!pending) pending = new Set();
+        pending.add(filename == null ? null : String(filename));
+        if (!timer) timer = setTimeout(flush, opts.debounceMs);
+      });
+      watcher.on("error", (err) => {
+        watchError = errText(err);
+        stop();
+      });
+    } catch (err) {
+      watcher = null;
+      watchError = errText(err);
+    }
+  };
+
+  const stop = () => {
+    if (watcher) watcher.close();
+    watcher = null;
+    if (timer) clearTimeout(timer);
+    timer = null;
+    pending = null;
+  };
+
+  const drop = (res, ping) => {
+    clearInterval(ping);
+    clients.delete(res);
+    if (!clients.size) stop();
+  };
+
+  return {
+    serve(req, res) {
+      res.writeHead(200, {
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+      });
+      if (!watcher) start();
+      clients.add(res);
+      const ping = setInterval(() => res.write(": ping\n\n"), opts.pingMs);
+      req.on("close", () => drop(res, ping));
+      res.on("close", () => drop(res, ping));
+      let cards = [];
+      try {
+        cards = watcher ? watchedCards(root).map((w) => w.card.name) : [];
+      } catch (err) {
+        watchError = errText(err);
+      }
+      const hello = { watching: watcher !== null, cards };
+      if (watchError) hello.error = watchError;
+      res.write(`retry: 5000\n${eventFrame("hello", hello)}`);
+    },
+    closeAll() {
+      for (const res of clients) res.end();
+      clients.clear();
+      stop();
+    },
+  };
+}
+
+// ----------------------------------------------- reviews joined onto the board
+//
+// The board and the review runs are two lists keyed on the same pull request.
+// Served apart, one PR appears twice with two answers to "who is waiting"; so
+// when both sources are on, a board row carries its latest run under one key,
+// `review`, and the runs panel keeps only what the board cannot show. The key
+// (`cards/keys.mjs`) and the join (`cards/join.mjs`) are the card model's;
+// what remains here is the legacy payload shape around them.
+
+/**
+ * The board payload with `review` on each row whose PR has a run: the join
+ * the `/api/dyn/board` alias applies, as a library call. The payload keeps
+ * whatever shape the upstream sent and a row with no run comes back as it
+ * came — no `review` key, not a null one.
+ *
+ * @param {unknown} data the upstream board payload
+ * @param {object[]} runs `listReviews().items`
+ */
+export function joinReviews(data, runs) {
+  return joinPayload(data, runs, { key: "pr_url", latest: "started", into: "review", keyOf: boardRowKey, project: forJoin });
+}
+
 // -------------------------------------------------------------- deep links
 //
 // The path *is* the slug. There is no registry mapping pretty names onto
@@ -1683,13 +1931,13 @@ export function contentTypeFor(p) {
   return CONTENT_TYPES[path.extname(p).toLowerCase()] || "application/octet-stream";
 }
 
-function sendText(res, code, body, type = "text/plain; charset=utf-8") {
-  res.writeHead(code, { "content-type": type, "cache-control": "no-store" });
+function sendText(res, code, body, type = "text/plain; charset=utf-8", headers = {}) {
+  res.writeHead(code, { "content-type": type, "cache-control": "no-store", ...headers });
   res.end(body);
 }
 
-function sendJson(res, code, obj) {
-  sendText(res, code, JSON.stringify(obj, null, 2), "application/json; charset=utf-8");
+function sendJson(res, code, obj, headers) {
+  sendText(res, code, JSON.stringify(obj, null, 2), "application/json; charset=utf-8", headers);
 }
 
 function sendFile(res, abs, type) {
@@ -1724,6 +1972,14 @@ export function createServer(opts = {}) {
     // showing a snapshot.
     peersFresh: false,
     inFlight: null,
+    // The clock the cards read `elapsed_s` against. A test seam: two routes
+    // serving one tree must agree to the second, which they cannot when each
+    // reads `Date.now()` a few milliseconds apart.
+    now: opts.now || Date.now,
+    events: eventsHub(root, {
+      debounceMs: opts.eventsDebounceMs || EVENTS_DEBOUNCE_MS,
+      pingMs: opts.eventsPingMs || EVENTS_PING_MS,
+    }),
   };
 
   const refresh = () => {
@@ -1759,6 +2015,14 @@ export function createServer(opts = {}) {
   });
 
   server.hudRefreshPeers = refresh;
+  // An open event stream never ends on its own, and `close` waits for every
+  // open response; so the streams are ended first, or stopping the HUD with a
+  // page open would hang.
+  const close = server.close.bind(server);
+  server.close = (cb) => {
+    dyn.events.closeAll();
+    return close(cb);
+  };
   return server;
 }
 
@@ -1784,6 +2048,12 @@ function handle(req, res, root, uiDir, dyn, refresh) {
     return sendText(res, 405, "method not allowed\n");
   }
   if (req.method !== "GET" && req.method !== "HEAD") return sendText(res, 405, "method not allowed\n");
+  // GET only: a HEAD of a stream that never ends has no headers worth
+  // answering, and it would start the watcher for nothing.
+  if (pathname === "/api/events") {
+    if (req.method !== "GET") return sendText(res, 405, "method not allowed\n");
+    return dyn.events.serve(req, res);
+  }
 
   if (pathname === "/api/tree") return sendJson(res, 200, buildTree(root));
   if (pathname === "/api/md") return serveMarkdown(res, root, url.searchParams.get("path"));
@@ -1792,7 +2062,9 @@ function handle(req, res, root, uiDir, dyn, refresh) {
   // JSON; the browser has no TOML parser and must not grow a second copy of
   // this one. Exposes nothing new — /api/md still serves the file verbatim.
   if (pathname === "/api/config") return sendJson(res, 200, loadConfig(root));
-  if (pathname === "/api/dyn/board") return serveBoard(res, root, dyn);
+  // The board is the `board` card under its old envelope: `source`, `stale`,
+  // `cached_at`, `data` as the upstream sent it plus `review` on joined rows.
+  if (pathname === "/api/dyn/board") return serveLegacy(res, root, url, dyn, "board");
   if (pathname === "/api/dyn/digest") return serveDigest(res, root, dyn);
   if (pathname === "/api/dyn/peers") return servePeers(res, root, dyn);
   // Sessions is read-only by construction: this is its only route, and the
@@ -1801,6 +2073,13 @@ function handle(req, res, root, uiDir, dyn, refresh) {
   // Same watch-only shape as sessions: one GET route, no POST case above, so
   // every mutating verb lands on the 405 arm.
   if (pathname === "/api/loadout") return serveLoadout(res, root);
+  // Cards read and nothing else: one GET route per card, no POST case above,
+  // so every mutating verb lands on the 405 arm. `/api/reviews` is the
+  // reviews card under its old envelope.
+  if (pathname === "/api/cards") return serveCardsList(res, root);
+  const cardName = cardNameOf(pathname);
+  if (cardName !== null) return serveCardRoute(req, res, root, url, dyn, cardName);
+  if (pathname === "/api/reviews") return serveLegacy(res, root, url, dyn, "reviews");
   // Matched against the raw target rather than `url.pathname`: the URL parser
   // folds `..` away, and a traversal attempt must be refused outright rather
   // than quietly rewritten into whichever route it normalises to.
@@ -1817,6 +2096,9 @@ function handle(req, res, root, uiDir, dyn, refresh) {
  * (`stale:true`) ⇒ 503 with a JSON body. `data` carries the upstream payload
  * verbatim; `stale` and `cached_at` are the envelope, so the client can tell
  * "now" from "as of" without the server reinterpreting anyone's schema.
+ *
+ * The board walked this ladder too, until it became a card: the `http` kind
+ * is this ladder with the snapshot under `.generated/cards/`.
  */
 async function serveSource(res, root, name, source, produce) {
   if (!source) {
@@ -1841,14 +2123,6 @@ async function serveSource(res, root, name, source, produce) {
     }
     return sendJson(res, 503, { source: name, stale: true, cached_at: null, error: errText(err) });
   }
-}
-
-function serveBoard(res, root, dyn) {
-  const source = sourceOf(loadConfig(root), "board");
-  const url = source && typeof source.url === "string" ? source.url : null;
-  return serveSource(res, root, "board", url ? source : null, () =>
-    fetchBoard(url, dyn.httpTimeoutMs),
-  );
 }
 
 function serveDigest(res, root, dyn) {
@@ -1976,6 +2250,13 @@ if (invokedDirectly) {
   const cfg = loadConfigDetail(root);
   for (const warn of cfg.warns) {
     process.stderr.write(`hud: ${cfg.file}: ${warn}\n`);
+  }
+  // The card registry's complaints belong here for the same reason: a stanza
+  // it refused is served as a 503 per request, and a spelling it tolerated
+  // is served without comment, so startup is the one time either is said.
+  const registry = loadCards(cfg.data, { hudRoot: root, configFile: CONFIG_TOML });
+  for (const line of [...registry.errors, ...registry.warnings]) {
+    process.stderr.write(`hud: ${line}\n`);
   }
   const server = createServer({ root });
   server.listen(port, "127.0.0.1", () => {

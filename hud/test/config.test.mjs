@@ -123,7 +123,7 @@ test("malformed line skipped with warning not crash", () => {
     "this line is not config at all",
     'unterminated = "no closing quote',
     "dotted.key = 1",
-    "arrays = [1, 2]",
+    "nested = [[1], 2]",
     "inline = { a = 1 }",
     "float = 1.5",
     "empty =",
@@ -145,7 +145,7 @@ test("malformed line skipped with warning not crash", () => {
   // table that happened to precede it.
   assert.equal(data.dotted, undefined);
   assert.equal(data.orphan, undefined);
-  assert.equal(data.array, undefined);
+  assert.equal(data.nested, undefined);
 
   assert.equal(warns.length, 9, warns.join("; "));
   for (const warn of warns) assert.match(warn, /^line \d+: /);

@@ -1,0 +1,2 @@
+{"id":"git-1","class":"READ","text":"parse() at handler.go:88 before verify at :104","source":"git/diff.patch hunk 2","row":1}
+{"id":"git-2","class":"READ","text":"parser.go:12 splits on unescaped pipe","source":"worktree parser.go:12","row":3}

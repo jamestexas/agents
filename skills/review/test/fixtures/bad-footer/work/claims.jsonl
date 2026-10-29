@@ -1,0 +1,3 @@
+{"id":"c1","class":"READ","text":"parse() called at handler.go:88 before verify at :104","source":"git/diff.patch hunk 2","row":1}
+{"id":"c2","class":"RAN","text":"modmap impact lists 3 consumers of handler","source":"probes/go-graph/modmap-impact.out","row":1}
+{"id":"c3","class":"ASSUMED","text":"staging includes base sha","source":"probes/deploy/staging.out UNAVAILABLE","row":2}

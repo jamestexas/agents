@@ -1,0 +1,4 @@
+[
+  {"tag":"Blocking","title":"parse before signature check","file_line":"handler.go:88","blast":"every inbound webhook.","rows":[1],"claims":["c1","c2"]},
+  {"tag":"Question","title":"rolling deploy reads the new column","file_line":"migrate.sql:3","blast":"one deploy window","rows":[2],"claims":["c3"]}
+]

@@ -1,0 +1,5 @@
+{"id":"probes-1","class":"RAN","text":"go build fails: undefined symbol at pkg/x.go:12","source":"probes/go-graph/build.out","row":1}
+{"id":"git-1","class":"RAN","text":"go test ./handler run in the worktree; TestOrdering fails","source":"worktree: go test ./handler","row":3}
+{"id":"git-2","class":"READ","text":"parse at handler.go:88 before verify at :104","source":"git/diff.patch hunk 2","row":3}
+{"id":"git-3","class":"READ","text":"helper body identical to other.go:40","source":"worktree other.go:40","row":4}
+{"id":"probes-2","class":"RAN","text":"build output names the flag","source":"probes/go-graph/build.out","row":5}

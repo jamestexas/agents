@@ -1,0 +1,5 @@
+[
+  {"tag":"Question","title":"parse before signature check","file_line":"handler.go:88","blast":"not assessed (fast)","rows":[1],"claims":["c1","c2"]},
+  {"tag":"Question","title":"helper could be generic","file_line":"?","blast":"not assessed (fast)","rows":[3],"claims":[]},
+  {"tag":"Question","title":"naming inconsistent","file_line":"?","blast":"not assessed (fast)","rows":[3],"claims":[]}
+]

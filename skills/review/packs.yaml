@@ -1,0 +1,57 @@
+# packs.yaml — generic probe packs shipped with /review.
+#
+# A pack is matched when ANY changed file matches ANY of its globs: Ruby
+# File.fnmatch with FNM_PATHNAME plus a `<glob>/*` variant for globs ending
+# in `/**`, so "env/**" reaches nested files (scripts/which-applies.sh uses
+# the raw call without that variant). `only: true` means the pack matches
+# only when EVERY changed file matches (docs-only). Each probe is one bash
+# command run with these variables exported:
+#   WORKTREE REPO_DIR OUTDIR FILES MODULES BASE HEAD PR REPO.
+# `needs` lists binaries; a missing one makes every probe UNAVAILABLE. A
+# probe that exits 127 is recorded UNAVAILABLE with its stderr as the reason.
+#
+# Every pack states the question it answers. Phase 2 reads that line to know
+# an answer exists; a pack without one is a lint failure.
+#
+# Site-specific packs (deploy workflows, metric names, CLI probes) do not
+# belong here — this repo is public. Put them in $HUD_ROOT/review-packs.yaml
+# or <repo>/.claude/review-packs.yaml; see packs.site.example.yaml.
+#
+# Trust boundary: <repo>/.claude/review-packs.yaml is read from the
+# reviewer's trusted checkout at the BASE ref
+# (`git show "$BASE:.claude/review-packs.yaml"`), never from the PR worktree.
+# The PR author controls the worktree and probes run with the reviewer's
+# credentials, so a pack file taken from the PR would be arbitrary code
+# execution as the reviewer.
+packs:
+  go-graph:
+    question: "Which modules and callers does this change reach, and do the touched modules still build and vet?"
+    match: ["**/*.go", "**/go.mod", "**/go.sum"]
+    needs: [go]
+    probes:
+      build: 'cd "$WORKTREE" || exit 1; rc=0; while read -r m; do echo "## $m"; (cd "$m" && go build ./... 2>&1 | head -100; exit "${PIPESTATUS[0]}") || rc=1; done < "$MODULES"; exit $rc'
+      vet:   'cd "$WORKTREE" || exit 1; rc=0; while read -r m; do echo "## $m"; (cd "$m" && go vet ./... 2>&1 | head -100; exit "${PIPESTATUS[0]}") || rc=1; done < "$MODULES"; exit $rc'
+      modmap-impact: 'cd "$WORKTREE" && command -v modmap >/dev/null || { echo "missing binary: modmap" >&2; exit 127; }; modmap impact --root . --json < "$FILES"'
+  terraform:
+    question: "Does the Terraform format, and which resources does the diff add, change, or remove?"
+    match: ["**/*.tf", "**/*.tfvars"]
+    needs: [terraform]
+    probes:
+      fmt: 'cd "$WORKTREE" || exit 1; rc=0; while read -r f; do case "$f" in *.tf|*.tfvars) [ -e "$f" ] || continue; terraform fmt -check -diff "$f" || rc=1;; esac; done < "$FILES"; exit $rc'
+      resources: 'cd "$WORKTREE" || exit 1; git diff "$BASE...$HEAD" -- "*.tf" | grep -E "^[+-](resource|module|data) "; rc=$?; [ $rc -eq 1 ] && { echo "no resource, module or data blocks added or removed"; exit 0; }; exit $rc'
+      new-alert-policies: 'cd "$WORKTREE" || exit 1; git diff "$BASE...$HEAD" -- "*.tf" | grep -nE "^\+.*google_monitoring_alert_policy"; rc=$?; [ $rc -eq 1 ] && { echo "no new alert policies in diff"; exit 0; }; exit $rc'
+  github-actions:
+    question: "Do the changed workflows lint, and are the actions pinned?"
+    match: [".github/workflows/**"]
+    probes:
+      actionlint: 'cd "$WORKTREE" && command -v actionlint >/dev/null || { echo "missing binary: actionlint" >&2; exit 127; }; actionlint $(grep -E "^\.github/workflows/" "$FILES")'
+      unpinned: 'cd "$WORKTREE" || exit 1; grep -nE "uses: [^@]+@(main|master|v[0-9]+)\b" $(grep -E "^\.github/workflows/" "$FILES"); rc=$?; [ $rc -eq 1 ] && { echo "all uses pinned to a sha or none changed"; exit 0; }; exit $rc'
+  docs-only:
+    question: "Is every touched file documentation, so the run is --light eligible?"
+    match: ["**/*.md"]
+    only: true
+    probes:
+      # -H forces the filename even for a single file, so the IFS=: split is
+      # stable. The regex excludes ":" so URLs with a scheme never match; the
+      # case guard is belt and braces for "#anchor" and "scheme://" links.
+      links: 'cd "$WORKTREE" || exit 1; while read -r f; do [ -e "$f" ] || continue; grep -HnoE "\]\(([^):]+)\)" "$f" || true; done < "$FILES" | while IFS=: read -r f n link; do p="${link#](}"; p="${p%)}"; p="${p%%#*}"; case "$p" in ""|"#"*|*://*) continue;; esac; case "$p" in /*) t="$WORKTREE$p";; *) t="$(dirname "$f")/$p";; esac; [ -e "$t" ] || echo "$f:$n broken relative link $p"; done; true'

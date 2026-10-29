@@ -1,0 +1,2 @@
+{"id":"probes-1","class":"ASSUMED","text":"staging includes base sha; a RAN deploy probe would upgrade it","source":"probes/deploy/staging.out UNAVAILABLE","row":2}
+{"id":"probes-2","class":"READ","text":"parser.go:12 splits on every pipe","source":"worktree parser.go:12","row":3}

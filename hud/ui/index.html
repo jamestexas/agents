@@ -449,6 +449,12 @@
         opacity: 0.6;
         border-style: dashed;
       }
+      /* A card whose stanza the server refused: the reason, in the warning
+         colour, where the rows would be. The panel stays, so a typo in
+         hud.toml reads as a fault and never as "nothing to show". */
+      .panel .misconfigured {
+        color: var(--accent);
+      }
       /* One line across the top when the page is NOT showing live data.
          Per-panel staleness is deliberately quiet — dashed and dimmed — which
          is right for one panel and wrong for the whole page: a reader who
@@ -514,11 +520,29 @@
         font-weight: 400;
         color: var(--muted);
       }
+      /* A subtitle says what the panel leaves out, in the heading's own line. */
+      .panel > h2 .sub {
+        letter-spacing: 0;
+        text-transform: none;
+        font-weight: 400;
+        color: var(--muted);
+      }
+      /* A body scrolls inside its panel rather than pushing the next panel
+         off the column: the heading stays put and the aside stays a stack of
+         panels, not one long one. The three that grow without bound get more
+         of the viewport than the inventories. */
       .panel > .body {
         padding: 11px;
         color: var(--muted);
         font-family: var(--mono);
         font-size: 12px;
+        max-height: 30vh;
+        overflow: auto;
+      }
+      #wrap-digest > .body,
+      #wrap-sessions > .body,
+      #wrap-reviews > .body {
+        max-height: 38vh;
       }
 
       /* One row per board item / peer / digest line. Everything is a link out:
@@ -662,6 +686,124 @@
         word-break: break-all;
       }
 
+      /* ---- PR grids: the board and the review runs, one PR per row ---- */
+      /* Many columns in a 340px aside: the table scrolls sideways rather
+         than wrapping, so a row stays a row. The panel body is the scroller
+         on both axes, so the sideways bar is always at the panel's foot.
+         One style for both tables, because the five review columns are
+         the same cells in each and must read the same. */
+      .prgrid {
+        width: max-content;
+        min-width: 100%;
+      }
+      .prgrid table {
+        border-collapse: collapse;
+        white-space: nowrap;
+        font-size: 11px;
+      }
+      .prgrid th {
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        text-align: left;
+        padding: 0 8px 4px 0;
+        border-bottom: 1px solid var(--card);
+      }
+      .prgrid td {
+        padding: 4px 8px 4px 0;
+        border-top: 1px solid var(--card);
+        vertical-align: baseline;
+      }
+      .prgrid tbody tr:first-child td {
+        border-top: 0;
+      }
+      /* A run in flight is the row the reader came for: its left edge is lit
+         and its phase takes the live colour. Finished rows keep the panel's
+         muted voice. */
+      .prgrid tr.running td {
+        color: var(--fg);
+      }
+      .prgrid tr.running td:first-child {
+        box-shadow: inset 3px 0 0 var(--cyan);
+        padding-left: 6px;
+      }
+      .prgrid tr.running .phase,
+      .prgrid .phases .live {
+        color: var(--cyan);
+      }
+      /* A run nothing will finish: say so quietly rather than keep it lit. */
+      .prgrid tr.stale-run td {
+        color: var(--muted);
+        text-decoration: line-through;
+        text-decoration-color: var(--yellow);
+      }
+      .prgrid tr.unreadable .warn {
+        color: var(--yellow);
+      }
+      /* The board's title is the one cell allowed to wrap: it is prose, and a
+         row of prose kept on one line would push every review column out
+         of sight. */
+      .prgrid td.title {
+        white-space: normal;
+        min-width: 160px;
+        max-width: 240px;
+      }
+      .prgrid .path {
+        white-space: normal;
+        word-break: break-all;
+      }
+      .prgrid .gate {
+        letter-spacing: 2px;
+      }
+      .prgrid .g-ok {
+        color: var(--green);
+      }
+      .prgrid .g-fail {
+        color: var(--hot);
+      }
+      .prgrid .g-null {
+        color: var(--muted);
+      }
+      .prgrid .v-approve {
+        color: var(--green);
+      }
+      .prgrid .v-request_changes {
+        color: var(--hot);
+      }
+      .prgrid .v-comment {
+        color: var(--yellow);
+      }
+      .prgrid .v-preliminary {
+        color: var(--muted);
+      }
+      .prgrid .findings.hot,
+      .prgrid .early.hot {
+        color: var(--hot);
+      }
+      /* Who is waiting on whom. A thread waiting on the reader is the one
+         cell in the row that asks for action, so it is the one that is lit. */
+      .prgrid .threads.awaiting {
+        color: var(--hot);
+        font-weight: 600;
+      }
+      .prgrid .mine .behind {
+        color: var(--yellow);
+        margin-left: 3px;
+      }
+      .prgrid .rs-approved {
+        color: var(--green);
+      }
+      .prgrid .rs-changes_requested {
+        color: var(--hot);
+      }
+      .prgrid .rs-commented {
+        color: var(--yellow);
+      }
+      .prgrid a.notelink {
+        color: var(--cyan);
+      }
+
       .footnote {
         color: var(--muted);
         font-size: 11px;
@@ -700,11 +842,17 @@
       </div>
 
       <!-- One panel per dynamic source, each hidden until its route answers
-           with something to show. A new source needs a block here plus a
-           `renderPanel(id, env, build)` call in the script below. -->
+           with something to show. Document order is display order: review runs
+           lead because a run in flight is what the reader checks on. A new
+           source needs a block here plus a `renderPanel(id, env, build)` call
+           in the script below. -->
       <aside>
-        <div class="panel" id="wrap-board" data-source="board" hidden>
-          <h2>My PRs<span class="stamp" id="stamp-board"></span></h2>
+        <div class="panel" id="wrap-reviews" data-source="reviews" data-card="reviews" hidden>
+          <h2><span class="title">Review runs</span><span class="sub">in flight or not yet posted</span><span class="stamp" id="stamp-reviews"></span></h2>
+          <div class="body" id="panel-reviews"></div>
+        </div>
+        <div class="panel" id="wrap-board" data-source="board" data-card="board" hidden>
+          <h2><span class="title">My PRs</span><span class="stamp" id="stamp-board"></span></h2>
           <div class="body" id="panel-board"></div>
         </div>
         <div class="panel" id="wrap-peers" data-source="peers" hidden>
@@ -1669,37 +1817,6 @@
         body.appendChild(built || node("div", "empty", "nothing to show"));
       }
 
-      /** work-board's payload, tolerantly: an array or an object holding one. */
-      function boardItems(data) {
-        if (Array.isArray(data)) return data;
-        if (data && Array.isArray(data.items)) return data.items;
-        if (data && Array.isArray(data.prs)) return data.prs;
-        return [];
-      }
-
-      function buildBoard(env) {
-        const items = boardItems(env.data);
-        if (!items.length) return node("div", "empty", "nothing needs you");
-        return rowsNode(items, (item) => {
-          const li = document.createElement("li");
-          const top = node("div", "row-top");
-          if (item.number !== undefined && item.number !== null) {
-            top.appendChild(node("span", "num", "#" + item.number));
-          }
-          top.appendChild(linkOut(item.url, item.title || item.url || "(untitled)", "text"));
-          li.appendChild(top);
-          const reason = item.reason || item.state;
-          if (reason) {
-            const sub = node("div", "row-sub");
-            sub.appendChild(
-              node("span", item.state === "needs_you" ? "needs-you" : null, String(reason)),
-            );
-            li.appendChild(sub);
-          }
-          return li;
-        });
-      }
-
       function setDial(env) {
         const dial = el("dial");
         if (!env) {
@@ -1712,7 +1829,7 @@
           dial.title = "work-board unavailable";
           return;
         }
-        const n = boardItems(env.data).filter((i) => i && i.state === "needs_you").length;
+        const n = (Array.isArray(env.items) ? env.items : []).filter((i) => i && i.state === "needs_you").length;
         dial.textContent = "◉ needs-you: " + n;
         // Colour encodes the count, not the freshness. It used to encode
         // freshness, which meant `needs-you: 0` and `needs-you: 7` rendered in
@@ -1725,7 +1842,7 @@
         // colour. Dashed and dimmed, so a stale zero cannot read as a
         // confident zero.
         dial.classList.toggle("stale", Boolean(env.stale));
-        dial.title = env.stale ? "from the snapshot of " + fmtTime(env.cached_at) : "live";
+        dial.title = env.stale ? "from the snapshot of " + fmtTime(env.generated_at) : "live";
       }
 
       function buildPeers(env) {
@@ -1933,6 +2050,464 @@
         return wrap;
       }
 
+      // ------------------------------------------------------------- cards
+      //
+      // One renderer for every card: REVIEW RUNS, MY PRS, and any card a
+      // stanza in hud.toml declares. The server serves `/api/card/<name>` —
+      // rows, the column ids to show, the joins it applied — and the page
+      // draws a table through the cell registry below, so a verdict reads
+      // the same wherever it appears. Every cell is a fact or a link — out to
+      // GitHub for the PR and the posted review, into the tree for the note.
+      // Nothing here starts, stops, or posts anything.
+
+      const DASH = "—";
+
+      /** Seconds as the panel shows them: 45s, 22m, 1h05m. */
+      function fmtElapsed(s) {
+        if (typeof s !== "number" || isNaN(s)) return DASH;
+        if (s < 60) return s + "s";
+        const m = Math.floor(s / 60);
+        if (m < 60) return m + "m";
+        return Math.floor(m / 60) + "h" + String(m % 60).padStart(2, "0") + "m";
+      }
+
+      /** Seconds as minutes to one decimal, the unit a phase is read in: 114 → 1.9. */
+      function fmtMinutes(s) {
+        return (s / 60).toFixed(1);
+      }
+
+      /** The short name a phase goes by in the phases cell; an unlisted phase keeps its first two letters. */
+      const PHASE_ABBR = { evidence: "ev", questions: "q", settle: "se", refute: "re", triage: "tr", teach: "te" };
+      const phaseAbbr = (name) => PHASE_ABBR[name] || String(name).slice(0, 2);
+
+      /**
+       * Where the run's time went: one `ev 1.9` per timed phase, in the order
+       * the run passed through them, the phase still open marked with an
+       * ellipsis because its number is still growing. A run with no timings
+       * (one written before phases were recorded) shows a dash.
+       */
+      function phasesCell(tr, r) {
+        const secs = r.phase_seconds && typeof r.phase_seconds === "object" ? r.phase_seconds : {};
+        const phases = r.phases && typeof r.phases === "object" ? r.phases : {};
+        const names = Object.keys(secs);
+        if (!names.length) return cell(tr, undefined, "phases");
+        const span = node("span");
+        const words = [];
+        names.forEach((name, i) => {
+          if (i) span.appendChild(document.createTextNode(" · "));
+          const open = phases[name] && phases[name].ended == null;
+          span.appendChild(node("span", open ? "live" : null, phaseAbbr(name) + " " + fmtMinutes(secs[name]) + (open ? "…" : "")));
+          words.push(name + " " + fmtElapsed(secs[name]) + (open ? " (running)" : ""));
+        });
+        return cell(tr, span, "phases", words.join(" · "));
+      }
+
+      /**
+       * The early signal: candidates that rested on hard evidence at phase 3
+       * and have not yet been refuted. Shown only while the run is in flight,
+       * lit when there is one; once a run has finished the findings columns
+       * carry the truth and this cell is a dash.
+       */
+      function earlyCell(tr, r) {
+        const e = r.running && r.early && typeof r.early === "object" ? r.early : null;
+        if (!e || typeof e.count !== "number") return cell(tr, undefined, "early");
+        const items = Array.isArray(e.items) ? e.items : [];
+        return cell(
+          tr,
+          e.count,
+          "early" + (e.count > 0 ? " hot" : ""),
+          items.length
+            ? items.map((x) => "row " + x.row + ": " + x.title + " (" + x.basis + ")").join("\n")
+            : "no candidate with hard evidence yet",
+        );
+      }
+
+      /** The middle value; the mean of the two middle values when the count is even. */
+      function median(xs) {
+        const a = xs.slice().sort((x, y) => x - y);
+        const mid = a.length >> 1;
+        return a.length % 2 ? a[mid] : (a[mid - 1] + a[mid]) / 2;
+      }
+
+      /**
+       * "median per phase across N runs with timings" — the line under the
+       * runs table that says where review time goes. Only closed phases
+       * count: an open one would pull its median down by however long the
+       * run has left. Runs with no timings are skipped, and when none has
+       * any there is no line.
+       */
+      function phaseMedians(items) {
+        const by = new Map();
+        let runs = 0;
+        for (const r of items) {
+          const secs = r.phase_seconds && typeof r.phase_seconds === "object" ? r.phase_seconds : {};
+          const phases = r.phases && typeof r.phases === "object" ? r.phases : {};
+          const names = Object.keys(secs);
+          if (!names.length) continue;
+          runs++;
+          for (const name of names) {
+            if (phases[name] && phases[name].ended == null) continue;
+            if (!by.has(name)) by.set(name, []);
+            by.get(name).push(secs[name]);
+          }
+        }
+        if (!runs || !by.size) return null;
+        const parts = [...by].map(([name, xs]) => phaseAbbr(name) + " " + fmtMinutes(median(xs)));
+        return "median per phase across " + runs + " run(s) with timings: " + parts.join(" · ");
+      }
+
+      /** One cell; an absent fact renders as a dash rather than a blank. */
+      function cell(tr, content, cls, title) {
+        const td = node("td", cls);
+        if (content instanceof Node) td.appendChild(content);
+        else {
+          const blank = content === undefined || content === null || content === "";
+          td.textContent = blank ? DASH : String(content);
+        }
+        if (title) td.title = title;
+        tr.appendChild(td);
+        return td;
+      }
+
+      /**
+       * One dot per gate, in order: ledger · triage · blocking, then outputs
+       * when the run recorded it (only a run with an event log has one).
+       */
+      function gatesNode(gates) {
+        const g = gates && typeof gates === "object" ? gates : {};
+        const wrap = node("span", "gates");
+        const words = [];
+        const names = ["ledger", "triage", "blocking"].concat("outputs" in g ? ["outputs"] : []);
+        for (const name of names) {
+          const v = g[name] === "ok" || g[name] === "fail" ? g[name] : "null";
+          wrap.appendChild(node("span", "gate g-" + v, "●"));
+          words.push(name + " " + (v === "null" ? DASH : v));
+        }
+        wrap.title = words.join(" · ");
+        wrap.setAttribute("aria-label", wrap.title);
+        return wrap;
+      }
+
+      /**
+       * A link into the tree. The href is a real /n/ URL, so middle-click and
+       * copy work; a plain click takes the same path a tree click does, which
+       * is what makes a note that has moved land on "not found" rather than a
+       * reload.
+       */
+      function noteLink(url) {
+        const a = node("a", "notelink", "note");
+        a.href = url;
+        a.title = url.replace(/^\/n\//, "");
+        a.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          history.pushState({ kind: "entry", path: parseRoute(url).path }, "", url);
+          applyLocation();
+        });
+        return a;
+      }
+
+      /** A table from [id, heading, tooltip] columns and built rows; the id is each cell's class. */
+      function gridNode(columns, rows) {
+        const wrap = node("div", "prgrid");
+        const table = document.createElement("table");
+        const head = document.createElement("tr");
+        for (const [id, label, title] of columns) {
+          const th = node("th", null, label);
+          th.dataset.col = id;
+          th.title = title;
+          head.appendChild(th);
+        }
+        table.appendChild(node("thead")).appendChild(head);
+        const body = table.appendChild(node("tbody"));
+        for (const tr of rows) body.appendChild(tr);
+        wrap.appendChild(table);
+        return wrap;
+      }
+
+      // The cells a board row and a run row share. Each takes the fact, not
+      // the row, so the two tables cannot drift on what a verdict looks like.
+
+      // PRELIMINARY is a --fast run's verdict: it stopped after the early
+      // signal, nothing in it was refuted, and the gates refuse to post it.
+      // It takes the muted colour so it never reads as a decision.
+      function verdictCell(tr, verdict) {
+        cell(
+          tr,
+          verdict,
+          "verdict v-" + String(verdict || "none").toLowerCase(),
+          verdict === "PRELIMINARY" ? "fast run, unrefuted" : "",
+        );
+      }
+
+      function noteCell(tr, url, note) {
+        cell(tr, url ? noteLink(url) : undefined, "note", note || "");
+      }
+
+      function postedCell(tr, posted) {
+        const p = posted && typeof posted === "object" ? posted : null;
+        cell(
+          tr,
+          p && p.url ? linkOut(p.url, String(p.state || "posted").toLowerCase(), "text") : undefined,
+          "posted",
+          p && p.at ? "posted " + fmtTime(p.at) : "",
+        );
+      }
+
+      /**
+       * Who the threads wait on. The run row leads with the unresolved count;
+       * the board row (`brief`) shows only me · author, the two numbers that
+       * name a person. Either way the cell is lit when a thread waits on me.
+       */
+      function threadsCell(tr, threads, brief) {
+        const th = threads && typeof threads === "object" ? threads : null;
+        if (!th) return cell(tr, undefined, "threads");
+        const n = (k) => (typeof th[k] === "number" ? th[k] : DASH);
+        const who = "me " + n("awaiting_me") + " · author " + n("awaiting_author");
+        return cell(
+          tr,
+          brief ? who : n("unresolved") + " · " + who,
+          "threads" + (th.awaiting_me > 0 ? " awaiting" : ""),
+          "threads: " + n("total") + " total, " + n("unresolved") + " unresolved, " +
+            n("awaiting_me") + " awaiting me, " + n("awaiting_author") + " awaiting the author",
+        );
+      }
+
+      /** Short for a review state: APPROVED → A, COMMENTED → C, CHANGES_REQUESTED → R. */
+      const STATE_LETTER = { APPROVED: "A", COMMENTED: "C", CHANGES_REQUESTED: "R" };
+
+      /** "login STATE" per reviewer, one per line, for a tooltip. */
+      function reviewerList(list) {
+        return list
+          .map((h) => {
+            const found = typeof h.findings === "number" ? " · " + h.findings + " findings" : "";
+            return h.login + (h.state ? " " + h.state : "") + found;
+          })
+          .join("\n");
+      }
+
+      /**
+       * The who-waits-on-whom cells: mine, humans, bots (threads is below,
+       * shared with the board). Without the block every one is a dash; the
+       * state file predates it, and a dash says "not recorded" where a zero
+       * would say "nobody".
+       */
+      function mineCell(tr, rs) {
+        const mine = rs && rs.mine && typeof rs.mine === "object" ? rs.mine : null;
+        if (mine && mine.state) {
+          const span = node("span", "rs-" + mine.state.toLowerCase(), mine.state.toLowerCase());
+          if (mine.head_matches === false) {
+            const mark = node("span", "behind", "†");
+            mark.title = "my review predates the current head";
+            span.appendChild(mark);
+          }
+          return cell(tr, span, "mine", mine.at ? "reviewed " + fmtTime(mine.at) : "");
+        }
+        return cell(tr, undefined, "mine", mine && mine.at ? fmtTime(mine.at) : "");
+      }
+
+      function humansCell(tr, rs) {
+        const humans = rs && Array.isArray(rs.humans) ? rs.humans : null;
+        if (!humans) return cell(tr, undefined, "humans");
+        const count = { A: 0, C: 0, R: 0 };
+        for (const h of humans) if (STATE_LETTER[h.state]) count[STATE_LETTER[h.state]]++;
+        return cell(tr, "A" + count.A + " C" + count.C + " R" + count.R, "humans", reviewerList(humans));
+      }
+
+      function botsCell(tr, rs) {
+        const bots = rs && Array.isArray(rs.bots) ? rs.bots : null;
+        if (!bots) return cell(tr, undefined, "bots");
+        const found = bots.filter((b) => typeof b.findings === "number");
+        const sum = found.reduce((acc, b) => acc + b.findings, 0);
+        return cell(tr, bots.length + (found.length ? " · " + sum + "f" : ""), "bots", reviewerList(bots));
+      }
+
+      /**
+       * The cell registry: every column id a card may name, as [heading,
+       * tooltip, draw(tr, row, joined)]. `joined` is the block a row's shared
+       * cells read — the row itself on a run, the run joined onto it on a
+       * board row, null on a board row no run has seen — so the verdict,
+       * gates, note, posted and threads cells are one piece of code wherever
+       * they appear. A column no entry knows renders the row's field of that
+       * name as text, so a new card needs no entry here to show a plain fact.
+       */
+      const CELLS = {
+        pr: ["PR", "the pull request, linked", (tr, r) => {
+          const n = r.pr !== undefined && r.pr !== null ? r.pr : r.number;
+          const text = n === undefined || n === null ? DASH : "#" + n;
+          const url = r.pr_url || r.url;
+          cell(tr, url ? linkOut(url, text, "text") : text, "pr", [r.repo, r.title].filter(Boolean).join(": "));
+        }],
+        title: ["title", "its title", (tr, r) => {
+          cell(tr, linkOut(r.url, r.title || r.url || "(untitled)", "text"), "title");
+        }],
+        why: ["why", "why it is on the board", (tr, r) => {
+          const reason = r.reason || r.state;
+          cell(tr, reason ? node("span", r.state === "needs_you" ? "needs-you" : null, String(reason)) : undefined, "why");
+        }],
+        project: ["project", "the project directory the run wrote into", (tr, r) => cell(tr, r.project, "project")],
+        mode: ["mode", "default, light, deep, or engage", (tr, r) => cell(tr, r.mode, "mode")],
+        phase: ["phase", "where the run is; while it runs, with its elapsed time; stale or abandoned when its session went quiet or died", (tr, r) => {
+          // A run nothing will finish names why before where it stopped.
+          const dead = (r.liveness === "stale" || r.liveness === "abandoned") && r.phase !== r.liveness;
+          cell(
+            tr,
+            r.running ? (r.phase || DASH) + " · " + fmtElapsed(r.elapsed_s) : dead ? r.liveness + " · " + (r.phase || DASH) : r.phase,
+            "phase",
+            (r.running ? "running for " : dead ? r.liveness + " after " : "took ") + fmtElapsed(r.elapsed_s),
+          );
+        }],
+        phases: ["phases", "minutes per phase: ev q se re tr te; … marks the phase still running", (tr, r) => phasesCell(tr, r)],
+        verdict: ["verdict", "APPROVE, REQUEST_CHANGES, or COMMENT once settled; PRELIMINARY for a fast run", (tr, r, j) => verdictCell(tr, j ? j.verdict : undefined)],
+        mine: ["mine", "my own review of this PR; † marks one that predates the current head", (tr, r, j) => mineCell(tr, j ? j.review_state : null)],
+        humans: ["humans", "human reviews: approved / commented / changes requested", (tr, r, j) => humansCell(tr, j ? j.review_state : null)],
+        bots: ["bots", "bot reviews, and the findings they reported", (tr, r, j) => botsCell(tr, j ? j.review_state : null)],
+        threads: ["threads", "unresolved review threads · awaiting me · awaiting the author", (tr, r, j) => {
+          threadsCell(tr, j && j.review_state ? j.review_state.threads : undefined, j !== r);
+        }],
+        gates: ["gates", "ledger · triage · blocking", (tr, r, j) => cell(tr, j ? gatesNode(j.gates) : undefined, "gates")],
+        unavail: ["unavail", "probes that could not run", (tr, r, j) => {
+          const p = j && j.probes && typeof j.probes === "object" ? j.probes : null;
+          cell(
+            tr,
+            p ? p.unavailable : undefined,
+            "unavail",
+            p && typeof p.total === "number"
+              ? "probes: " + p.ran + " ran, " + p.failed + " failed, " + p.unavailable + " unavailable of " + p.total
+              : "",
+          );
+        }],
+        early: ["early", "while the run is in flight: candidates with hard evidence not yet refuted", (tr, r) => earlyCell(tr, r)],
+        findings: ["B/N/Q/O", "findings: blocking / non-blocking / question / observation", (tr, r, j) => {
+          const f = j && j.findings && typeof j.findings === "object" ? j.findings : null;
+          const n = (k) => (f && typeof f[k] === "number" ? f[k] : DASH);
+          cell(
+            tr,
+            f ? [n("blocking"), n("non_blocking"), n("question"), n("observation")].join("/") : undefined,
+            "findings" + (f && f.blocking > 0 ? " hot" : ""),
+            "findings: blocking / non-blocking / question / observation",
+          );
+        }],
+        note: ["note", "the run's note, in the tree", (tr, r, j) => noteCell(tr, j ? j.note_url : undefined, j ? j.note : undefined)],
+        posted: ["posted", "the review as posted, linked", (tr, r, j) => postedCell(tr, j ? j.posted : undefined)],
+      };
+
+      /** The text an empty card shows; a card not named here says "nothing to show". */
+      const EMPTY_TEXT = {
+        reviews: "no run in flight or waiting to post",
+        board: "nothing needs you",
+      };
+
+      /** Lines under a card's table that only that card can say; a card not named here has none. */
+      const FOOTERS = {
+        reviews: (items) => {
+          const out = [];
+          const medians = phaseMedians(items.filter((r) => !r.unreadable));
+          if (medians) out.push(node("div", "row-sub greyed medians", medians));
+          const running = items.filter((r) => r.running && !r.unreadable).length;
+          out.push(
+            node(
+              "div",
+              "footnote",
+              (running ? running + " running · " : "") +
+                items.length +
+                " run(s) · each row is one run's state.json; the HUD reads it and changes nothing.",
+            ),
+          );
+          return out;
+        },
+      };
+
+      /**
+       * How a row's shared cells find the block they read. A card that joins
+       * nothing reads the row itself; a card with joins reads the joined
+       * block, named after the card it came from, or null when the row has
+       * none — so a board row no run has seen shows dashes, never the row's
+       * own fields under a run's headings.
+       */
+      function joinedReader(resp) {
+        const names = resp && resp.joins && typeof resp.joins === "object" ? Object.keys(resp.joins) : [];
+        if (!names.length) return (r) => r;
+        return (r) => {
+          for (const name of names) if (r[name] && typeof r[name] === "object") return r[name];
+          return null;
+        };
+      }
+
+      function cardRow(columns, joined, r) {
+        const tr = document.createElement("tr");
+        if (r.unreadable) {
+          tr.className = "unreadable";
+          cell(tr, "unreadable", "warn", r.error || "");
+          cell(tr, r.path, "path").colSpan = Math.max(1, columns.length - 1);
+          return tr;
+        }
+        if (r.running) tr.className = "running";
+        else if (r.liveness === "stale" || r.liveness === "abandoned") tr.className = "stale-run";
+        const j = joined(r);
+        for (const id of columns) {
+          const spec = CELLS[id];
+          if (spec) spec[2](tr, r, j);
+          else cell(tr, r[id], id);
+        }
+        return tr;
+      }
+
+      /**
+       * One renderer for every card. `resp` is `/api/card/<name>`'s body on a
+       * 200, `{card, error}` when it answered anything else, or null for a
+       * card that does not exist; `mount` is the panel element. The heading
+       * takes the card's title; the table takes its columns, drawn through
+       * the registry; the degraded states take the body in place of rows —
+       * misconfigured in the warning colour with the reason, stale greyed and
+       * stamped "as of" the snapshot's age. Every "do" in here is a link.
+       */
+      function renderCard(resp, mount) {
+        const h2 = mount.querySelector("h2");
+        const title = h2 ? h2.querySelector(".title") : null;
+        const stamp = h2 ? h2.querySelector(".stamp") : null;
+        const body = mount.querySelector(".body");
+        body.textContent = "";
+        if (!resp) {
+          mount.hidden = true;
+          if (stamp) stamp.textContent = "";
+          return;
+        }
+        mount.hidden = false;
+        if (title && typeof resp.title === "string" && resp.title) title.textContent = resp.title;
+        if (resp.error) {
+          mount.classList.remove("stale");
+          if (stamp) stamp.textContent = "";
+          body.appendChild(node("div", "empty misconfigured", resp.error));
+          return;
+        }
+        mount.classList.toggle("stale", !!resp.stale);
+        if (stamp) stamp.textContent = resp.stale ? "as of " + fmtTime(resp.generated_at) : "";
+        const items = Array.isArray(resp.items) ? resp.items : [];
+        const columns = Array.isArray(resp.columns) ? resp.columns : [];
+        RENDER_STALE = !!resp.stale;
+        try {
+          if (!items.length) {
+            body.appendChild(node("div", "empty", EMPTY_TEXT[resp.card] || "nothing to show"));
+            return;
+          }
+          const joined = joinedReader(resp);
+          const headings = columns.map((id) => (CELLS[id] ? [id, CELLS[id][0], CELLS[id][1]] : [id, id, id]));
+          const wrap = gridNode(headings, items.map((r) => cardRow(columns, joined, r)));
+          if (resp.truncated) wrap.appendChild(node("div", "row-sub greyed", "older rows not shown"));
+          if (resp.rejected > 0) {
+            wrap.appendChild(node("div", "row-sub greyed", resp.rejected + " row(s) the server could not read as rows"));
+          }
+          const unavailable = Object.entries(resp.joins || {}).filter(([, status]) => status !== "ok");
+          if (unavailable.length) {
+            wrap.appendChild(node("div", "row-sub greyed", unavailable.map(([name, status]) => name + ": " + status).join(" · ")));
+          }
+          for (const line of FOOTERS[resp.card] ? FOOTERS[resp.card](items) : []) wrap.appendChild(line);
+          body.appendChild(wrap);
+        } finally {
+          RENDER_STALE = false;
+        }
+      }
+
       // ------------------------------------------------------ loadout panel
       //
       // Which skills and agents this machine has, which tree each one really
@@ -2094,12 +2669,6 @@
         }
       }
 
-      async function loadBoard() {
-        const env = await loadDyn("board");
-        setDial(env);
-        renderPanel("board", env, buildBoard);
-      }
-
       async function loadDigest() {
         renderPanel("digest", await loadDyn("digest"), buildDigest);
       }
@@ -2145,14 +2714,224 @@
         renderPanel("loadout", env, buildLoadout);
       }
 
-      /** ⟳ : the tree, the two proxied sources, and a real peers re-poll. */
+      /**
+       * Every card the server declares, in the layout's order. A card with no
+       * panel in the shell gets one, so a stanza added to hud.toml renders
+       * without a UI change; the shell's own panels keep today's order unless
+       * `[layout].order` says otherwise. Each card then loads through one path.
+       */
+      async function loadCards() {
+        let names = [];
+        let order = [];
+        try {
+          const res = await fetch("/api/cards", { cache: "no-store" });
+          const body = await res.json().catch(() => null);
+          if (res.ok && body && Array.isArray(body.cards)) {
+            names = body.cards.filter((n) => typeof n === "string");
+            order = body.layout && Array.isArray(body.layout.order) ? body.layout.order : [];
+          }
+        } catch {
+          /* the HUD server itself is gone; hide rather than shout */
+        }
+        for (const name of names) ensurePanel(name);
+        orderPanels(order);
+        // A shell panel whose card is gone — its stanza removed — is hidden,
+        // not left showing its last rows.
+        for (const wrap of document.querySelectorAll("aside .panel[data-card]")) {
+          if (!names.includes(wrap.dataset.card)) {
+            renderCard(null, wrap);
+            SOURCE_STATE.delete(wrap.dataset.card);
+          }
+        }
+        if (!names.includes("board")) setDial(null);
+        paintConnState();
+        await Promise.all(names.map(loadCard));
+      }
+
+      /** The panel for a card: the shell's when it has one, else one made in the aside. */
+      function ensurePanel(name) {
+        let wrap = el("wrap-" + name);
+        if (wrap) return wrap;
+        wrap = node("div", "panel");
+        wrap.id = "wrap-" + name;
+        wrap.dataset.card = name;
+        wrap.hidden = true;
+        const h2 = node("h2");
+        h2.appendChild(node("span", "title", name));
+        h2.appendChild(node("span", "stamp"));
+        wrap.appendChild(h2);
+        wrap.appendChild(node("div", "body"));
+        document.querySelector("aside").appendChild(wrap);
+        return wrap;
+      }
+
+      /** Panels the layout names move to the top in that order; the rest keep today's order after them. */
+      function orderPanels(order) {
+        const aside = document.querySelector("aside");
+        const named = order.map((name) => el("wrap-" + name)).filter((wrap) => wrap && wrap.parentElement === aside);
+        const rest = [...aside.children].filter((child) => !named.includes(child));
+        for (const wrap of [...named, ...rest]) aside.appendChild(wrap);
+      }
+
+      /**
+       * What the page last heard from each card: the ETag to send back, the
+       * body it came with and when, when it was last confirmed (a 200 or a
+       * 304), and the timer for the next poll. A poll whose ETag still holds
+       * is a 304, and the rows already drawn stand.
+       */
+      const CARD_LIVE = new Map();
+
+      /**
+       * The event stream: whether it is open, and which cards it names. A
+       * card it names is "live" — refetched the moment its files change —
+       * and every card is polled on its served `refresh` either way, so a
+       * stream that drops costs latency, never data.
+       */
+      const STREAM = { open: false, cards: new Set() };
+
+      /**
+       * A kept body, advanced to now: the clock-derived fields of a run in
+       * flight are left out of the ETag, so a 304 means the run has not
+       * changed, not that its timer has stopped. The page moves them itself.
+       */
+      function advanced(resp, secs) {
+        if (!resp || !Array.isArray(resp.items) || secs <= 0) return resp;
+        const age = (r) => {
+          if (!r || typeof r !== "object" || r.running !== true) return r;
+          const out = { ...r };
+          if (Number.isInteger(r.elapsed_s)) out.elapsed_s = r.elapsed_s + secs;
+          if (r.phase_seconds && typeof r.phase_seconds === "object" && r.phases && typeof r.phases === "object") {
+            out.phase_seconds = { ...r.phase_seconds };
+            for (const [name, p] of Object.entries(r.phases)) {
+              if (p && p.ended == null && Number.isInteger(out.phase_seconds[name])) out.phase_seconds[name] += secs;
+            }
+          }
+          return out;
+        };
+        const items = resp.items.map((r) => {
+          const out = age(r);
+          for (const k of Object.keys(resp.joins || {})) if (out && out[k]) out[k] = age(out[k]);
+          return out;
+        });
+        return { ...resp, items };
+      }
+
+      /** The heading's stamp for a card answering live: "live" or "polling", and how long since it was confirmed. */
+      function paintLiveStamp(name) {
+        const state = CARD_LIVE.get(name);
+        const stamp = document.querySelector("#wrap-" + CSS.escape(name) + " > h2 .stamp");
+        if (!state || !stamp || !state.resp || state.resp.error || state.resp.stale) return;
+        const ago = Math.max(0, Math.round((Date.now() - state.checked) / 1000));
+        const mode = STREAM.open && STREAM.cards.has(name) ? "live · " : "polling · ";
+        stamp.textContent = mode + ago + "s ago";
+      }
+
+      /** The next poll, on the card's served cadence; a card that is gone is not polled again. */
+      function schedule(name, secs) {
+        const state = CARD_LIVE.get(name);
+        if (!state) return;
+        clearTimeout(state.timer);
+        state.timer = secs > 0 ? setTimeout(() => loadCard(name), secs * 1000) : null;
+      }
+
+      /**
+       * One card. 404 is the panel-off contract — the stanza is absent, so the
+       * panel does not exist. Anything else but 200 or 304 is configured and
+       * failing to answer, which is a fault worth the banner and a body that
+       * says why. What the payload says about itself (`health`) outranks how
+       * old it is. A 304 redraws the kept body, advanced to now.
+       */
+      async function loadCard(name) {
+        const wrap = ensurePanel(name);
+        if (!CARD_LIVE.has(name)) CARD_LIVE.set(name, { etag: null, resp: null, at: 0, checked: 0, timer: null });
+        const state = CARD_LIVE.get(name);
+        let resp = null;
+        let next = 0;
+        try {
+          const headers = state.etag && state.resp ? { "if-none-match": state.etag } : {};
+          const res = await fetch("/api/card/" + encodeURIComponent(name), { cache: "no-store", headers });
+          if (res.status === 304 && state.resp) {
+            state.checked = Date.now();
+            resp = advanced(state.resp, Math.round((state.checked - state.at) / 1000));
+            next = state.resp.refresh;
+          } else {
+            const body = await res.json().catch(() => null);
+            if (res.ok && body && Array.isArray(body.items)) {
+              resp = body;
+              Object.assign(state, { etag: res.headers.get("etag"), resp: body, at: Date.now(), checked: Date.now() });
+              next = body.refresh;
+              const health = payloadHealth(body.health);
+              if (health) noteSource(name, health.state, health.why);
+              else noteSource(name, body.stale ? "stale" : "live");
+            } else if (res.status === 404) {
+              Object.assign(state, { etag: null, resp: null });
+              SOURCE_STATE.delete(name);
+              paintConnState();
+            } else {
+              resp = { card: name, error: (body && body.error) || "HTTP " + res.status };
+              Object.assign(state, { etag: null, resp });
+              next = DEFAULT_REFRESH_S;
+              noteSource(name, "absent", resp.error);
+            }
+          }
+        } catch {
+          /* the HUD server itself is gone; hide rather than shout, and keep asking */
+          next = DEFAULT_REFRESH_S;
+        }
+        if (name === "board") setDial(resp && !resp.error ? resp : null);
+        renderCard(resp, wrap);
+        paintLiveStamp(name);
+        schedule(name, Number.isInteger(next) ? next : DEFAULT_REFRESH_S);
+      }
+
+      /** The cadence for a card whose answer carried none — an error, or a server that is gone. */
+      const DEFAULT_REFRESH_S = 60;
+
+      /**
+       * One stream for the page. `hello` names the cards it will push for —
+       * sent on every (re)connect, so a card changed while the stream was down
+       * is refetched then; `card` names one to refetch now. On an error the
+       * browser reconnects by itself, and until it does every panel says
+       * "polling" and its timer carries it.
+       */
+      function openStream() {
+        if (!window.EventSource) return;
+        const stream = new EventSource("/api/events");
+        stream.addEventListener("hello", (ev) => {
+          let data = null;
+          try {
+            data = JSON.parse(ev.data);
+          } catch {
+            /* a frame that is not JSON names nothing */
+          }
+          STREAM.open = !!(data && data.watching);
+          STREAM.cards = new Set(data && Array.isArray(data.cards) ? data.cards : []);
+          for (const name of STREAM.cards) if (CARD_LIVE.has(name)) loadCard(name);
+          for (const name of CARD_LIVE.keys()) paintLiveStamp(name);
+        });
+        stream.addEventListener("card", (ev) => {
+          let data = null;
+          try {
+            data = JSON.parse(ev.data);
+          } catch {
+            return;
+          }
+          if (data && typeof data.name === "string" && CARD_LIVE.has(data.name)) loadCard(data.name);
+        });
+        stream.addEventListener("error", () => {
+          STREAM.open = false;
+          for (const name of CARD_LIVE.keys()) paintLiveStamp(name);
+        });
+      }
+
+      /** ⟳ : the tree, the cards, the two remaining proxied sources, and a real peers re-poll. */
       async function refreshAll() {
         const button = el("refresh");
         button.disabled = true;
         try {
           await Promise.all([
             loadTree(),
-            loadBoard(),
+            loadCards(),
             loadDigest(),
             loadSessions(),
             loadLoadout(),
@@ -2214,10 +2993,15 @@
       // have answered — the tree for /n/, the sessions panel for /s/. The
       // remaining panels are not addressable, so nothing waits on them.
       Promise.all([loadTree(), loadSessions()]).then(applyLocation);
-      loadBoard();
+      loadCards();
       loadDigest();
       loadPeers();
       loadLoadout();
+      openStream();
+      // The stamps' "Ns ago" is the only thing that moves every second.
+      setInterval(() => {
+        for (const name of CARD_LIVE.keys()) paintLiveStamp(name);
+      }, 1000);
     </script>
   </body>
 </html>

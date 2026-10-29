@@ -48,6 +48,7 @@ import {
   hasDatePrefix,
   pathPattern,
 } from "./hud-contract.mjs";
+import { KINDS as CARD_KINDS } from "./cards/registry.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -203,6 +204,19 @@ export const REGIONS = {
       `- **Key order is not significant** and neither is formatting. Read keys and values; anything that depends on their arrangement is depending on something no serializer preserves.`,
     ].join("\n"),
 
+  /** Every card kind the design names, and which this release serves. */
+  "cards-kinds-table": () =>
+    table(
+      ["kind", "status", "reads", "rows from", "degraded when"],
+      Object.entries(CARD_KINDS).map(([k, spec]) => [
+        code(k),
+        spec.status === "now" ? "**now**" : "next",
+        cell(spec.reads),
+        cell(spec.rows),
+        cell(spec.degraded),
+      ]),
+    ),
+
   /** How a slug is derived — the one algorithm the docs must state exactly. */
   "slug-rule": () =>
     `A slug is the title, lowercased, reduced to ${code(SLUG.alphabet)}, with ${SLUG.stopwords
@@ -325,6 +339,7 @@ const BEGIN = /<!--\s*@generated-begin:\s*([\w-]+)\s*-->/g;
 
 /** Every file that carries at least one marked region. */
 const REGION_FILES = Object.freeze([
+  "docs/CARDS.md",
   "docs/CLI.md",
   "docs/SOURCES.md",
   "skills/hud/SKILL.md",
