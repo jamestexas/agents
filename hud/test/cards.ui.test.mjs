@@ -182,3 +182,14 @@ test("gates: three dots, and a fourth for outputs when the run recorded it", () 
   assert.deepEqual(four.kids.map((k) => k.cls), ["gate g-ok", "gate g-ok", "gate g-ok", "gate g-fail"]);
   assert.match(four.title, /outputs fail$/);
 });
+
+test("a run whose session went quiet or died is struck through, and its phase says which", () => {
+  assert.match(CARDS_BLOCK, /else if \(r\.liveness === "stale" \|\| r\.liveness === "abandoned"\) tr\.className = "stale-run";/);
+  const phase = between('        phase: ["phase",', "        phases: [");
+  assert.match(phase, /r\.liveness \+ " · " \+ \(r\.phase \|\| DASH\)/, "stale · settle, not a bare settle");
+  const cssAt = html.indexOf(".prgrid tr.stale-run td {");
+  assert.ok(cssAt !== -1);
+  const css = html.slice(cssAt, html.indexOf("}", cssAt));
+  assert.match(css, /color:\s*var\(--muted\)/);
+  assert.match(css, /text-decoration:\s*line-through/);
+});

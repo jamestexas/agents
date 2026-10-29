@@ -7,6 +7,7 @@
 // cannot read the same source two ways.
 
 import { createHash } from "node:crypto";
+import fs from "node:fs";
 
 import { errText } from "../errtext.mjs";
 import { DEFAULT_REFRESH_S, KINDS, SHAPES, getCard } from "./registry.mjs";
@@ -16,6 +17,29 @@ import { joinRows } from "./join.mjs";
 export const MAX_ROWS = 200;
 
 /**
+ * The liveness probe a normaliser may use: is a pid alive, and when was a
+ * file last written. Read-only; signal 0 checks existence and sends nothing,
+ * and EPERM means the process exists under another user.
+ */
+const probe = {
+  alive(pid) {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (e) {
+      return e.code === "EPERM";
+    }
+  },
+  mtimeMs(p) {
+    try {
+      return fs.statSync(p).mtimeMs;
+    } catch {
+      return null;
+    }
+  },
+};
+
+/**
  * Items from a kind's rows: normalised, sorted by the shape, scoped.
  *
  * @returns {{items: object[], scanned: number, truncated: boolean, rejected: number}}
@@ -23,8 +47,9 @@ export const MAX_ROWS = 200;
 function shapeRows(shape, read, ctx, opts) {
   let rejected = 0;
   const items = [];
+  const shapeCtx = { ...ctx, probe: ctx.probe ?? probe };
   for (const row of read.rows ?? []) {
-    const item = shape.normalize(row, ctx);
+    const item = shape.normalize(row, shapeCtx);
     if (item === null) rejected++;
     else items.push(item);
   }

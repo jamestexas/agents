@@ -95,7 +95,7 @@ dropped and counted in the response's `rejected`.
 
 | shape | rows are | derives | scopes | default columns |
 | --- | --- | --- | --- | --- |
-| `review-state` | a review run's `state.json` | `project`, `running`, `elapsed_s`, `phase_seconds`, `pr_url`, `note_url`; `phases`, `early` and `review_state` rebuilt field by field | `open` (running or not yet posted), `all` | the sixteen the REVIEW RUNS panel shows |
+| `review-state` | a review run's `state.json` | `project`, `liveness`, `running`, `elapsed_s`, `phase_seconds`, `pr_url`, `note_url`; `phases`, `early` and `review_state` rebuilt field by field | `open` (running or not yet posted), `all` | the sixteen the REVIEW RUNS panel shows |
 | `work-board` | a row of the local work-board service | `pr_url` from `repo` + `number` or the row's `url` (null for a row whose `kind` is not `pr`); keeps `number`, `url`, `title`, `state`, `reason`, `kind`, `repo` | — | `pr`, `title`, `why`, `verdict`, `gates`, `note`, `posted`, `threads` |
 
 The field-by-field contract of `review-state` — what each key means, what is
@@ -105,6 +105,17 @@ nulled, what is dropped — is written up under *reviews* in
 file the glob names that is not a JSON object is still a row — `unreadable:
 true`, the path, the reason — because a run whose state cannot be read is a
 fact about the tree, not an absence from it. This shape rejects nothing.
+
+`liveness` is one of `running`, `stale`, `abandoned`, `failed` or `done`, and
+`running` is true only for the first. A run the writer recorded as
+`abandoned` or `failed` is that; a run that has ended is `done`. A run not
+yet ended that names an `owner` (the session, pid and transcript that
+`state.mjs init --pending` records) is `abandoned` once that pid is gone,
+and `stale` while the pid lives but its transcript has been quiet for more
+than 10 minutes (`STALE_AFTER_MS`). A run with no `owner` keeps the older
+rule: not ended is running. The page never heals a run. The probe only
+reads (`kill -0`, a `stat`), and recording `abandoned` is the writer's job,
+done by its `SessionEnd` hook. `owner` itself never reaches the page.
 
 `work-board` rejects a row that is not an object (counted in `rejected`) and
 also reads the payload's **self-report** — `tick_status` and `degradations`,

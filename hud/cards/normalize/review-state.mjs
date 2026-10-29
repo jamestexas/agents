@@ -225,15 +225,36 @@ export function phaseSeconds(phases, now) {
   return out;
 }
 
+/** A run whose owner's transcript has been quiet this long is shown stale. */
+export const STALE_AFTER_MS = 10 * 60_000;
+
+/**
+ * running | stale | abandoned | failed | done, from the file alone plus a
+ * probe of the owner process. The page only ever reads; healing a dead run
+ * is the SessionEnd hook's job, so this never writes. A run with no owner
+ * (written before owners were recorded, or outside Claude Code), or a
+ * context with no probe, keeps the old rule: not ended is running.
+ */
+function liveness(state, probe, now) {
+  if (state.phase === "abandoned" || state.phase === "failed") return state.phase;
+  if (state.ended != null) return "done";
+  const o = state.owner;
+  if (!isObject(o) || !probe) return "running";
+  if (Number.isInteger(o.pid) && !probe.alive(o.pid)) return "abandoned";
+  const m = typeof o.transcript_path === "string" ? probe.mtimeMs(o.transcript_path) : null;
+  if (m != null && now - m > STALE_AFTER_MS) return "stale";
+  return "running";
+}
+
 /**
  * One item for one row. The item carries the named state fields and the
- * derived ones — `running`, `elapsed_s`, `phase_seconds`, `pr_url`,
+ * derived ones — `liveness`, `running`, `elapsed_s`, `phase_seconds`, `pr_url`,
  * `note_url` — and nothing else from the file. An unreadable row is the item,
  * as it came: a run whose state cannot be read is shown in place, not
  * rejected, so this shape never returns null.
  *
  * @param {{path: string, project: string|null, data?: object, unreadable?: true, error?: string}} row
- * @param {{now: number}} ctx
+ * @param {{now: number, probe?: {alive: (pid: number) => boolean, mtimeMs: (path: string) => number|null}}} ctx
  */
 export function normalize(row, ctx) {
   if (row.unreadable) return row;
@@ -250,8 +271,10 @@ export function normalize(row, ctx) {
   else delete item.early;
   const rs = sanitizeReviewState(state.review_state);
   if (rs) item.review_state = rs;
-  // The contract spells a run that has not finished as `ended: null`.
-  item.running = item.ended == null;
+  // The contract spells a run that has not finished as `ended: null`; it is
+  // running only while its owner, when it names one, is still alive.
+  item.liveness = liveness(state, ctx.probe, now);
+  item.running = item.liveness === "running";
   item.elapsed_s = elapsedSeconds(item.started, item.ended, now);
   item.phase_seconds = phaseSeconds(phases, now);
   item.pr_url = prUrl({ repo: item.repo, number: item.pr });

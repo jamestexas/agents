@@ -732,6 +732,12 @@
       .prgrid .phases .live {
         color: var(--cyan);
       }
+      /* A run nothing will finish: say so quietly rather than keep it lit. */
+      .prgrid tr.stale-run td {
+        color: var(--muted);
+        text-decoration: line-through;
+        text-decoration-color: var(--yellow);
+      }
       .prgrid tr.unreadable .warn {
         color: var(--yellow);
       }
@@ -2340,12 +2346,14 @@
         }],
         project: ["project", "the project directory the run wrote into", (tr, r) => cell(tr, r.project, "project")],
         mode: ["mode", "default, light, deep, or engage", (tr, r) => cell(tr, r.mode, "mode")],
-        phase: ["phase", "where the run is; while it runs, with its elapsed time", (tr, r) => {
+        phase: ["phase", "where the run is; while it runs, with its elapsed time; stale or abandoned when its session went quiet or died", (tr, r) => {
+          // A run nothing will finish names why before where it stopped.
+          const dead = (r.liveness === "stale" || r.liveness === "abandoned") && r.phase !== r.liveness;
           cell(
             tr,
-            r.running ? (r.phase || DASH) + " · " + fmtElapsed(r.elapsed_s) : r.phase,
+            r.running ? (r.phase || DASH) + " · " + fmtElapsed(r.elapsed_s) : dead ? r.liveness + " · " + (r.phase || DASH) : r.phase,
             "phase",
-            (r.running ? "running for " : "took ") + fmtElapsed(r.elapsed_s),
+            (r.running ? "running for " : dead ? r.liveness + " after " : "took ") + fmtElapsed(r.elapsed_s),
           );
         }],
         phases: ["phases", "minutes per phase: ev q se re tr te; … marks the phase still running", (tr, r) => phasesCell(tr, r)],
@@ -2434,6 +2442,7 @@
           return tr;
         }
         if (r.running) tr.className = "running";
+        else if (r.liveness === "stale" || r.liveness === "abandoned") tr.className = "stale-run";
         const j = joined(r);
         for (const id of columns) {
           const spec = CELLS[id];
