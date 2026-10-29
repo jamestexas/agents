@@ -444,3 +444,41 @@ test('abandon and fail are terminal', () => {
   assert.equal(read(other).phase, 'failed');
   assert.notEqual(run(other, ['abandon']).status, 0, 'nothing follows a terminal state');
 });
+
+test('replaying a whole run reproduces state.json byte for byte', () => {
+  const dir = copyGood();
+  const gates = ['ledger: 3 asked, 3 decided+unresolved — ok', 'triage: 0 in, 0 out — ok', 'blocking: 0 finding(s), evidence-backed — ok', ''].join('\n');
+  const calls = [
+    [['init', '--pending', 'pr=owner/repo#1']],
+    [['init', 'viewer=v']],
+    [['phase', 'questions']],
+    [['output', 'questions']],
+    [['phase', 'settle']],
+    [['output', 'settle']],
+    [['phase', 'teach']],
+    [['output', 'teach']],
+    [['finish', 'note=projects/p/notes/PR-1.md', 'gates=-'], gates],
+  ];
+  fs.writeFileSync(path.join(dir, 'work', 'candidates.md'), '');
+  for (const [args, input] of calls) assert.equal(run(dir, args, input).status, 0, args.join(' '));
+  const first = fs.readFileSync(path.join(dir, 'state.json'));
+  const lines = events(dir).length;
+  const s = read(dir);
+  assert.equal(s.phase, 'rendered');
+  assert.deepEqual(s.skipped, [{ phase: 'refute', reason: 'zero-candidates' }, { phase: 'triage', reason: 'zero-candidates' }]);
+
+  // Every op but phase is a replay and exits 0. A phase the run has passed
+  // is refused as behind it and writes nothing, so the state is unchanged
+  // either way.
+  for (const [args, input] of calls) {
+    const r = run(dir, args, input);
+    if (args[0] === 'phase') {
+      assert.equal(r.status, 1, args.join(' '));
+      assert.match(r.stderr, /is behind rendered/);
+    } else {
+      assert.equal(r.status, 0, `${args.join(' ')}: ${r.stderr}`);
+    }
+  }
+  assert.ok(fs.readFileSync(path.join(dir, 'state.json')).equals(first), 'state.json is byte-identical');
+  assert.equal(events(dir).length, lines);
+});
