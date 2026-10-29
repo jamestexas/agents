@@ -13,10 +13,14 @@
 //   sessions — /api/sessions               (read `~/.claude`, graft via lectio)
 //   loadout  — /api/loadout                (what skills/agents are installed,
 //                                           where from, and where that drifts)
-//   reviews  — /api/reviews[?scope=open]   (each review run's state.json,
-//                                           read out of the content tree; and,
-//                                           when the board is on too, joined
-//                                           onto each board row as `review`)
+//   cards    — /api/card/<name>[?scope=…]  (any card the registry under
+//                                           cards/ holds: today `reviews`, each
+//                                           review run's state.json read out
+//                                           of the content tree; and, when the
+//                                           board is on too, joined onto each
+//                                           board row as `review`)
+//              /api/reviews[?scope=open]   (the reviews card under its old
+//                                           envelope, an alias for one release)
 //
 // Plus the shell routes: /, /ui/*, and the deep links /n/<path> and
 // /s/<group>/<id>, which all serve ui/index.html so a bookmarked view loads
@@ -41,10 +45,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { lectioGraft, listSessions } from "./sessions.mjs";
 import { errText } from "./errtext.mjs";
-import { DEFAULT_REVIEWS_GLOB, expandHome } from "./cards/registry.mjs";
+import { DEFAULT_REVIEWS_GLOB, expandHome, getCard, loadCards } from "./cards/registry.mjs";
 import { LIMITS as FS_LIMITS, SKIP_NAMES, parseGlob as parseReviewsGlob } from "./cards/kinds/fs.mjs";
 import { intOrNull, isObject, prUrl, strOrNull } from "./cards/normalize/review-state.mjs";
-import { MAX_ROWS, collectRows } from "./cards/serve.mjs";
+import { MAX_ROWS, collectRows, serveCard } from "./cards/serve.mjs";
 
 // The reviews layer's pieces now live under cards/; the names stay exported
 // from here so the tests and the CLI that import them keep working.
@@ -1631,74 +1635,47 @@ export function listReviews(root, opts = {}) {
   return { items, scanned, truncated };
 }
 
-/**
- * How the reviews source is configured, read once for both routes that need
- * it: null when the table is absent, `{error}` when its glob cannot be
- * honoured, else the root and glob to walk.
- */
-function reviewsSource(cfg, root) {
-  const source = sourceOf(cfg, "reviews");
-  if (!source) return null;
-  const reviewsRoot =
-    typeof source.root === "string" && source.root !== "" ? expandHome(source.root) : root;
-  const glob =
-    typeof source.glob === "string" && source.glob !== "" ? source.glob : DEFAULT_REVIEWS_GLOB;
-  const parsed = parseReviewsGlob(glob);
-  if (parsed.error) return { error: `reviews.glob in ${CONFIG_TOML}: ${parsed.error}` };
-  return { root: reviewsRoot, glob };
+// ------------------------------------------------------------------- cards
+//
+// `GET /api/card/<name>` serves any card the registry holds: the declared
+// `[cards.*]`, or the ones synthesised from legacy `[sources.*]`. The registry
+// is rebuilt from the config on every request, as every other route re-reads
+// the config, so an edit to hud.toml is live on the next refresh. `/api/reviews`
+// is the reviews card under its old envelope, kept for one release so
+// bookmarks and tests keep working.
+
+/** The registry for this request. */
+function cardsOf(root) {
+  return loadCards(loadConfig(root), { hudRoot: root, configFile: CONFIG_TOML });
+}
+
+function cardCtx(root, dyn) {
+  return { hudRoot: root, configFile: CONFIG_TOML, now: dyn.now, sendJson };
 }
 
 /**
- * `open` is what the runs panel shows once the board carries each PR's latest
- * run: a run still going, or one that has not posted — the rows the board
- * cannot stand in for. A row whose state could not be read has no `posted`
- * and stays in view, as it does under `all`. `all` is every run, the panel's
- * original answer.
+ * `/api/card/<name>`: one path segment, nothing after it. The name is read
+ * off the parsed pathname, so `%2F` is already a slash here and is refused
+ * like one; a name the registry would not accept is simply not in it.
  */
-const REVIEW_SCOPES = new Set(["open", "all"]);
-
-function inReviewScope(item, scope) {
-  if (scope === "all") return true;
-  return item.running === true || item.posted == null;
+function cardNameOf(pathname) {
+  if (!pathname.startsWith("/api/card/")) return null;
+  const name = pathname.slice("/api/card/".length);
+  return name !== "" && !name.includes("/") ? name : null;
 }
 
-/**
- * Not configured ⇒ 404, the panel-off contract sessions and loadout use: there
- * is no snapshot tier, so "unconfigured" and "down" are not two states worth
- * telling apart. A glob the walker cannot honour is the one way this source
- * can be configured and still unable to answer, and that is a 503 with the
- * reason, not a quiet 404 — a typo in `hud.toml` should read as a fault. So
- * is a `scope` outside the vocabulary: 400, not a silent fall-back to `all`.
- */
-function serveReviews(res, root, url) {
-  const source = reviewsSource(loadConfig(root), root);
-  if (!source) {
-    return sendJson(res, 404, {
-      source: "reviews",
-      error: `reviews is not configured in ${CONFIG_TOML}`,
-    });
-  }
-  if (source.error) return sendJson(res, 503, { source: "reviews", error: source.error });
-  const scope = url.searchParams.get("scope") ?? "all";
-  if (!REVIEW_SCOPES.has(scope)) {
-    return sendJson(res, 400, {
-      source: "reviews",
-      error: `scope must be one of ${[...REVIEW_SCOPES].join(", ")}`,
-    });
-  }
-  const { items, truncated } = listReviews(source.root, { glob: source.glob });
-  const kept = items.filter((item) => inReviewScope(item, scope));
-  const shown = kept.slice(0, REVIEWS_LIMITS.maxReviews);
-  return sendJson(res, 200, {
-    source: "reviews",
-    stale: false,
-    generated_at: new Date().toISOString(),
-    root: source.root,
-    glob: source.glob,
-    scope,
-    count: shown.length,
-    truncated: truncated || shown.length < kept.length,
-    items: shown,
+function serveCardRoute(res, root, url, dyn, name) {
+  const card = getCard(cardsOf(root).cards, name);
+  return serveCard(res, cardCtx(root, dyn), card, { name, scope: url.searchParams.get("scope") });
+}
+
+/** The reviews card under the old `/api/reviews` envelope: `source`, `glob`, `scope`, default scope `all`. */
+function serveReviews(res, root, url, dyn) {
+  const card = getCard(cardsOf(root).cards, "reviews");
+  return serveCard(res, cardCtx(root, dyn), card, {
+    name: "reviews",
+    legacy: "reviews",
+    scope: url.searchParams.get("scope"),
   });
 }
 
@@ -1948,6 +1925,10 @@ export function createServer(opts = {}) {
     // showing a snapshot.
     peersFresh: false,
     inFlight: null,
+    // The clock the cards read `elapsed_s` against. A test seam: two routes
+    // serving one tree must agree to the second, which they cannot when each
+    // reads `Date.now()` a few milliseconds apart.
+    now: opts.now || Date.now,
   };
 
   const refresh = () => {
@@ -2025,9 +2006,12 @@ function handle(req, res, root, uiDir, dyn, refresh) {
   // Same watch-only shape as sessions: one GET route, no POST case above, so
   // every mutating verb lands on the 405 arm.
   if (pathname === "/api/loadout") return serveLoadout(res, root);
-  // Reviews reads the content tree and nothing else: one GET route, no POST
-  // case above, so every mutating verb lands on the 405 arm.
-  if (pathname === "/api/reviews") return serveReviews(res, root, url);
+  // Cards read and nothing else: one GET route per card, no POST case above,
+  // so every mutating verb lands on the 405 arm. `/api/reviews` is the
+  // reviews card under its old envelope.
+  const cardName = cardNameOf(pathname);
+  if (cardName !== null) return serveCardRoute(res, root, url, dyn, cardName);
+  if (pathname === "/api/reviews") return serveReviews(res, root, url, dyn);
   // Matched against the raw target rather than `url.pathname`: the URL parser
   // folds `..` away, and a traversal attempt must be refused outright rather
   // than quietly rewritten into whichever route it normalises to.
@@ -2079,15 +2063,16 @@ function serveBoard(res, root, dyn) {
   const cfg = loadConfig(root);
   const source = sourceOf(cfg, "board");
   const url = source && typeof source.url === "string" ? source.url : null;
-  // With both sources on, each board row carries its latest review run. The
-  // join is best effort: a reviews tree that cannot be read leaves the board
-  // as the upstream sent it rather than turning a board answer into a fault.
-  const reviews = reviewsSource(cfg, root);
+  // With the reviews card on too, each board row carries its latest review
+  // run. The join is best effort: a reviews tree that cannot be read leaves
+  // the board as the upstream sent it rather than turning a board answer into
+  // a fault.
+  const reviews = getCard(loadCards(cfg, { hudRoot: root, configFile: CONFIG_TOML }).cards, "reviews");
   const decorate =
     reviews && !reviews.error
       ? (data) => {
           try {
-            return joinReviews(data, listReviews(reviews.root, { glob: reviews.glob }).items);
+            return joinReviews(data, collectRows(reviews, { now: dyn.now() }).items);
           } catch {
             return data;
           }
