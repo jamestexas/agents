@@ -256,6 +256,39 @@ itself, every panel reads `polling` meanwhile, and each `hello` on reconnect
 refetches the cards it names, so a change made while the stream was down is
 not missed.
 
+### Proving live updates
+
+Headlessly, `node hud/test/live-smoke.mjs` (also run by `node --test hud/test`)
+starts the real server on a free port against a tmp `HUD_ROOT`, opens the
+stream, writes one run's `state.json` at phase `evidence` with `ended: null`,
+then rewrites it three times — `questions`; `settle` with one early signal;
+`rendered` with a verdict and `ended` — and asserts after each write that the
+stream names `reviews` within a second, the card's ETag moves, the row shows
+the phase, `early` and `running` the file says, and a poll with that ETag
+before the next write is a 304. It prints one line:
+
+```
+live-smoke: 4 writes, event lag 250/262/262/262 ms (max 262), 4 polls 304, total 1138 ms
+```
+
+and fails if the whole sequence takes five seconds or more.
+
+By hand, against a real review: `hud restart`, open the page and its network
+panel, and from an agent session run `/review <owner>/<repo>#<N> --fast` on a
+small open PR. What should be seen, with no reload at any point:
+
+1. The run appears on REVIEW RUNS within a second of the skill's first
+   `state.json` write, its stamp reading `live · Ns ago`.
+2. The `phases` cell advances at each phase as the skill records it.
+3. `early` lights if the run finds an early signal.
+4. When the run posts, the row leaves the `open` scope.
+5. Between those changes, the network panel's polls of `/api/card/reviews`
+   are 304s, every 15 s while the run is in flight.
+
+Record the PR, the timestamps in `state.json`'s `phases` against the times the
+page showed each change, and whether any refresh was manual. A change that
+needed a reload is a failure of this section, not a slow page.
+
 ## Legacy config
 
 A `hud.toml` with no `[cards]` table has its `[sources.*]` tables synthesised
