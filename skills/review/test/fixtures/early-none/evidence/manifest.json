@@ -1,0 +1,4 @@
+{"version":1,"probes":[
+ {"name":"core/diff","status":"RAN","file":"probes/core/diff.out","err":"probes/core/diff.err","sha256":"a","reason":"","exit":0,"cmd":"git diff","started":"t","ended":"t"},
+ {"name":"go-graph/build","status":"RAN","file":"probes/go-graph/build.out","err":"probes/go-graph/build.err","sha256":"c","reason":"","exit":0,"cmd":"go build ./...","started":"t","ended":"t"}
+]}

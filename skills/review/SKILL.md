@@ -159,6 +159,23 @@ candidates; refute and triage count only what is in `work/candidates.md`.
 Read its three count lines; resolve a `conflict:` row yourself from the two
 cited files before phase 4, and rewrite that cell.
 
+Then the early signal, by script, in every mode:
+
+```bash
+node $SKILL/scripts/early-signal.mjs <run>
+```
+
+It names every candidate that already rests on hard evidence: one whose
+row carries a RAN claim reading a probe the manifest marks FAILED
+(`probe-failed:<probe>`), or one the reader tagged `[Blocking]` with at
+least one RAN claim behind it (`blocking-ran`). It writes `work/early.md`
+and `work/early.json` and records the list in `state.json`, so the HUD row
+shows the count while the run is in flight. Print its count line. Nothing
+in it is posted and nothing in it is a finding yet: `candidates.md` is
+untouched, so refute and triage see the same list they would have without
+it, and the rendered artifact carries it as "Early signal (unrefuted)" only
+while it is non-empty.
+
 ## Phase 4 — Refute (one sub-agent, fresh)
 
 Skip under `--light`. `state.mjs <run> phase refute`. Dispatch

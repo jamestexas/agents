@@ -1686,6 +1686,7 @@ const REVIEW_FIELDS = [
   "findings",
   "note",
   "posted",
+  "early",
 ];
 
 /**
@@ -1787,6 +1788,24 @@ function sanitizePhases(v) {
 }
 
 /**
+ * The early signal as the panel may see it: `{count, items}` where each item
+ * is `{row, title, basis}` with an integer row and string title and basis.
+ * An entry of another shape is dropped and `count` is what survived, so the
+ * number shown is the number of lines the page could show. A value that is
+ * not an array is no block.
+ */
+function sanitizeEarly(v) {
+  if (!Array.isArray(v)) return undefined;
+  const items = [];
+  for (const e of v) {
+    if (!isObject(e) || !Number.isInteger(e.row)) continue;
+    if (typeof e.title !== "string" || typeof e.basis !== "string") continue;
+    items.push({ row: e.row, title: e.title, basis: e.basis });
+  }
+  return { count: items.length, items };
+}
+
+/**
  * Whole seconds per phase, in the file's order: `ended` minus `started`, or
  * now minus `started` for the phase still open. A phase whose times do not
  * parse is left out rather than shown as zero, so a missing number reads as
@@ -1834,6 +1853,9 @@ function readReviewState(root, rel, project, now) {
   const phases = sanitizePhases(state.phases);
   if (phases) item.phases = phases;
   else delete item.phases;
+  const early = sanitizeEarly(state.early);
+  if (early) item.early = early;
+  else delete item.early;
   const rs = sanitizeReviewState(state.review_state);
   if (rs) item.review_state = rs;
   // The contract spells a run that has not finished as `ended: null`.

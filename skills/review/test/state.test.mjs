@@ -119,6 +119,23 @@ test('posted records url, state and time, and moves the phase to posted', () => 
   assert.match(s.posted.at, ISO);
 });
 
+test('early copies work/early.json into state.early; an absent file is an empty list', () => {
+  const dir = copyGood();
+  run(dir, ['init']);
+  fs.writeFileSync(path.join(dir, 'work', 'early.json'), JSON.stringify([
+    { row: 1, title: 'parse before signature check', basis: 'blocking-ran', extra: 'dropped' },
+    'not an object',
+  ]));
+  let r = run(dir, ['early']);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(read(dir).early, [{ row: 1, title: 'parse before signature check', basis: 'blocking-ran' }]);
+  fs.rmSync(path.join(dir, 'work', 'early.json'));
+  r = run(dir, ['early']);
+  assert.equal(r.status, 0);
+  assert.deepEqual(read(dir).early, []);
+  assert.equal(run(dir, ['early', 'x=1']).status, 2, 'early takes no keys');
+});
+
 test('an unknown key or op is a usage error, not a silent field', () => {
   const dir = copyGood();
   assert.equal(run(dir, ['init', 'bogus=1']).status, 2);

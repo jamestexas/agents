@@ -118,6 +118,13 @@ const running = {
   started: RUNNING_STARTED,
   ended: null,
   verdict: null,
+  // Two early signals and two entries of the wrong shape.
+  early: [
+    { row: 1, title: "build broken by new import", basis: "probe-failed:go-graph/build", extra: EXTRA_CANARY },
+    { row: 3, title: "signature verified after parse", basis: "blocking-ran" },
+    { row: "4", title: "row is not an integer", basis: "blocking-ran" },
+    "not an object",
+  ],
   gates: { ledger: "ok", triage: null, blocking: null },
   probes: { total: 20, ran: 19, failed: 0, unavailable: 1 },
   findings: { blocking: 0, non_blocking: 1, question: 1, observation: 0 },
@@ -284,6 +291,16 @@ test("api reviews serves runs running-first with the derived fields", async (t) 
   // not a missing key, so the page can tell "untimed" from "unreadable".
   assert.deepEqual(done.phases, {});
   assert.deepEqual(done.phase_seconds, {});
+  // The early signal is served as a count plus the lines the page could
+  // show; an entry of the wrong shape is neither counted nor shown.
+  assert.deepEqual(run.early, {
+    count: 2,
+    items: [
+      { row: 1, title: "build broken by new import", basis: "probe-failed:go-graph/build" },
+      { row: 3, title: "signature verified after parse", basis: "blocking-ran" },
+    ],
+  });
+  assert.equal(done.early, undefined, "a state file without the key serves none");
 
   assert.equal(done.project, "example-two");
   assert.equal(done.running, false);
@@ -640,6 +657,12 @@ test("reviews panel is wired and only links", () => {
   assert.match(block, /function phaseMedians\b/, "and a median per phase across the loaded runs");
   assert.match(block, /median per phase across /, "named as such under the table");
   assert.match(block, /\.toFixed\(1\)/, "minutes to one decimal");
+  // The early signal sits beside the findings it anticipates, and only
+  // while the run is in flight.
+  assert.deepEqual(ids.slice(ids.indexOf("early"), ids.indexOf("early") + 2), ["early", "findings"]);
+  assert.match(block, /function earlyCell\b/);
+  assert.match(block, /r\.running && r\.early/, "a finished row shows nothing here");
+  assert.match(block, /e\.count > 0 \? " hot"/, "lit when there is one");
   assert.match(block, /function reviewStateCells\b/, "the block renders the review_state block");
   assert.match(block, /head_matches === false/, "a review behind the head is marked");
   assert.match(block, /awaiting_me > 0/, "a thread waiting on the reader is highlighted");

@@ -762,7 +762,8 @@
       .prgrid .v-comment {
         color: var(--yellow);
       }
-      .prgrid .findings.hot {
+      .prgrid .findings.hot,
+      .prgrid .early.hot {
         color: var(--hot);
       }
       /* Who is waiting on whom. A thread waiting on the reader is the one
@@ -2139,6 +2140,26 @@
         return cell(tr, span, "phases", words.join(" · "));
       }
 
+      /**
+       * The early signal: candidates that rested on hard evidence at phase 3
+       * and have not yet been refuted. Shown only while the run is in flight,
+       * lit when there is one; once a run has finished the findings columns
+       * carry the truth and this cell is a dash.
+       */
+      function earlyCell(tr, r) {
+        const e = r.running && r.early && typeof r.early === "object" ? r.early : null;
+        if (!e || typeof e.count !== "number") return cell(tr, undefined, "early");
+        const items = Array.isArray(e.items) ? e.items : [];
+        return cell(
+          tr,
+          e.count,
+          "early" + (e.count > 0 ? " hot" : ""),
+          items.length
+            ? items.map((x) => "row " + x.row + ": " + x.title + " (" + x.basis + ")").join("\n")
+            : "no candidate with hard evidence yet",
+        );
+      }
+
       /** The middle value; the mean of the two middle values when the count is even. */
       function median(xs) {
         const a = xs.slice().sort((x, y) => x - y);
@@ -2314,6 +2335,7 @@
             ? "probes: " + p.ran + " ran, " + p.failed + " failed, " + p.unavailable + " unavailable of " + p.total
             : "",
         );
+        earlyCell(tr, r);
         const f = r.findings && typeof r.findings === "object" ? r.findings : null;
         const n = (k) => (f && typeof f[k] === "number" ? f[k] : DASH);
         cell(
@@ -2391,6 +2413,7 @@
         ["threads", "threads", "unresolved review threads · awaiting me · awaiting the author"],
         ["gates", "gates", "ledger · triage · blocking"],
         ["unavail", "unavail", "probes that could not run"],
+        ["early", "early", "while the run is in flight: candidates with hard evidence not yet refuted"],
         ["findings", "B/N/Q/O", "findings: blocking / non-blocking / question / observation"],
         ["note", "note", "the run's note, in the tree"],
         ["posted", "posted", "the review as posted, linked"],

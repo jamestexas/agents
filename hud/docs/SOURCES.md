@@ -110,7 +110,10 @@ no parseable `started` is left out), `pr_url`
 `pr` is a positive integer), and `note_url` (the `/n/` tree route for the
 note's path, `.md` dropped — the same rule a tree click applies). `phases`
 itself is rebuilt as `{<name>: {started, ended}}`, strings or null, nothing
-else. Running rows sort first, then newest `started` first.
+else, and `early` — the candidates that rested on hard evidence at phase 3
+and have not yet been refuted — is served as `{count, items}` with each item
+`{row, title, basis}` and an entry of another shape dropped. Running rows
+sort first, then newest `started` first.
 
 A state file may also carry a `review_state` block — who has reviewed the PR
 and who is waited on — and it is the one nested object the server copies

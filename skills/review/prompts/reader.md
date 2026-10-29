@@ -12,7 +12,9 @@ line: `| <row#> | <Decision> |`, where Decision is one of:
   settled it, ending `→ candidate: <one line>` only if it yields a finding;
 - `**Unresolved** — <which probe or file was missing or UNAVAILABLE>`.
 
-A row that settles clean ends with no `→ candidate:` clause at all. Never
+A candidate may carry a leading `[Blocking]` tag when you believe it blocks
+merge (correctness, security, or data integrity); leave the tag off
+otherwise. A row that settles clean ends with no `→ candidate:` clause at all. Never
 write `→ candidate: none`: the merge collects every `→ candidate:` line into
 the triage input, so a "none" is a candidate that two later phases must
 spend effort dismissing. The two shapes:

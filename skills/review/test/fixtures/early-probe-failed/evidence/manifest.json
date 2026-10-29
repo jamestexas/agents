@@ -1,0 +1,5 @@
+{"version":1,"probes":[
+ {"name":"core/diff","status":"RAN","file":"probes/core/diff.out","err":"probes/core/diff.err","sha256":"a","reason":"","exit":0,"cmd":"git diff","started":"t","ended":"t"},
+ {"name":"go-graph/build","status":"FAILED","file":"probes/go-graph/build.out","err":"probes/go-graph/build.err","sha256":"c","reason":"exit 1","exit":1,"cmd":"go build ./...","started":"t","ended":"t"},
+ {"name":"deploy/staging","status":"UNAVAILABLE","file":"probes/deploy/staging.out","err":"probes/deploy/staging.err","sha256":"b","reason":"REVIEW_STAGING_WORKFLOW unset","exit":null,"cmd":"gh run list","started":"t","ended":"t"}
+]}

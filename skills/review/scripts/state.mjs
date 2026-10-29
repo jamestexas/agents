@@ -18,6 +18,8 @@
 //          from stdin when gates=- (pipe `check.mjs <run> | state.mjs ...`),
 //          otherwise check.mjs is re-run here. Explicit rather than "stdin if
 //          not a TTY", so a harness with an open-but-silent stdin cannot hang.
+//   early                copy work/early.json (early-signal.mjs's list) to
+//                        `early`; an absent or unreadable file is []
 //   posted url=<u> state=<s>   phase "posted"
 //
 // The schema is the HUD's contract (hud/server.mjs REVIEW_FIELDS):
@@ -25,7 +27,7 @@
 //    phases{<name>:{started,ended}}, started, ended, verdict,
 //    gates{ledger,triage,blocking}, probes{total,ran,failed,unavailable},
 //    findings{blocking,non_blocking,question,observation}, note,
-//    posted{url,state,at}|null}
+//    posted{url,state,at}|null, early[{row,title,basis}] (from phase 3 on)}
 // plus two keys the HUD ignores today: viewer, and (only when
 // evidence/pr/context.json exists) review_state:
 //   {authorship: own|peer|null, mine{state,at,head_matches},
@@ -38,7 +40,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const [run, op, ...rest] = process.argv.slice(2);
-const usage = () => { console.error('usage: state.mjs <run> init|phase <name>|finish|posted [k=v ...]'); process.exit(2); };
+const usage = () => { console.error('usage: state.mjs <run> init|phase <name>|early|finish|posted [k=v ...]'); process.exit(2); };
 if (!run || !op) usage();
 
 const statePath = path.join(run, 'state.json');
@@ -145,6 +147,16 @@ const ops = {
     s.gates = parseGates(args.gates === '-' ? fs.readFileSync(0, 'utf8') : runCheck());
     const context = jsonIf(ev('pr/context.json'));
     if (context) s.review_state = reviewState(context, s.viewer ?? null, s.head ?? null);
+    save(s);
+  },
+
+  early() {
+    kv([]);
+    const s = load();
+    const list = jsonIf(work('early.json'));
+    s.early = Array.isArray(list)
+      ? list.filter((e) => e && typeof e === 'object').map(({ row, title, basis }) => ({ row, title, basis }))
+      : [];
     save(s);
   },
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // render.mjs <run-dir> --title T --out FILE — assemble the review artifact.
-// Open sections come from work/summary.md, findings.json, impact.md. Everything
-// else is wrapped in <details> so a human reads a screen and their AI reads
+// Open sections come from work/summary.md, findings.json, early.json (only
+// when it names something), impact.md. Everything else is wrapped in <details> so a human reads a screen and their AI reads
 // the rest. It does not judge anything; check.mjs does the gating. A phase
 // file that is missing or not parseable becomes a labelled empty section, never
 // a crash. Without --out the artifact lands in <run>/work/artifact.md.
@@ -45,6 +45,16 @@ const findingLine = (f) => {
 const findingsMd = !Array.isArray(findings) ? '_findings.json not parseable_'
   : findings.length ? findings.map(findingLine).join('\n') : '_none confirmed_';
 
+// The early signal is open only while there is one: a candidate that rested
+// on hard evidence at phase 3 and that nothing since has refuted. Each line
+// says so, because the section sits beside findings that did pass the gates.
+const earlyDoc = w('early.json') ? tryJSON(w('early.json')) : [];
+const early = Array.isArray(earlyDoc) ? earlyDoc.filter((x) => x && typeof x === 'object') : [];
+const earlyMd = early.length
+  ? ['## Early signal (unrefuted)', '',
+     ...early.map((x) => `- row ${x.row}: ${x.title} — ${x.basis} (unrefuted at phase 3)`), '']
+  : [];
+
 const manifestDoc = e('manifest.json') ? tryJSON(e('manifest.json')) : { probes: [] };
 const manifest = Array.isArray(manifestDoc?.probes) ? manifestDoc.probes : undefined;
 const order = { UNAVAILABLE: 0, FAILED: 1, RAN: 2 };
@@ -65,6 +75,7 @@ const md = [
   `# ${title}`, '',
   noH1(w('summary.md')), '',
   '## Confirmed findings', '', findingsMd, '',
+  ...earlyMd,
   '## Job-level impact', '', noH1(w('impact.md')) || '_no impact section produced_', '',
   '---', '',
   details('Decision ledger', w('ledger.md')),
