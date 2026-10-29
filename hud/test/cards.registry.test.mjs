@@ -57,18 +57,26 @@ function fromToml(text) {
 // --------------------------------------------------------------- (a) parse
 
 test("[cards.reviews] with kind fs parses to the card the plan names", () => {
-  const { cards, errors } = fromToml(REVIEWS_TOML);
+  const { cards, errors, warnings } = fromToml(REVIEWS_TOML);
   assert.deepEqual(errors, []);
+  assert.deepEqual(warnings, [], "the canonical spelling has nothing to say");
   assert.deepEqual([...cards.keys()], ["reviews"]);
   assert.deepEqual(cards.get("reviews"), REVIEWS_CARD);
   assert.deepEqual(getCard(cards, "reviews"), REVIEWS_CARD);
   assert.equal(getCard(cards, "board"), null, "an undeclared card is null, not undefined");
 });
 
-test("`source` is accepted as the design doc's spelling of `kind`", () => {
-  const { cards } = fromToml(REVIEWS_TOML.replace('kind    = "fs"', 'source  = "fs"'));
+test("`source` is accepted as the design doc's spelling of `kind`, with one warning so configs converge", () => {
+  const { cards, errors, warnings } = fromToml(REVIEWS_TOML.replace('kind    = "fs"', 'source  = "fs"'));
   assert.equal(cards.get("reviews").kind, "fs");
   assert.equal("source" in cards.get("reviews"), false, "the card carries one name for it");
+  assert.deepEqual(errors, [], "a warning, not a fault: the card is served");
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /^cards\.reviews: `source` is read as `kind`; spell it `kind = "fs"`$/);
+  // `kind` present wins silently, whatever `source` says.
+  const both = loadCards({ cards: { a: { kind: "fs", source: "http", glob: "a/*", shape: "review-state" } } }, ENV);
+  assert.equal(both.cards.get("a").kind, "fs");
+  assert.deepEqual(both.warnings, []);
 });
 
 test("title defaults to the name, columns to the shape's, root to the HUD root", () => {

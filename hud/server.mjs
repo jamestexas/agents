@@ -2214,6 +2214,13 @@ if (invokedDirectly) {
   for (const warn of cfg.warns) {
     process.stderr.write(`hud: ${cfg.file}: ${warn}\n`);
   }
+  // The card registry's complaints belong here for the same reason: a stanza
+  // it refused is served as a 503 per request, and a spelling it tolerated
+  // is served without comment, so startup is the one time either is said.
+  const registry = loadCards(cfg.data, { hudRoot: root, configFile: CONFIG_TOML });
+  for (const line of [...registry.errors, ...registry.warnings]) {
+    process.stderr.write(`hud: ${line}\n`);
+  }
   const server = createServer({ root });
   server.listen(port, "127.0.0.1", () => {
     process.stdout.write(`hud: ${root}\nhud: http://127.0.0.1:${port}/\n`);

@@ -96,9 +96,10 @@ const isStringList = (v) => Array.isArray(v) && v.every((s) => typeof s === "str
  *
  * @param {unknown} cfg the parsed config (`loadConfig`'s value)
  * @param {{hudRoot: string, configFile?: string}} env
- * @returns {{cards: Map<string, object>, layout: {order: string[]}, errors: string[]}}
+ * @returns {{cards: Map<string, object>, layout: {order: string[]}, errors: string[], warnings: string[]}}
  *   `cards` holds a card per name, or `{name, error}` for one that cannot be
- *   served; `errors` repeats every such reason so `hud status` can list them.
+ *   served; `errors` repeats every such reason so `hud status` can list them;
+ *   `warnings` are spellings that were accepted but should converge.
  */
 export function loadCards(cfg, env = {}) {
   const conf = isObject(cfg) ? cfg : {};
@@ -106,6 +107,8 @@ export function loadCards(cfg, env = {}) {
   const configFile = env.configFile ?? "hud.toml";
   const cards = new Map();
   const errors = [];
+  const warnings = [];
+  const warn = (line) => warnings.push(line);
 
   // `[cards]` present — even empty — is the answer; `[sources.*]` is read only
   // in its absence, so a tree that has moved to cards is not also haunted by
@@ -118,7 +121,7 @@ export function loadCards(cfg, env = {}) {
       errors.push(`${where}: name must be letters, digits, '_' or '-'`);
       continue;
     }
-    const built = buildCard(name, raw, { hudRoot, configFile, where });
+    const built = buildCard(name, raw, { hudRoot, configFile, where, warn });
     if (built.error) {
       errors.push(built.error);
       cards.set(name, { name, error: built.error });
@@ -127,7 +130,7 @@ export function loadCards(cfg, env = {}) {
     }
   }
 
-  return { cards, layout: loadLayout(conf.layout, errors), errors };
+  return { cards, layout: loadLayout(conf.layout, errors), errors, warnings };
 }
 
 /** The card by name, or null: a route asks this, and null is "404". */
@@ -175,8 +178,13 @@ function buildCard(name, raw, ctx) {
   if (!isObject(raw)) return fail("not a table");
 
   // `kind` is the plan's spelling; the design doc wrote `source` for the same
-  // key, so a stanza copied from it is not a stanza that fails.
-  const kind = raw.kind ?? raw.source;
+  // key, so a stanza copied from it is not a stanza that fails — but it is
+  // said once at startup, so configs converge on the one spelling.
+  let kind = raw.kind;
+  if (kind === undefined && raw.source !== undefined) {
+    kind = raw.source;
+    ctx.warn(`${ctx.where}: \`source\` is read as \`kind\`; spell it \`kind = ${JSON.stringify(kind)}\``);
+  }
   if (nonEmpty(kind) === undefined) return fail("kind is required");
   const spec = KINDS[kind];
   if (!spec) return fail(`unknown kind "${kind}"`);
