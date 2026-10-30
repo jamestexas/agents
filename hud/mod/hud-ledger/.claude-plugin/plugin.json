@@ -1,0 +1,7 @@
+{
+  "name": "hud-ledger",
+  "version": "0.1.0",
+  "description": "Captures this session's receipts (PRs, Linear, Slack, docs, hud syncs) and flushes them into ~/hud",
+  "author": { "name": "James Gardner" },
+  "types": "./types/index.d.ts"
+}
