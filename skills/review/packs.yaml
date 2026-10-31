@@ -6,7 +6,7 @@
 # the raw call without that variant). `only: true` means the pack matches
 # only when EVERY changed file matches (docs-only). Each probe is one bash
 # command run with these variables exported:
-#   WORKTREE REPO_DIR OUTDIR FILES MODULES BASE HEAD PR REPO.
+#   WORKTREE REPO_DIR OUTDIR FILES MODULES BASE HEAD PR REPO SKILL_DIR.
 # `needs` lists binaries; a missing one makes every probe UNAVAILABLE. A
 # probe that exits 127 is recorded UNAVAILABLE with its stderr as the reason.
 #
@@ -32,6 +32,16 @@ packs:
       build: 'cd "$WORKTREE" || exit 1; rc=0; while read -r m; do echo "## $m"; (cd "$m" && go build ./... 2>&1 | head -100; exit "${PIPESTATUS[0]}") || rc=1; done < "$MODULES"; exit $rc'
       vet:   'cd "$WORKTREE" || exit 1; rc=0; while read -r m; do echo "## $m"; (cd "$m" && go vet ./... 2>&1 | head -100; exit "${PIPESTATUS[0]}") || rc=1; done < "$MODULES"; exit $rc'
       modmap-impact: 'cd "$WORKTREE" && command -v modmap >/dev/null || { echo "missing binary: modmap" >&2; exit 127; }; modmap impact --root . --json < "$FILES"'
+  lenses:
+    question: "Does a changed Go function repeat a mechanism that already exists in another file, so two copies now have to be kept in sync?"
+    match: ["**/*.go"]
+    needs: [mache]
+    probes:
+      # first-party lens: smell-rules/mechanism_overlap.json over a mache db of
+      # the head worktree, scoped to each changed non-test Go file. One line per
+      # partner function (file:line of the existing copy), tagged with the
+      # changed file it overlaps. The db lives in a temp dir, never in OUTDIR.
+      mechanism-overlap: 'cd "$WORKTREE" || exit 1; tmp="$(mktemp -d)"; trap ''rm -rf "$tmp"'' EXIT; mache build . "$tmp/head.db" >/dev/null 2>"$tmp/build.err" || { cat "$tmp/build.err" >&2; exit 1; }; grep -E "\.go$" "$FILES" | grep -vE "_test\.go$" | while read -r f; do [ -e "$f" ] || continue; mache find-smells --db "$tmp/head.db" --rules-dir "$SKILL_DIR/smell-rules" --rule mechanism_overlap --source-id "$f" --fail-on none --format ci | grep "\[mechanism_overlap\]" | sed "s|$| overlaps $f|"; done; true'
   terraform:
     question: "Does the Terraform format, and which resources does the diff add, change, or remove?"
     match: ["**/*.tf", "**/*.tfvars"]

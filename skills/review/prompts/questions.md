@@ -34,7 +34,13 @@ Rules:
    for the rollout or the on-call surface).
 4. For every probe in `manifest.json` with status UNAVAILABLE, write one row
    whose settler is that probe, so the gap is visible as a question.
-5. Escape `|` inside a cell as `\|`.
-6. End with: `Questions asked: N.`
+5. For every line in `probes/lenses/mechanism-overlap.out`, write one row
+   asking whether the changed file named at the end of the line repeats the
+   mechanism of the function at the line's `file:line`, and what keeps the
+   two copies in sync; the settler is that probe plus both files. These rows
+   count toward the cap; if they alone would exceed it, keep the highest
+   ones in file order and say how many you left out in the last such row.
+6. Escape `|` inside a cell as `\|`.
+7. End with: `Questions asked: N.`
 
 Write nothing else. Do not answer, do not review.
