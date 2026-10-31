@@ -54,7 +54,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { lectioGraft, listSessions } from "./sessions.mjs";
 import { errText } from "./errtext.mjs";
 import { DEFAULT_REVIEWS_GLOB, expandHome, getCard, loadCards } from "./cards/registry.mjs";
-import { SKIP_NAMES, covers as fsCovers, parseGlob as parseReviewsGlob } from "./cards/kinds/fs.mjs";
+import { SKIP_NAMES, covers as fsCovers, matchGlob, parseGlob as parseReviewsGlob } from "./cards/kinds/fs.mjs";
 import {
   LIMITS as HTTP_LIMITS,
   legacySnapshotFile,
@@ -2077,6 +2077,7 @@ function handle(req, res, root, uiDir, dyn, refresh) {
   // so every mutating verb lands on the 405 arm. `/api/reviews` is the
   // reviews card under its old envelope.
   if (pathname === "/api/cards") return serveCardsList(res, root);
+  if (pathname === "/api/page") return servePage(res, root, url.searchParams.get("path"));
   const cardName = cardNameOf(pathname);
   if (cardName !== null) return serveCardRoute(req, res, root, url, dyn, cardName);
   if (pathname === "/api/reviews") return serveLegacy(res, root, url, dyn, "reviews");
@@ -2214,6 +2215,45 @@ function serveMarkdown(res, root, rel) {
 
   // Exact bytes; the client decides how to render them.
   sendFile(res, abs, "text/plain; charset=utf-8");
+}
+
+/**
+ * A generated page from the tree, by path — served only while a `pages` card's
+ * glob names it, so the cards config is this route's allow-list and the route
+ * cannot be pointed at an arbitrary file.
+ *
+ * The page is sandboxed: `Content-Security-Policy: sandbox allow-scripts`
+ * gives it an opaque origin, so its own scripts run (a tracker draws itself)
+ * but it cannot read the HUD's API or anything else on this origin.
+ */
+function servePage(res, root, rel) {
+  // `rel` arrives already percent-decoded by URLSearchParams.
+  if (rel === null || rel === "") return sendText(res, 400, "missing ?path\n");
+  if (rel.includes("\0") || !/\.html?$/i.test(rel)) return sendText(res, 400, "bad path\n");
+  for (const card of cardsOf(root).cards.values()) {
+    if (card.error || card.shape !== "pages" || card.kind !== "fs") continue;
+    const parsed = parseReviewsGlob(card.glob);
+    if (parsed.error || !matchGlob(parsed.segments, rel)) continue;
+    const abs = resolveWithin(card.root, rel);
+    if (abs === null) return sendText(res, 400, "path escapes its root\n");
+    let buf;
+    try {
+      if (!fs.statSync(abs).isFile()) return sendText(res, 400, "not a file\n");
+      buf = fs.readFileSync(abs);
+    } catch {
+      return sendText(res, 404, "not found\n");
+    }
+    res.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "content-length": buf.length,
+      "cache-control": "no-store",
+      "content-security-policy": "sandbox allow-scripts",
+      "x-content-type-options": "nosniff",
+    });
+    return res.end(buf);
+  }
+  // No pages card names it: as far as this route is concerned it does not exist.
+  return sendText(res, 404, "not found\n");
 }
 
 function serveStatic(res, uiDir, rel) {

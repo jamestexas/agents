@@ -72,7 +72,7 @@ and its required field is still checked. The table is generated from
 <!-- @generated-begin: cards-kinds-table -->
 | kind | status | reads | rows from | degraded when |
 | --- | --- | --- | --- | --- |
-| `fs` | **now** | files under a root matched by a segment glob (`*` within one segment) | one row per file; a file that is not a JSON object is one `unreadable` row | bad glob → misconfigured; absent root → an empty card |
+| `fs` | **now** | files under a root matched by a segment glob (`*` within one segment); `format = "text"` hands over each file's head instead of parsing it as JSON | one row per file; a file that is not a JSON object is one `unreadable` row | bad glob → misconfigured; absent root → an empty card |
 | `http` | **now** | one GET of a loopback URL, JSON | the array the response carries (`items`, `prs`, or the top-level array) | non-2xx, timeout, bad JSON → last snapshot with `stale`, else 503 with the reason |
 | `cmd` | next | argv, no shell | one JSON object per line, or one JSON array | non-zero exit, bad JSON → 503 with the first stderr line |
 | `prometheus` | next | one PromQL instant or range query, bearer token from a `token_cmd` | one row per series (labels + value) | token command non-zero or 401 → 503 with the reason; query parse error → 503 with the API's text |

@@ -2340,6 +2340,22 @@
         title: ["title", "its title", (tr, r) => {
           cell(tr, linkOut(r.url, r.title || r.url || "(untitled)", "text"), "title");
         }],
+        page: ["page", "a generated page in the tree, opened sandboxed", (tr, r) => {
+          // Only the page route is linked: a row's url that is anything else is
+          // shown as text, so a pages row can never become an arbitrary link.
+          const local = typeof r.url === "string" && r.url.startsWith("/api/page?path=");
+          let content = r.title || r.path || DASH;
+          if (local) {
+            content = node("a", "text", r.title || r.path);
+            content.href = r.url;
+            content.target = "_blank";
+            content.rel = "noopener";
+          }
+          cell(tr, content, "page", r.path);
+        }],
+        updated: ["updated", "when the file was last written", (tr, r) => {
+          cell(tr, r.updated ? ago(r.updated) : undefined, "updated", r.updated ? fmtTime(r.updated) : "");
+        }],
         why: ["why", "why it is on the board", (tr, r) => {
           const reason = r.reason || r.state;
           cell(tr, reason ? node("span", r.state === "needs_you" ? "needs-you" : null, String(reason)) : undefined, "why");
