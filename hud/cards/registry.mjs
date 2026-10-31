@@ -14,6 +14,7 @@
 
 import * as fsKind from "./kinds/fs.mjs";
 import * as httpKind from "./kinds/http.mjs";
+import * as pages from "./normalize/pages.mjs";
 import * as reviewState from "./normalize/review-state.mjs";
 import * as workBoard from "./normalize/work-board.mjs";
 
@@ -45,7 +46,7 @@ export const KINDS = Object.freeze({
     status: "now",
     required: ["glob", "shape"],
     module: fsKind,
-    reads: "files under a root matched by a segment glob (`*` within one segment)",
+    reads: "files under a root matched by a segment glob (`*` within one segment); `format = \"text\"` hands over each file's head instead of parsing it as JSON",
     rows: "one row per file; a file that is not a JSON object is one `unreadable` row",
     degraded: "bad glob → misconfigured; absent root → an empty card",
   }),
@@ -85,7 +86,7 @@ export const KINDS = Object.freeze({
  * place that knows a source's field names; it also declares the card's
  * default columns and, when the shape has one, its scope vocabulary.
  */
-export const SHAPES = Object.freeze({ "review-state": reviewState, "work-board": workBoard });
+export const SHAPES = Object.freeze({ "review-state": reviewState, "work-board": workBoard, pages });
 
 /** Seconds between a page's polls of a card that declares no `refresh`. */
 export const DEFAULT_REFRESH_S = 60;

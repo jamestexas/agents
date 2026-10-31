@@ -25,7 +25,14 @@ export const LIMITS = Object.freeze({
   maxScanned: 2000,
   // A state file is a few hundred bytes; one that is not is not a state file.
   maxBytes: 256 * 1024,
+  // A `text` row hands over the head of the file, not the file: a generated
+  // page can run to megabytes, and what a normaliser reads from it (a title)
+  // sits at the top.
+  headBytes: 16 * 1024,
 });
+
+/** How a matched file becomes a row: parsed as a JSON object, or handed over as the head of its text. */
+export const FORMATS = Object.freeze(["json", "text"]);
 
 /**
  * Expand a leading `~` in a configured path. Nothing else about the string is
@@ -62,6 +69,21 @@ export function parseGlob(glob) {
     segments.push({ re: new RegExp(`^${parts.join("[^/]*")}$`) });
   }
   return { segments };
+}
+
+/**
+ * Whether a relative path is one the glob names: the same segment rules the
+ * walk applies, so a path the walk would never list never matches. Dot-prefixed
+ * and skipped names do not match either.
+ */
+export function matchGlob(segments, rel) {
+  const parts = String(rel ?? "").split("/");
+  if (parts.length !== segments.length) return false;
+  return parts.every((name, i) => {
+    if (name === "" || name.startsWith(".") || SKIP_NAMES.has(name)) return false;
+    const seg = segments[i];
+    return seg.literal !== undefined ? name === seg.literal : seg.re.test(name);
+  });
 }
 
 /**
@@ -103,7 +125,7 @@ export function walk(root, segments, budget) {
  * `unreadable: true` with the path and the reason — because a run whose state
  * cannot be read is a fact about the tree, not an absence from it.
  */
-function readRow(root, rel, project) {
+function readRow(root, rel, project, format = "json") {
   const abs = path.join(root, rel);
   const base = { path: rel, project };
   let stat;
@@ -112,6 +134,7 @@ function readRow(root, rel, project) {
   } catch (err) {
     return { ...base, unreadable: true, error: errText(err) };
   }
+  if (format === "text") return readText(abs, base, stat);
   if (stat.size > LIMITS.maxBytes) {
     return { ...base, unreadable: true, error: `larger than ${LIMITS.maxBytes} bytes` };
   }
@@ -128,6 +151,24 @@ function readRow(root, rel, project) {
 }
 
 /**
+ * A `text` row: the file's head as `data.text`, with its size and mtime. The
+ * kind does not interpret the text; a normaliser decides what of it to show.
+ */
+function readText(abs, base, stat) {
+  let fd;
+  try {
+    fd = fs.openSync(abs, "r");
+    const buf = Buffer.alloc(Math.min(stat.size, LIMITS.headBytes));
+    const n = fs.readSync(fd, buf, 0, buf.length, 0);
+    return { ...base, data: { text: buf.subarray(0, n).toString("utf8"), size: stat.size, mtime: stat.mtime.toISOString() } };
+  } catch (err) {
+    return { ...base, unreadable: true, error: errText(err) };
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+/**
  * The card's rows: every file its glob names under its root, read raw.
  *
  * @param {{root: string, glob: string}} card a card the registry validated
@@ -138,7 +179,7 @@ export function read(card) {
   if (parsed.error) throw new Error(`glob: ${parsed.error}`);
   const found = walk(card.root, parsed.segments, LIMITS.maxScanned);
   return {
-    rows: found.map((f) => readRow(card.root, f.rel, f.project)),
+    rows: found.map((f) => readRow(card.root, f.rel, f.project, card.format)),
     scanned: found.length,
     truncated: found.length >= LIMITS.maxScanned,
   };
@@ -147,7 +188,8 @@ export function read(card) {
 /**
  * Read the kind's own fields off a stanza onto the card: `glob`, checked
  * against the walker's subset, and `root`, a leading `~` expanded, defaulting
- * to the HUD root. Returns `{field, reason}` for the field that cannot be
+ * to the HUD root, and `format`, `json` unless the stanza says `text`.
+ * Returns `{field, reason}` for the field that cannot be
  * honoured, else null.
  */
 export function validate(raw, card, ctx) {
@@ -155,6 +197,12 @@ export function validate(raw, card, ctx) {
   if (parsed.error) return { field: "glob", reason: parsed.error };
   card.glob = raw.glob;
   card.root = typeof raw.root === "string" && raw.root !== "" ? expandHome(raw.root) : ctx.hudRoot;
+  // Set only when the stanza names one, so a card that says nothing keeps the
+  // exact shape it had before formats existed; reading defaults to JSON.
+  if (raw.format !== undefined) {
+    if (!FORMATS.includes(raw.format)) return { field: "format", reason: `format must be one of ${FORMATS.join(", ")}` };
+    card.format = raw.format;
+  }
   return null;
 }
 
