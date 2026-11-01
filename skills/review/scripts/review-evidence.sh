@@ -217,6 +217,7 @@ jq -c '.matched[]' "$OUTDIR/packs.json" | while read -r pack; do
             --env "WORKTREE=$WT" --env "REPO_DIR=$REPO_DIR" --env "OUTDIR=$OUTDIR" \
             --env "FILES=$OUTDIR/git/files" --env "MODULES=$OUTDIR/git/modules" \
             --env "BASE=$BASE" --env "HEAD=$HEAD" --env "PR=$PR" --env "REPO=$REPO" \
+            --env "SKILL_DIR=$SKILL_DIR" \
             -- bash -c "$cmd" < /dev/null
     done
 done
