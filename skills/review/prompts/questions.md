@@ -34,8 +34,10 @@ Rules:
    `probes/go-graph/modmap-impact.out` (callers reached); otherwise use
    `owners.json` (who is on the hook) and the deploy probes (what changes
    for the rollout or the on-call surface).
-4. For every probe in `manifest.json` with status UNAVAILABLE, write one row
-   whose settler is that probe, so the gap is visible as a question.
+4. For every probe in `manifest.json` with status UNAVAILABLE or FAILED,
+   write one row whose settler is that probe (its `.out` and `.err`), so the
+   gap is visible as a question. A FAILED probe may mean the change broke
+   something or that the probe itself broke; the row asks which.
 5. For every line in `probes/lenses/mechanism-overlap.out`, write one row
    asking whether the changed file named at the end of the line repeats the
    mechanism of the function at the line's `file:line`, and what keeps the

@@ -160,7 +160,9 @@ cap is a budget, not a target, and UNAVAILABLE rows count toward it.
 `pr/context.json` with no model: one line per thread in `.threads.items[]`
 whose `state` is `unresolved` (`- thread <path>:<line> — <first line of the
 first comment body>`), then one per `.reviews.items[]` with `kind` `review`
-(`- review by <author> (<state>) — <first line of body>`); `(none)` if both
+and a non-empty body (`- review by <author> (<state>) — <first line of
+body>`). An empty body is the review GitHub creates around a thread reply,
+and the thread line already carries it. `(none)` if both
 lists are empty or the file is absent. Thread rows do not count toward
 `{{MAX_QUESTIONS}}`.
 
@@ -310,8 +312,9 @@ it.
 ## Phase 7 — Post (`--post` only)
 
 Read `$HUD_ROOT/review-policy.md`. If absent, print "no posting policy; not
-posting" and stop. Otherwise, re-run `review-evidence.sh --pr ... --out
-<run>-recheck`, then:
+posting" and stop. Otherwise, re-run `review-evidence.sh --pr ... --core-only
+--out <run>-recheck` (core probes only: head, checks and threads, in
+seconds, with no second round of builds and tests), then:
 
 ```bash
 node $SKILL/scripts/freshness.mjs <run> <run>-recheck

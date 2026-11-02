@@ -3,9 +3,13 @@
 # evidence directory every later phase reads, and nothing else.
 #
 # Usage:
-#   review-evidence.sh --pr <owner/repo#N | N> [--repo-dir DIR] --out RUN
+#   review-evidence.sh --pr <owner/repo#N | N> [--repo-dir DIR] [--core-only] --out RUN
 #   review-evidence.sh --path REPO_DIR --base REF --head REF --out RUN
 #   review-evidence.sh --cleanup RUN
+#
+# --core-only stops after the target, PR context, checks and git facts: no
+# owners, no packs. It is the phase-7 recheck, which compares head, checks and
+# activity and has no use for a second round of builds and tests.
 #
 # Layout under RUN/evidence (see SKILL.md): manifest.json target.json
 # pr/ git/ owners.json packs.json probes/ replay.txt
@@ -63,11 +67,12 @@ cleanup() {
     exit 0
 }
 
-MODE="" PR="" REPO="" REPO_DIR="" BASE="" HEAD="" RUN=""
+MODE="" PR="" REPO="" REPO_DIR="" BASE="" HEAD="" RUN="" CORE_ONLY=""
 ARGS=("$@")
 while [ $# -gt 0 ]; do
     case "$1" in
         --pr)       MODE="pr";   PR="$2"; shift 2 ;;
+        --core-only) CORE_ONLY=1; shift ;;
         --repo-dir) REPO_DIR="$2"; shift 2 ;;
         --path)     MODE="path"; REPO_DIR="$2"; shift 2 ;;
         --base)     BASE="$2"; shift 2 ;;
@@ -185,6 +190,12 @@ while read -r f; do
     fi
 done < "$OUTDIR/git/files" | sort -u > "$OUTDIR/git/modules"
 sort -u "$gp.unsorted" > "$gp"; rm -f "$gp.unsorted"
+
+if [ -n "$CORE_ONLY" ]; then
+    jq -S 'del(.probes[].started, .probes[].ended)' "$MANIFEST" | shasum -a 256 | cut -d' ' -f1 > "$OUTDIR/manifest.sha256"
+    note "core evidence written to $OUTDIR ($(jq '.probes|length' "$MANIFEST") probes; owners and packs skipped)"
+    exit 0
+fi
 
 # ---- owners ---------------------------------------------------------------
 # CODEOWNERS is read at the BASE ref of the reviewer's checkout, never from the

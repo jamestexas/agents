@@ -84,6 +84,12 @@ jq -e '.matched | map(.name) | index("bare")' "$out/evidence/packs.json" >/dev/n
 out2="$tmp/run2"
 HUD_ROOT="$hud" PATH="$bin" bash "$HERE/../scripts/review-evidence.sh" --path "$repo" --base main --head feature --out "$out2" 2>/dev/null
 cmp -s "$out/evidence/manifest.sha256" "$out2/evidence/manifest.sha256" || { echo "manifest.sha256 differs across identical runs: $(cat "$out/evidence/manifest.sha256") vs $(cat "$out2/evidence/manifest.sha256")"; exit 1; }
+# --core-only: the recheck shape. Core probes and git facts, no owners, no packs.
+outc="$tmp/core"
+HUD_ROOT="$hud" PATH="$bin" bash "$HERE/../scripts/review-evidence.sh" --path "$repo" --base main --head feature --core-only --out "$outc" 2>/dev/null
+mc="$outc/evidence/manifest.json"
+jq -e '[.probes[].name] | any(startswith("core/diff")) and (any(startswith("go-graph/")) | not) and (any(. == "core/owners") | not)' "$mc" >/dev/null || { echo "core-only must run core probes and skip owners and packs: $(jq -c '[.probes[].name]' "$mc")"; exit 1; }
+[ -f "$outc/evidence/target.json" ] && [ -f "$outc/evidence/manifest.sha256" ] && [ ! -f "$outc/evidence/packs.json" ] || { echo "core-only layout"; exit 1; }
 # an UNAVAILABLE probe carries the reason a reader needs, not just the status
 reason() { jq -r --arg n "$1" '.probes[] | select(.name==$n) | .reason' "$m"; }
 [[ "$(reason core/pr-context)" == *"no PR in path mode"* ]]  || { echo "pr-context reason: got '$(reason core/pr-context)'"; exit 1; }
