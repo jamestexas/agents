@@ -78,6 +78,7 @@ is the fastest way to see what this HUD is wired to and what it is not.
 | `hud sync [-m MSG] [--dry-run]` | Stages and commits the **content tree** in one verb. **Local-only by default**: it pushes to the git remote only with `[backup] push = true`, and runs a backup command only with `[backup] cmd`, ideally set in the never-committed `hud.local.toml`. Never force-pushes. See [Backing the content tree up](docs/CLI.md#backing-the-content-tree-up). |
 | `hud link` / `hud unlink` | Puts **this command** on your PATH, and takes it off. See [Two installs, two verbs](docs/CLI.md#two-installs-two-verbs). |
 | `hud install` / `hud uninstall` | Installs and removes **the launchd service**, via `service/install.sh` / `service/uninstall.sh`; arguments passed through. |
+| `hud board validate\|render\|list` | `boards.mjs` — a `hud.board/1` JSON status document under `projects/<p>/boards/`, rendered to the markdown page beside it (mermaid graph + table + provenance) with a history snapshot per changed generation. See [docs/BOARDS.md](docs/BOARDS.md). |
 | `hud index` | `hud-index.mjs` — rebuilds the mache index. |
 | `hud smoke` | `smoke.sh` — the integration gate against the real tree. |
 | `hud test` | `node --test test/` — the hermetic suite. |
