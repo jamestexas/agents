@@ -75,6 +75,14 @@ and stays visible while evidence runs (about a minute). It records the
 session that owns the run, which is how a reader tells a live run from a
 dead one (see Run state).
 
+Every new invocation of `/review` passes `--new` right after `--pending`
+(`init --pending --new pr=...`). When `<run>` holds a run that ended, this
+starts the next review and sets the old log, `evidence/` and `work/` aside
+as `*.superseded-<stamp>`. Without it, the same arguments read as a replay
+of the ended run and nothing moves, so the new readers would merge the old
+run's decision files. Leave `--new` off only when repeating a call within
+the same invocation.
+
 Read the manifest before anything else. Every UNAVAILABLE row becomes a
 ledger question in phase 2. Do not re-fetch what the script fetched.
 

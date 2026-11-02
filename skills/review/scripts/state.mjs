@@ -5,10 +5,14 @@
 // judges the review; check.mjs does that, and `finish` only records its
 // verdict per gate.
 //
-//   init --pending pr=<owner/repo#N> [mode=<m>]
+//   init --pending [--new] pr=<owner/repo#N> [mode=<m>]
 //          before evidence runs: phase pending, the PR, and the owner
 //          (session id, pid, transcript) when run under Claude Code, so the
-//          HUD shows the run at dispatch and can tell when its session died
+//          HUD shows the run at dispatch and can tell when its session died.
+//          --new starts the next review of a PR whose last run ended, even
+//          with the same arguments; without it the same call is a replay.
+//          Either way, starting over sets the ended run's log, evidence/
+//          and work/ aside as *.superseded-<stamp>.
 //   init   mode=<light|default|deep> [viewer=<login>]
 //          evidence/target.json + evidence/manifest.json (+ core/pr-shas.out,
 //          pr/context.json for title and author) -> a fresh state.json.
@@ -138,7 +142,13 @@ const terminal = (opName, target) => {
 // name the HUD's state.json glob does not match, and the new run gets a fresh
 // log; a run still open is refused, since two writers on one log is the
 // corruption the log exists to prevent.
-const startOver = () => {
+//
+// With `dirs`, the ended run's evidence/ and work/ go aside with its log. Only
+// `init --pending` passes it: it runs before the new run's evidence, so those
+// dirs can only be the old run's, and a reader would otherwise merge the old
+// run's decision files into the new ledger. The evidence-time `init` must not:
+// by then evidence/ is the new run's.
+const startOver = ({ dirs = false } = {}) => {
   const stamp = now().replace(/[:.]/g, '-');
   const events = readEvents();
   if (events.length === 0) {
@@ -151,7 +161,13 @@ const startOver = () => {
     process.exit(1);
   }
   fs.renameSync(eventsPath, path.join(run, `events.superseded-${stamp}.jsonl`));
+  if (dirs) {
+    for (const d of ['evidence', 'work']) {
+      if (fs.existsSync(path.join(run, d))) fs.renameSync(path.join(run, d), path.join(run, `${d}.superseded-${stamp}`));
+    }
+  }
 };
+const priorEnded = () => { const es = readEvents(); return es.length > 0 && fold(es).ended != null; };
 
 // A row of a markdown table body: a `|` line that is neither the header (the
 // line above a separator) nor the separator itself.
@@ -174,14 +190,18 @@ const ops = {
   init() {
     if (rest[0] === '--pending') {
       rest.shift();
+      // --new: this is the next review of the PR, not a replay of the last
+      // one. The arguments alone cannot tell the two apart once a run has
+      // ended, and replay must stay a no-op, so the new review says so.
+      const fresh = rest[0] === '--new' ? (rest.shift(), true) : false;
       const { pr: ref, mode = 'default' } = kv(['pr', 'mode']);
       const m = String(ref ?? '').match(/^([^/#\s]+\/[^#\s]+)#(\d+)$/);
       if (!m) { console.error('state.mjs init --pending: need pr=<owner/repo#N>'); process.exit(2); }
       fs.mkdirSync(run, { recursive: true });
       const o = owner();
       const data = { repo: m[1], pr: Number(m[2]), mode, ...(o ? { owner: o } : {}) };
-      if (replayed('init-pending', data)) return;
-      startOver();
+      if (!(fresh && priorEnded()) && replayed('init-pending', data)) return;
+      startOver({ dirs: true });
       append('init-pending', data);
       return;
     }
