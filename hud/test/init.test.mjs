@@ -124,6 +124,13 @@ test("--yes scaffolds a tree whose config parses with no warnings", (t) => {
   const ignore = fs.readFileSync(path.join(root, ".gitignore"), "utf8");
   assert.match(ignore, /^\.generated\/$/m);
   assert.match(ignore, /^_hud$/m);
+  // The machine-local overlay is where a private backup target goes.
+  assert.match(ignore, /^hud\.local\.toml$/m);
+
+  // Local-only by default: the template documents [backup] but enables none.
+  const toml = fs.readFileSync(path.join(root, CONFIG_TOML), "utf8");
+  assert.match(toml, /^#\s+\[backup\]$/m);
+  assert.match(toml, /hud\.local\.toml/);
 
   // The generated file has to be readable by the parser that will read it, and
   // cleanly: a warning here would mean init wrote a line the server skips.
@@ -132,6 +139,7 @@ test("--yes scaffolds a tree whose config parses with no warnings", (t) => {
   assert.deepEqual(detail.warns, []);
   assert.equal(detail.data.ticket_url_template, "https://example.invalid/issue/{id}");
   assert.equal(detail.data.serve.host, "127.0.0.1");
+  assert.equal(detail.data.backup, undefined);
 });
 
 test("init git-inits the tree and creates no remote", (t) => {

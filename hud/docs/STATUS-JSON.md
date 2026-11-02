@@ -22,7 +22,7 @@ first, then each read-only mount, then anything refused.
 | Field | Meaning |
 | --- | --- |
 | `name` | The store name entries carry. `local` for the writable store; the `[read.<name>]` name otherwise; `null` for a refused row. |
-| `writable` | True for exactly one row. This is the store `hud sync` pushes and the only one anything writes to. |
+| `writable` | True for exactly one row. This is the store `hud sync` commits and backs up, and the only one anything writes to. |
 | `path` | Resolved absolute path, `~` expanded. `null` for a refused row. |
 | `status` | `ok` or `ignored`. |
 | `reason` | Why a row was ignored; `null` when `ok`. |
@@ -55,17 +55,28 @@ asks whether the thing on the other end is there.
 ## Backup
 
 `backup` keeps the same contract for the other question `status` answers —
-*is my knowledge safe?* It carries `remote`, `url`, `branch`, `upstream`, the
-`ahead` / `behind` / `dirty` counts, and one `status` from its own closed
-five-state vocabulary, again with a reason that is never blank:
+*is my knowledge safe?* It carries `mode` (`local`, `push`, `cmd` or
+`push+cmd`, from the `[backup]` table), `configured` (a backup target exists:
+a remote under push, or a command), `command` (the backup command's program,
+argv[0] only), `remote`, `url`, `branch`, `upstream`, the `ahead` / `behind` /
+`dirty` counts, and one `status` from its own closed seven-state vocabulary,
+again with a reason that is never blank:
 
 | `status` | Means |
 | --- | --- |
-| `synced` | A remote is configured, and everything committed here is on it. |
-| `unpushed` | Work exists only on this machine — uncommitted, or committed and unpushed, or a branch with no upstream yet. |
-| `diverged` | The remote holds commits this tree does not. Pull before syncing. |
-| `absent` | No remote configured; this tree is not backed up anywhere. |
+| `local` | Local-only by config, with neither `push` nor `cmd` set. Committed here, not copied anywhere. The reason carries any uncommitted-change count. |
+| `command` | Backed up by `cmd` only. The command runs elsewhere and leaves nothing here to read, so status cannot verify it offline. The reason says so and carries any uncommitted count. |
+| `synced` | `push`: everything committed here is on the remote. |
+| `unpushed` | `push`: work exists only on this machine — uncommitted, or committed and unpushed, or a branch with no upstream yet. |
+| `diverged` | `push`: the remote holds commits this tree does not. Pull before syncing. |
+| `absent` | `push`: no remote is configured, so the push has nowhere to go. |
 | `unknown` | Could not tell; `reason` says what stopped it (no `git`, not a repo, detached HEAD). |
+
+With both `push` and `cmd`, the push states apply and the reason notes the
+command, which is no more verifiable offline than under `command`. A git remote
+that exists while `push` is off is not reported: it is not a backup target.
+`config.local` names the overlay (`hud.local.toml`) when one was read, else
+`null`.
 
 The counts come from the local remote-tracking ref, so they are as fresh as
 your last fetch and the probe stays offline — `hud status` must not block on the

@@ -20,7 +20,7 @@
 // The HUD's watch-only posture is unchanged — this file adds no route, no
 // method, and no capability. It only decides where the socket lives.
 
-import { createServer, DEFAULT_PORT, defaultRoot, loadConfigDetail } from "./server.mjs";
+import { configWarnLine, createServer, DEFAULT_PORT, defaultRoot, loadConfigDetail } from "./server.mjs";
 
 const root = defaultRoot();
 const port = Number(process.env.HUD_PORT || DEFAULT_PORT);
@@ -32,7 +32,7 @@ const host = process.env.HUD_HOST || "0.0.0.0";
 
 const cfg = loadConfigDetail(root);
 for (const warn of cfg.warns) {
-  process.stderr.write(`hud: ${cfg.file}: ${warn}\n`);
+  process.stderr.write(`hud: ${configWarnLine(cfg, warn)}\n`);
 }
 if (cfg.file === null) {
   // Not fatal: the static layer does not need a config. But a container whose
