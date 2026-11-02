@@ -20,4 +20,11 @@ Write `{{WORK}}/refutations.md`:
 Verdict is `stands`, `falls`, or `narrows (to: ...)`. `Why` cites the exact
 evidence file and line/hunk you used. A `falls` with no citation is not a
 refutation and will be discarded. Output is the table only; no heading or
-prose above it. Reply with one line: `done: N candidates`.
+prose above it.
+
+Also append to `{{WORK}}/claims/refute.jsonl` one JSON object per claim your
+verdicts rest on, in the readers' shape, so a later phase can cite what you
+ran:
+`{"id":"refute-n","class":"RAN|READ|ASSUMED","text":"...","source":"<path, e.g. work/refute/<file>>","row":<ledger row of the candidate>}`.
+RAN means you executed it and its output is under `{{WORK}}/refute/`. Ids
+are `refute-<n>`, numbered from 1. Reply with one line: `done: N candidates`.

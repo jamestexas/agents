@@ -67,6 +67,11 @@ jq -e '.ref == "main"' "$out/evidence/owners.json" >/dev/null || { echo "owners.
 jq -e '.matched | map(.name) | index("go-graph")' "$out/evidence/packs.json" >/dev/null || { echo "go-graph pack should match"; exit 1; }
 jq -e '.kind == "path" and .base == "main" and .head == "feature"' "$out/evidence/target.json" >/dev/null || { echo "target.json"; exit 1; }
 [ "$(cat "$out/evidence/git/modules")" = 'mod/a' ]                 || { echo "modules list want exactly mod/a, got: $(cat "$out/evidence/git/modules")"; exit 1; }
+# the changed .go file sits at the module root, so its package dir is "."
+[ "$(cat "$out/evidence/git/go-packages")" = 'mod/a .' ]           || { echo "go-packages want 'mod/a .', got: $(cat "$out/evidence/git/go-packages")"; exit 1; }
+# main moved one commit, but only README.md, which the feature does not touch
+[ "$(st core/base-drift)" = RAN ]    || { echo "base-drift: $(st core/base-drift)"; exit 1; }
+grep -q '^none: 1 base commit(s) since the merge-base, none touch a changed file$' "$out/evidence/probes/core/base-drift.out" || { echo "base-drift want none, got: $(cat "$out/evidence/probes/core/base-drift.out")"; exit 1; }
 for f in owners.json packs.json manifest.sha256; do [ -f "$out/evidence/$f" ] || { echo "missing $f: run aborted early"; exit 1; }; done
 # the reader output dirs exist before any reader is dispatched
 for d in decisions claims refute; do [ -d "$out/work/$d" ] || { echo "work/$d must be pre-created"; exit 1; }; done

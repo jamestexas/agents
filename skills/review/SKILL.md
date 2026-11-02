@@ -51,7 +51,10 @@ rendered artifact is copied to the notes path at the end of phase 6.
 
 Resolve `<project>` as: an existing `$HUD_ROOT/projects/<x>/` whose
 `CONTEXT.md` names a touched path or the repo; else the project the operator
-stated; else `inbox`.
+stated; else an existing `$HUD_ROOT/projects/<x>/` with no `CONTEXT.md` whose
+name equals a top-level directory the change touches (`{{CONTEXT}}` is then
+`(none)`, and say in the hand-over that the project has no context file);
+else `inbox`.
 
 ## Phase 1 — Evidence (script, no model)
 
@@ -161,9 +164,15 @@ row's **Settled by** is non-empty and **Decision** is empty. Then
 ## Phase 3 — Settle (N sub-agents in parallel)
 
 `state.mjs <run> phase settle`. Default: split rows into up to 3 groups by
-the evidence they name (git, probes, pr). `--deep`: one reader per dimension in
+the evidence they name (git, probes, pr). No group holds more than half the
+rows: split an oversized group by the file its rows name, since one reader
+with most of the ledger is the critical path and the most likely to skim.
+`--deep`: one reader per dimension in
 `skills/pr-review/DIMENSIONS.md` plus one per invariant skill whose paths
-match `owners.json`/`packs.json`. Each reader gets `prompts/reader.md` with
+match `owners.json`/`packs.json`. In default mode, an invariant skill whose
+description names a touched path is not dropped: append one line to the
+`{{ROWS}}` of the reader whose rows touch that path, `Invariants: apply the
+<skill> skill to these rows`. Each reader gets `prompts/reader.md` with
 `{{ROWS}}` = its rows verbatim and `{{READER}}` = a short id. Readers run
 concurrently and write `work/decisions/<id>.md` and `work/claims/<id>.jsonl`.
 
@@ -218,7 +227,11 @@ refute` is refused on such a run.
 
 `state.mjs <run> phase refute`. Dispatch
 `prompts/refute.md` with `{{CANDIDATES}}` = `work/candidates.md`. Drop any
-`falls` row with no citation. Then `state.mjs <run> output refute`.
+`falls` row with no citation. Then re-run `node $SKILL/scripts/merge-decisions.mjs
+<run>` so refute's `work/claims/refute.jsonl` joins `work/claims.jsonl`.
+The merge is idempotent, so the ledger and `candidates.md` come out the same,
+and triage and the blocking gate can cite what refute ran. Then
+`state.mjs <run> output refute`.
 
 ## Phase 5 — Triage (one sub-agent)
 
@@ -289,13 +302,35 @@ it.
 ## Phase 7 — Post (`--post` only)
 
 Read `$HUD_ROOT/review-policy.md`. If absent, print "no posting policy; not
-posting" and stop. Otherwise: re-run `review-evidence.sh --pr ... --out
-<run>-recheck` and refuse if `target.json.head` differs; refuse if
-`check.mjs` fails; stage the review body from `summary.md` + `findings.json`
-to `<run>/work/post.md`, apply every rule in the policy file (prefixes,
-per-author discuss-only, comment-not-approve cases), print it, and post with
-`gh pr review`. For the operator's own PRs, stop after staging. Append the
-review URL to the artifact and record it:
+posting" and stop. Otherwise, re-run `review-evidence.sh --pr ... --out
+<run>-recheck`, then:
+
+```bash
+node $SKILL/scripts/freshness.mjs <run> <run>-recheck
+```
+
+The review ran against a snapshot, and the PR keeps moving while the review
+runs. `freshness.mjs` compares the snapshot to the live PR on three axes and
+writes `work/freshness.json`:
+
+- **head**: the head moved, so it exits 1. Refuse to post; re-review.
+- **checks**: a check is failing or pending, or the checks probe is
+  UNAVAILABLE, so the verdict is capped at COMMENT. Post COMMENT instead of
+  APPROVE, and name the checks in the body. Before calling a failure caused
+  by the change, read its failure output if a site probe or tool can fetch
+  it. When it can't, say the cause is unknown instead of guessing in a
+  posted body.
+- **activity**: reviews or comments posted since the snapshot. Read each
+  one. For each finding, if a new item already raises it, reference that
+  item or reply in its thread instead of repeating the finding. Never post
+  a finding as new that someone else raised after the snapshot.
+
+Then refuse if `check.mjs` fails; stage the review body from `summary.md` +
+`findings.json` to `<run>/work/post.md`, apply the freshness caps and every
+rule in the policy file (prefixes, per-author discuss-only,
+comment-not-approve cases), print it, and post with `gh pr review`. For the
+operator's own PRs, stop after staging. Append the review URL to the
+artifact and record it:
 `state.mjs <run> posted url=<review url> state=<APPROVED|CHANGES_REQUESTED|COMMENTED>`.
 
 `--engage`: phase 1 already has threads in `pr/context.json`; phase 2 seeds

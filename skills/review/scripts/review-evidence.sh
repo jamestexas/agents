@@ -159,14 +159,32 @@ cp "$OUTDIR/probes/core/files.out" "$OUTDIR/git/files"
 probe core staleness   -- git -C "$REPO_DIR" rev-list --count "$MB..$BASE"
 cp "$OUTDIR/probes/core/staleness.out" "$OUTDIR/git/behind-base"
 probe core commits     -- git -C "$REPO_DIR" log --format='%H %cI %s' "$MB..$HEAD"
-# nearest go.mod above each changed file, deduped: the unit `go build` works in
+# Base commits since the merge-base that touch a file this change touches. The
+# staleness count says how far the base moved; this says whether it moved under
+# the change, which is what a merge-ref CI run or a rebase will meet.
+# shellcheck disable=SC2016  # the variables expand inside the probe's bash, by design
+probe core base-drift --env "REPO_DIR=$REPO_DIR" --env "MB=$MB" --env "BASE=$BASE" --env "FILES=$OUTDIR/git/files" -- bash -c \
+    'n="$(git -C "$REPO_DIR" rev-list --count "$MB..$BASE")"; out="$(xargs git -C "$REPO_DIR" log --format="%h %cI %s" "$MB..$BASE" -- < "$FILES")"; if [ -n "$out" ]; then echo "$out"; else echo "none: $n base commit(s) since the merge-base, none touch a changed file"; fi'
+# Nearest go.mod above each changed file, deduped: the unit `go build` works
+# in. git/go-packages pairs each module with the package dirs (relative to it)
+# holding a changed .go file that still exists, so a test or lint probe can
+# scope to what changed instead of the whole module.
+gp="$OUTDIR/git/go-packages"; : > "$gp.unsorted"
 while read -r f; do
     d="$(dirname "$f")"
-    while [ "$d" != "." ] && [ ! -f "$WT/$d/go.mod" ]; do d="$(dirname "$d")"; done
+    m="$d"
+    while [ "$m" != "." ] && [ ! -f "$WT/$m/go.mod" ]; do m="$(dirname "$m")"; done
     # an if, not `&&`: a bare test as the loop's last command would make the
     # pipeline fail under pipefail when the last file is outside any module
-    if [ -f "$WT/$d/go.mod" ]; then echo "$d"; fi
+    if [ -f "$WT/$m/go.mod" ]; then
+        echo "$m"
+        if [[ "$f" == *.go ]] && [ -e "$WT/$f" ]; then
+            if [ "$d" = "$m" ]; then rel=.; elif [ "$m" = . ]; then rel="./$d"; else rel="./${d#"$m"/}"; fi
+            echo "$m $rel" >> "$gp.unsorted"
+        fi
+    fi
 done < "$OUTDIR/git/files" | sort -u > "$OUTDIR/git/modules"
+sort -u "$gp.unsorted" > "$gp"; rm -f "$gp.unsorted"
 
 # ---- owners ---------------------------------------------------------------
 # CODEOWNERS is read at the BASE ref of the reviewer's checkout, never from the
@@ -216,6 +234,7 @@ jq -c '.matched[]' "$OUTDIR/packs.json" | while read -r pack; do
         probe "$name" "$pname" "${needs[@]+"${needs[@]}"}" \
             --env "WORKTREE=$WT" --env "REPO_DIR=$REPO_DIR" --env "OUTDIR=$OUTDIR" \
             --env "FILES=$OUTDIR/git/files" --env "MODULES=$OUTDIR/git/modules" \
+            --env "GO_PACKAGES=$OUTDIR/git/go-packages" --env "MERGE_BASE=$MB" \
             --env "BASE=$BASE" --env "HEAD=$HEAD" --env "PR=$PR" --env "REPO=$REPO" \
             --env "SKILL_DIR=$SKILL_DIR" \
             -- bash -c "$cmd" < /dev/null
