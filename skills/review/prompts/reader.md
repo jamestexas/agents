@@ -6,6 +6,12 @@ work and you must not look for it.
 Assigned rows (from `{{WORK}}/ledger.md`):
 {{ROWS}}
 
+Start from the path entries your rows name in `probes/structure-*/paths.out`
+(when present): read those functions and the call sites listed, not whole
+files. A caller or callee fact that output already states is cited from it
+as a RAN claim (the probe ran); search only for what it does not cover, and
+say which provider and tier answered (`type` is exact; `token` is file-level).
+
 For each assigned row, append to `{{WORK}}/decisions/{{READER}}.md` one
 line: `| <row#> | <Decision> |`, where Decision is one of:
 - a conclusion, citing the exact evidence file and line/key/hunk that
