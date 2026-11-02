@@ -324,6 +324,29 @@ test('a second review in the same run dir: an ended run is set aside, an open on
   assert.equal(fs.readdirSync(dir).filter((f) => /^events\.superseded-.*\.jsonl$/.test(f)).length, 1);
 });
 
+test('init --pending --new after an ended run starts the next review and sets the old evidence and work aside', () => {
+  const dir = copyGood();
+  assert.equal(run(dir, ['init', '--pending', 'pr=owner/repo#1']).status, 0);
+  assert.equal(run(dir, ['init', 'viewer=v']).status, 0);
+  walk(dir);
+  run(dir, ['finish', 'note=projects/p/notes/PR-1.md', 'gates=-'], 'ledger: x — ok\n');
+  fs.mkdirSync(path.join(dir, 'work', 'decisions'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'work', 'decisions', 'old.md'), '| 1 | from the first run |\n');
+  // without --new the same call is a replay of the ended run: nothing moves
+  assert.equal(run(dir, ['init', '--pending', 'pr=owner/repo#1']).status, 0);
+  assert.equal(read(dir).phase, 'rendered');
+  assert.ok(fs.existsSync(path.join(dir, 'work', 'decisions', 'old.md')));
+  assert.equal(run(dir, ['init', '--pending', '--new', 'pr=owner/repo#1']).status, 0);
+  assert.deepEqual(events(dir).map((e) => e.op), ['init-pending']);
+  assert.equal(read(dir).phase, 'pending');
+  const names = fs.readdirSync(dir);
+  assert.ok(!names.includes('evidence') && !names.includes('work'), 'the old run\'s dirs must not be left for the new run to read');
+  const oldWork = names.find((f) => /^work\.superseded-/.test(f));
+  assert.ok(oldWork && names.some((f) => /^evidence\.superseded-/.test(f)));
+  assert.ok(fs.existsSync(path.join(dir, oldWork, 'decisions', 'old.md')));
+  assert.equal(names.filter((f) => /^events\.superseded-.*\.jsonl$/.test(f)).length, 1);
+});
+
 test('init over a state.json from before the log keeps the old file beside the new run', () => {
   const dir = copyGood();
   fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ version: 1, phase: 'rendered' }));

@@ -6,7 +6,10 @@
 # the raw call without that variant). `only: true` means the pack matches
 # only when EVERY changed file matches (docs-only). Each probe is one bash
 # command run with these variables exported:
-#   WORKTREE REPO_DIR OUTDIR FILES MODULES BASE HEAD PR REPO SKILL_DIR.
+#   WORKTREE REPO_DIR OUTDIR FILES MODULES GO_PACKAGES BASE HEAD MERGE_BASE
+#   PR REPO SKILL_DIR.
+# GO_PACKAGES has one `<module> <./pkg-dir>` line per package holding a
+# changed .go file, so a probe can scope to what changed.
 # `needs` lists binaries; a missing one makes every probe UNAVAILABLE. A
 # probe that exits 127 is recorded UNAVAILABLE with its stderr as the reason.
 #
@@ -25,10 +28,22 @@
 # execution as the reviewer.
 packs:
   go-graph:
-    question: "Which modules and callers does this change reach, and do the touched modules still build and vet?"
+    question: "Which modules and callers does this change reach; do the touched modules still build and vet; do the changed packages' tests pass and lint clean against the merge-base?"
     match: ["**/*.go", "**/go.mod", "**/go.sum"]
     needs: [go]
     probes:
+      # test and lint run on the changed packages only, not whole modules: a
+      # module-wide run in a large repo costs minutes and mostly re-proves the
+      # base. A test that needs a service it cannot reach usually skips, so a
+      # pass here says nothing about those tests; CI is still their real run.
+      # -v with the PASS lines dropped keeps every SKIP and FAIL line, so the
+      # output names which tests did not run here instead of hiding them
+      # behind a package-level "ok".
+      # The local linter version may differ from the one CI pins, and lint
+      # prints its version first so a reader can tell. A site pack that knows
+      # the pin can override this probe with the exact version.
+      test: 'cd "$WORKTREE" || exit 1; [ -s "$GO_PACKAGES" ] || { echo "no changed Go package"; exit 0; }; rc=0; for m in $(cut -d" " -f1 "$GO_PACKAGES" | sort -u); do echo "## $m"; pk="$(awk -v m="$m" ''$1==m {print $2}'' "$GO_PACKAGES")"; (cd "$m" && go test -count=1 -timeout 10m -v $pk 2>&1 | grep -E "^(ok |FAIL|panic:|[[:space:]]*--- (FAIL|SKIP))|_test\.go:[0-9]+:" | tail -150; exit "${PIPESTATUS[0]}") || rc=1; done; exit $rc'
+      lint: 'cd "$WORKTREE" || exit 1; command -v golangci-lint >/dev/null || { echo "missing binary: golangci-lint" >&2; exit 127; }; [ -s "$GO_PACKAGES" ] || { echo "no changed Go package"; exit 0; }; golangci-lint version 2>&1 | head -1; rc=0; for m in $(cut -d" " -f1 "$GO_PACKAGES" | sort -u); do echo "## $m"; pk="$(awk -v m="$m" ''$1==m {print $2}'' "$GO_PACKAGES")"; (cd "$m" && golangci-lint run --new-from-rev="$MERGE_BASE" $pk 2>&1 | tail -80; exit "${PIPESTATUS[0]}") || rc=1; done; exit $rc'
       build: 'cd "$WORKTREE" || exit 1; rc=0; while read -r m; do echo "## $m"; (cd "$m" && go build ./... 2>&1 | head -100; exit "${PIPESTATUS[0]}") || rc=1; done < "$MODULES"; exit $rc'
       vet:   'cd "$WORKTREE" || exit 1; rc=0; while read -r m; do echo "## $m"; (cd "$m" && go vet ./... 2>&1 | head -100; exit "${PIPESTATUS[0]}") || rc=1; done < "$MODULES"; exit $rc'
       modmap-impact: 'cd "$WORKTREE" && command -v modmap >/dev/null || { echo "missing binary: modmap" >&2; exit 127; }; modmap impact --root . --json < "$FILES"'
