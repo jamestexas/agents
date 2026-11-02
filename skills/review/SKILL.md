@@ -321,9 +321,12 @@ node $SKILL/scripts/freshness.mjs <run> <run>-recheck
 ```
 
 The review ran against a snapshot, and the PR keeps moving while the review
-runs. `freshness.mjs` compares the snapshot to the live PR on three axes and
+runs. `freshness.mjs` compares the snapshot to the live PR on four axes and
 writes `work/freshness.json`:
 
+- **state**: the PR was merged or closed, so it exits 1. Do not post; keep
+  the artifact. A merged PR keeps its head and its green checks, so no
+  other axis would notice.
 - **head**: the head moved, so it exits 1. Refuse to post; re-review.
 - **checks**: a check is failing or pending, or the checks probe is
   UNAVAILABLE, so the verdict is capped at COMMENT. Post COMMENT instead of

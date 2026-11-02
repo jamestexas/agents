@@ -25,6 +25,16 @@ test('a quiet, green, unmoved PR leaves the verdict uncapped', () => {
   assert.deepEqual(r.activity, []);
 });
 
+test('a PR merged after the snapshot is not postable, though its head and checks are unchanged', () => {
+  const r = assess(base({ prState: 'MERGED' }));
+  assert.equal(r.head.moved, false);
+  assert.equal(r.verdict_cap, null);
+  assert.equal(r.state.open, false);
+  assert.equal(r.postable, false);
+  assert.equal(assess(base({ prState: 'OPEN' })).postable, true);
+  assert.equal(assess(base()).postable, true, 'no pr-shas: state unchecked, not treated as closed');
+});
+
 test('a check that turned red after the snapshot caps the verdict at COMMENT', () => {
   const r = assess(base({ checks: [{ name: 'unit', state: 'SUCCESS' }, { name: 'presubmit', state: 'FAILURE' }] }));
   assert.deepEqual(r.checks.failing, ['presubmit']);
@@ -72,6 +82,13 @@ test('the CLI exits 1 when the head moved, and writes freshness.json either way'
   assert.equal(moved.status, 1, moved.stdout + moved.stderr);
   assert.match(moved.stdout, /head: moved aaa → bbb/);
   assert.ok(fs.existsSync(path.join(run, 'work', 'freshness.json')));
+
+  mk(recheck, 'aaa', [{ name: 'unit', state: 'SUCCESS' }]);
+  fs.writeFileSync(path.join(recheck, 'evidence', 'probes', 'core', 'pr-shas.out'), JSON.stringify({ data: { repository: { pullRequest: { state: 'MERGED' } } } }));
+  const merged = spawnSync('node', [script, run, recheck], { encoding: 'utf8' });
+  assert.equal(merged.status, 1, merged.stdout + merged.stderr);
+  assert.match(merged.stdout, /state: MERGED — nothing to post/);
+  fs.rmSync(path.join(recheck, 'evidence', 'probes', 'core', 'pr-shas.out'));
 
   mk(recheck, 'aaa', [{ name: 'unit', state: 'FAILURE' }]);
   const red = spawnSync('node', [script, run, recheck], { encoding: 'utf8' });

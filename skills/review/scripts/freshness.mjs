@@ -4,6 +4,9 @@
 // computed from a snapshot; three things move under it while the review runs,
 // and each one changes what may be posted:
 //
+//   state     the PR is no longer open (merged or closed): there is nothing
+//             left to review, and a merged PR keeps its head and its green
+//             checks, so the other axes cannot catch it. Exit 1; do not post.
 //   head      the PR head sha moved: the review is of a commit that is no
 //             longer the PR. Exit 1; re-review, do not post.
 //   checks    a check is failing or still pending in the recheck snapshot (or
@@ -16,7 +19,8 @@
 //             not repeated.
 //
 // Writes <run>/work/freshness.json and prints one line per axis plus one per
-// new activity item. Exit 0 unless the head moved or an input is missing.
+// new activity item. Exit 0 unless the PR is not open, the head moved, or an
+// input is missing.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,10 +30,13 @@ const PASSING = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 
 const firstLine = (s) => String(s ?? '').split('\n').find((l) => l.trim())?.trim().slice(0, 120) ?? '';
 
-export function assess({ origTarget, origContext, recheckTarget, recheckContext, checks, checksStatus, viewer }) {
+export function assess({ origTarget, origContext, recheckTarget, recheckContext, checks, checksStatus, viewer, prState }) {
   const then = origTarget?.head ?? null;
   const now = recheckTarget?.head ?? null;
   const head = { then, now, moved: Boolean(then && now && then !== now) };
+  // Unknown (no pr-shas) is not treated as closed: the head check still runs,
+  // and a missing state is printed so the operator sees it was not checked.
+  const state = { value: prState ?? null, open: prState == null || String(prState).toUpperCase() === 'OPEN' };
 
   const failing = []; const pending = [];
   if (checksStatus === 'RAN' && Array.isArray(checks)) {
@@ -56,7 +63,7 @@ export function assess({ origTarget, origContext, recheckTarget, recheckContext,
   activity.sort((a, b) => String(a.at).localeCompare(String(b.at)));
 
   const capped = checksOut.status !== 'RAN' || failing.length > 0 || pending.length > 0;
-  return { since, head, checks: checksOut, activity, verdict_cap: capped ? 'COMMENT' : null };
+  return { since, state, head, checks: checksOut, activity, verdict_cap: capped ? 'COMMENT' : null, postable: state.open && !head.moved };
 }
 
 const readJSON = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return undefined; } };
@@ -77,11 +84,14 @@ function main() {
     checks: readJSON(ev(recheck, 'probes/core/pr-checks.out')),
     checksStatus: checksProbe?.status,
     viewer: readJSON(path.join(run, 'state.json'))?.viewer ?? null,
+    prState: readJSON(ev(recheck, 'probes/core/pr-shas.out'))?.data?.repository?.pullRequest?.state ?? null,
   });
   fs.mkdirSync(path.join(run, 'work'), { recursive: true });
   fs.writeFileSync(path.join(run, 'work', 'freshness.json'), JSON.stringify(result, null, 2) + '\n');
 
-  const { head, checks, activity } = result;
+  const { state, head, checks, activity } = result;
+  if (state.value === null) console.log('state: not checked (no pr-shas in the recheck)');
+  else console.log(state.open ? 'state: OPEN — ok' : `state: ${state.value} — nothing to post`);
   console.log(head.moved ? `head: moved ${head.then} → ${head.now} — re-review, do not post` : `head: unchanged ${head.now} — ok`);
   if (checks.status !== 'RAN') console.log(`checks: ${checks.status} — verdict capped at COMMENT`);
   else if (checks.failing.length || checks.pending.length) {
@@ -89,7 +99,7 @@ function main() {
   } else console.log('checks: all passing — ok');
   console.log(`activity: ${activity.length} new item(s) since ${result.since ?? 'the snapshot'}${activity.length ? ' — read each before posting' : ' — ok'}`);
   for (const a of activity) console.log(`  - ${a.at} ${a.kind} ${a.author}${a.where ? ` ${a.where}` : ''}: ${a.text}`);
-  process.exit(head.moved ? 1 : 0);
+  process.exit(result.postable ? 0 : 1);
 }
 
 // Run as a script, not when imported by a test. Real paths, because the skill
