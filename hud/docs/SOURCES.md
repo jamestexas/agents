@@ -17,6 +17,12 @@ readable `hud.toml` exists, so a tree copied before the migration keeps working
 without a second format to maintain; a present-but-empty `hud.toml` still wins,
 because "I emptied the config" is an answer rather than an absence.
 
+`$HUD_ROOT/hud.local.toml`, when present, is read after whichever of those was
+used and overrides it key by key: tables merge at every depth, values replace.
+It is for what is true of one machine, or private to it, such as a backup
+bucket, and it is gitignored by `hud init` and refused by `hud sync` when it is
+not. A warning from it is printed with its own filename.
+
 A missing or malformed config is an **empty** config — no sources, so no
 panels. The static layer (the tree, notes, deep links) never depends on the
 config being present or valid.
@@ -310,8 +316,8 @@ path = "~/stores/work"
 One machine writes to exactly one store and may read from several. The writable
 store is `HUD_ROOT` and **cannot be named here** — that keeps one fact in one
 place, and it is why there is no `[store]` table. `hud sync` stages, commits and
-pushes only the writable store, so a mounted store cannot be pushed to the
-wrong remote: sync has no knowledge that other roots exist. `hud pull` is the
+backs up only the writable store, so a mounted store cannot be backed up to
+the wrong place: sync has no knowledge that other roots exist. `hud pull` is the
 mirror image: it fast-forwards the mounted stores and never reads `HUD_ROOT`.
 
 ### What a store has to look like
@@ -410,6 +416,21 @@ keys mean:
 
 `HUD_ROOT`, `HUD_PORT`, `HUD_HOST` and `HUD_LABEL` in the environment win over
 this table, everywhere in the HUD.
+
+## `[backup]`
+
+Read by `hud sync` and `hud status` only, and never served by `/api/config`.
+Neither key set means **local-only**: sync commits and copies nothing anywhere.
+
+| Key | Type | Effect |
+| --- | --- | --- |
+| `push` | boolean, default `false` | Push to the tree's git remote after each commit. A configured remote is otherwise left alone. |
+| `cmd` | string | A command run after each sync, split into argv with no shell, with the tree as cwd and `HUD_ROOT` set. |
+
+A value of the wrong type is a warning, and is treated as unset: a typo falls
+back to local-only rather than to sending notes anywhere. Set either key in
+`hud.local.toml` when it names anything private. Behaviour, refusals and
+examples: [CLI.md](CLI.md#backing-the-content-tree-up).
 
 ## What `hud init` probes, and what it writes
 

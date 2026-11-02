@@ -13,7 +13,9 @@ import path from "node:path";
 
 import {
   CONFIG_JSON,
+  CONFIG_LOCAL_TOML,
   CONFIG_TOML,
+  configWarnLine,
   createServer,
   loadConfig,
   loadConfigDetail,
@@ -222,6 +224,70 @@ test("toml wins when both exist", async (t) => {
 
   // Read-only, like every other GET route here.
   assert.equal((await fetch(`${base}/api/config`, { method: "POST" })).status, 405);
+});
+
+test("hud.local.toml overrides hud.toml key by key, and its warnings name it", (t) => {
+  const root = fixture(t, {
+    [CONFIG_TOML]: [
+      'ticket_url_template = "https://example.invalid/t/{id}"',
+      "[serve]",
+      "port = 4870",
+      'host = "127.0.0.1"',
+      "[sources.board]",
+      'url = "http://127.0.0.1:8787/api/board"',
+      "[backup]",
+      "push = true",
+      "not a line",
+    ].join("\n"),
+    [CONFIG_LOCAL_TOML]: [
+      "[serve]",
+      "port = 4999",
+      "[sources.digest]",
+      'cmd = "digest --json"',
+      "[backup]",
+      "push = false",
+      "cmd = 'copy . gs://<bucket>/hud'",
+      "also not a line",
+    ].join("\n"),
+  });
+
+  const detail = loadConfigDetail(root);
+  assert.equal(detail.file, CONFIG_TOML);
+  assert.equal(detail.localFile, CONFIG_LOCAL_TOML);
+  // Key by key: the overlay's port wins, the main file's host survives.
+  assert.deepEqual(detail.data.serve, { port: 4999, host: "127.0.0.1" });
+  // At every depth: a new nested table joins, an untouched one stays.
+  assert.equal(detail.data.sources.board.url, "http://127.0.0.1:8787/api/board");
+  assert.equal(detail.data.sources.digest.cmd, "digest --json");
+  assert.deepEqual(detail.data.backup, { push: false, cmd: "copy . gs://<bucket>/hud" });
+  assert.equal(detail.data.ticket_url_template, "https://example.invalid/t/{id}");
+
+  // A startup line has to send you to the file the typo is in.
+  assert.equal(detail.warns.length, 2, detail.warns.join("; "));
+  const lines = detail.warns.map((w) => configWarnLine(detail, w));
+  assert.match(lines[0], new RegExp(`^${CONFIG_TOML}: line 9: `));
+  assert.match(lines[1], new RegExp(`^${CONFIG_LOCAL_TOML}: line 8: `));
+});
+
+test("an overlay alone is read, and a tree without one reads as before", (t) => {
+  const only = loadConfigDetail(fixture(t, { [CONFIG_LOCAL_TOML]: "[backup]\npush = true\n" }));
+  assert.equal(only.file, null);
+  assert.deepEqual(only.data, { backup: { push: true } });
+
+  const none = loadConfigDetail(fixture(t, { [CONFIG_TOML]: "[serve]\nport = 4870\n" }));
+  assert.equal("localFile" in none, false, "no overlay, no localFile key");
+});
+
+test("/api/config never serves [backup], wherever it was set", async (t) => {
+  const root = fixture(t, {
+    [CONFIG_TOML]: 'ticket_url_template = "https://example.invalid/t/{id}"\n[backup]\npush = true\n',
+    [CONFIG_LOCAL_TOML]: "[backup]\ncmd = 'copy . gs://<bucket>/hud'\n",
+  });
+  const server = createServer({ root, uiDir: path.join(import.meta.dirname, "..", "ui") });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const res = await fetch(`http://127.0.0.1:${server.address().port}/api/config`);
+  assert.deepEqual(await res.json(), { ticket_url_template: "https://example.invalid/t/{id}" });
 });
 
 // -------------------------------------------------------- section descriptions

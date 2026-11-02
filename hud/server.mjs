@@ -265,6 +265,13 @@ function stripComment(s) {
 /** Canonical config, and the pre-migration file still read when it is absent. */
 export const CONFIG_TOML = "hud.toml";
 export const CONFIG_JSON = "hud.config.json";
+/**
+ * The machine-local overlay: same syntax, read after the main config, never
+ * committed. It exists for values that are true of one machine and private to
+ * it — a backup bucket, say — which is exactly what `hud.toml` promises never
+ * to hold. `hud sync` refuses to run while the tree's .gitignore lets it in.
+ */
+export const CONFIG_LOCAL_TOML = "hud.local.toml";
 
 const STRING_ESCAPES = { n: "\n", t: "\t", r: "\r", '"': '"', "\\": "\\" };
 
@@ -814,12 +821,42 @@ function contains(base, target) {
  * without a second config format to maintain — present-and-empty TOML still
  * wins, because "I emptied the config" is an answer, not an absence.
  *
+ * `hud.local.toml`, when present, is laid over whichever of those was read:
+ * tables merge key by key at every depth, and anything that is not a table (a
+ * scalar, an array) replaces what the main file said. Its warnings are
+ * prefixed with its filename, because a startup line that blamed `hud.toml`
+ * for a typo in the other file would send you to the wrong file. `localFile`
+ * is present only when the overlay is, so a tree without one reads exactly as
+ * it did before the overlay existed.
+ *
  * A missing or malformed config is an empty config, i.e. no sources, i.e. no
  * panels: the HUD's static layer must not depend on it being present or valid.
  *
- * @returns {{data: Record<string, unknown>, warns: string[], file: string|null}}
+ * @returns {{data: Record<string, unknown>, warns: string[], file: string|null, localFile?: string}}
  */
 export function loadConfigDetail(root) {
+  const base = loadBaseConfig(root);
+  const local = readIfPresent(path.join(root, CONFIG_LOCAL_TOML));
+  if (local === null) return base;
+  const overlay = parseToml(local);
+  return {
+    data: mergeConfig(base.data, overlay.data),
+    warns: [...base.warns, ...overlay.warns.map((w) => `${CONFIG_LOCAL_TOML}: ${w}`)],
+    file: base.file,
+    localFile: CONFIG_LOCAL_TOML,
+  };
+}
+
+/**
+ * One config warning as a startup line names it: with the file it came from.
+ * Overlay warnings already carry their filename (see loadConfigDetail).
+ */
+export function configWarnLine(detail, warn) {
+  if (warn.startsWith(`${CONFIG_LOCAL_TOML}: `)) return warn;
+  return `${detail.file}: ${warn}`;
+}
+
+function loadBaseConfig(root) {
   const toml = readIfPresent(path.join(root, CONFIG_TOML));
   if (toml !== null) {
     const { data, warns } = parseToml(toml);
@@ -837,6 +874,29 @@ export function loadConfigDetail(root) {
   } catch (err) {
     return { data: {}, warns: [errText(err)], file: CONFIG_JSON };
   }
+}
+
+const isTable = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
+/** `over` laid on `base`: tables merge, everything else replaces. Pure. */
+function mergeConfig(base, over) {
+  const out = { ...base };
+  for (const [k, v] of Object.entries(over)) {
+    out[k] = isTable(v) && isTable(out[k]) ? mergeConfig(out[k], v) : v;
+  }
+  return out;
+}
+
+/**
+ * The config as `/api/config` serves it: everything but [backup]. That table is
+ * read by the CLI alone, and is where a private bucket name lives — the reason
+ * the local overlay exists — so it is not served to anything that can reach
+ * the port.
+ */
+export function servedConfig(cfg) {
+  if (!cfg || typeof cfg !== "object" || !("backup" in cfg)) return cfg;
+  const { backup: _backup, ...rest } = cfg;
+  return rest;
 }
 
 /**
@@ -2061,7 +2121,7 @@ function handle(req, res, root, uiDir, dyn, refresh) {
   // config's raw bytes through /api/md, which only worked while the file was
   // JSON; the browser has no TOML parser and must not grow a second copy of
   // this one. Exposes nothing new — /api/md still serves the file verbatim.
-  if (pathname === "/api/config") return sendJson(res, 200, loadConfig(root));
+  if (pathname === "/api/config") return sendJson(res, 200, servedConfig(loadConfig(root)));
   // The board is the `board` card under its old envelope: `source`, `stale`,
   // `cached_at`, `data` as the upstream sent it plus `review` on joined rows.
   if (pathname === "/api/dyn/board") return serveLegacy(res, root, url, dyn, "board");
@@ -2289,7 +2349,7 @@ if (invokedDirectly) {
   // the config is hand-edited, and silence would read as "accepted".
   const cfg = loadConfigDetail(root);
   for (const warn of cfg.warns) {
-    process.stderr.write(`hud: ${cfg.file}: ${warn}\n`);
+    process.stderr.write(`hud: ${configWarnLine(cfg, warn)}\n`);
   }
   // The card registry's complaints belong here for the same reason: a stanza
   // it refused is served as a 503 per request, and a spelling it tolerated

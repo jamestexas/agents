@@ -52,7 +52,7 @@ Or reach all of it through one command, from any directory:
 ```bash
 hud/hud link                           # symlink onto PATH ($XDG_BIN_HOME)
 hud status                             # config, service, port, upstreams, backup
-hud sync                               # back the content tree up to its remote
+hud sync                               # commit the content tree; back it up only if [backup] says
 ```
 
 **New here?** → `hud/hud init`, then `hud status`: init tells you what it
@@ -75,7 +75,7 @@ is the fastest way to see what this HUD is wired to and what it is not.
 | `hud logs [-f] [-n N]` | Tails `$HUD_ROOT/.generated/service.log` — the file both start paths write to. |
 | `hud root` | Prints the resolved `HUD_ROOT`. |
 | `hud pull [--dry-run]` | Fast-forwards every read-only store; refuses any it cannot advance without losing work, and never touches the writable one. See [Pulling read-only stores](docs/CLI.md#pulling-read-only-stores). |
-| `hud sync [-m MSG] [--dry-run]` | Backs the **content tree** up: stage, commit, push to its git remote in one verb. Never force-pushes. See [Backing the content tree up](docs/CLI.md#backing-the-content-tree-up). |
+| `hud sync [-m MSG] [--dry-run]` | Stages and commits the **content tree** in one verb. **Local-only by default**: it pushes to the git remote only with `[backup] push = true`, and runs a backup command only with `[backup] cmd`, ideally set in the never-committed `hud.local.toml`. Never force-pushes. See [Backing the content tree up](docs/CLI.md#backing-the-content-tree-up). |
 | `hud link` / `hud unlink` | Puts **this command** on your PATH, and takes it off. See [Two installs, two verbs](docs/CLI.md#two-installs-two-verbs). |
 | `hud install` / `hud uninstall` | Installs and removes **the launchd service**, via `service/install.sh` / `service/uninstall.sh`; arguments passed through. |
 | `hud index` | `hud-index.mjs` — rebuilds the mache index. |
