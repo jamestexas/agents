@@ -26,7 +26,10 @@ import { fileURLToPath } from "node:url";
 export const BOARD_SCHEMA = "hud.board/1";
 export const EDGE_KINDS = Object.freeze(["dep", "inferred"]);
 
-const TOP_KEYS = new Set(["schema", "title", "generated", "sources", "columns", "rows", "edges", "notes", "tags"]);
+const TOP_KEYS = new Set(["schema", "title", "generated", "sources", "columns", "rows", "edges", "notes", "tags", "layout"]);
+// Graph directions mermaid accepts for a flowchart. LR suits a short chain; a
+// graph with many parallel branches reads better top-down.
+export const LAYOUTS = Object.freeze(["LR", "TD"]);
 const ROW_KEYS = new Set(["id", "label", "sub", "status", "external", "url", "cells"]);
 const CELL_KEYS = new Set(["value", "chip", "source", "url"]);
 const EDGE_KEYS = new Set(["from", "to", "kind", "why"]);
@@ -54,6 +57,7 @@ export function validateBoard(doc) {
   if (!isNonEmptyString(doc.title)) err("title must be a non-empty string");
   if (!isNonEmptyString(doc.generated) || Number.isNaN(Date.parse(doc.generated))) err("generated must be an ISO-8601 timestamp");
   if (doc.tags !== undefined && !(Array.isArray(doc.tags) && doc.tags.every(isNonEmptyString))) err("tags must be a list of strings");
+  if (doc.layout !== undefined && !LAYOUTS.includes(doc.layout)) err(`layout must be one of ${LAYOUTS.join(", ")}`);
 
   const sources = doc.sources ?? [];
   if (!Array.isArray(sources)) err("sources must be a list");
@@ -182,7 +186,7 @@ export function renderGraph(doc) {
   const edges = doc.edges ?? [];
   if (edges.length === 0 && rows.length < 2) return "";
   const idOf = new Map(rows.map((r, i) => [r.id, `n${i}`]));
-  const lines = ["flowchart LR"];
+  const lines = [`flowchart ${doc.layout ?? "LR"}`];
   const used = new Set();
   for (const r of rows) {
     const cls = statusClass(r.status, r.external);

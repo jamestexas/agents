@@ -49,6 +49,7 @@ writer, a ticket, a bead, a service, a person's queue; the shape is the same.
 | `title` | yes | The page title. |
 | `generated` | yes | ISO-8601. When the producer ran; the page prints it and the history snapshot is named by it. |
 | `tags` | no | Extra tags for the page's frontmatter; `board` is always added. |
+| `layout` | no | `LR` (default) or `TD`: the direction of the rendered graph. Use `TD` when the graph fans out into many parallel branches. |
 | `sources` | no | Where the producer looked: `kind` (git, gh, linear, beads, tf, …), `ref`, optional `at`. Printed under the title. |
 | `columns` | no | The table's columns, in order: `id` (used by cells) and `label`. No columns, no table. |
 | `rows` | yes | The things. `id` is unique and is what edges name; `label`, optional `sub`, free-text `status`, `external` (outside this board, drawn dashed), `url`, and `cells` keyed by column id. |

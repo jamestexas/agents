@@ -86,6 +86,14 @@ test("mermaidText strips what breaks a label", () => {
   assert.equal(mermaidText("x".repeat(100), 10).length, 10);
 });
 
+test("layout picks the flowchart direction and rejects anything but LR or TD", () => {
+  const doc = { schema: "hud.board/1", title: "t", generated: "2026-01-02T03:04:05Z", sources: [], columns: [], rows: [{ id: "a", label: "A" }, { id: "b", label: "B" }], edges: [{ from: "a", to: "b", kind: "dep" }] };
+  assert.ok(renderGraph(doc).startsWith("flowchart LR"));
+  assert.ok(renderGraph({ ...doc, layout: "TD" }).startsWith("flowchart TD"));
+  assert.equal(validateBoard({ ...doc, layout: "TD" }).ok, true);
+  assert.ok(validateBoard({ ...doc, layout: "RL" }).errors.some((m) => m.includes("layout")));
+});
+
 test("renderGraph draws dep edges solid, inferred edges dotted with a reason, externals dashed, links as click", () => {
   const g = renderGraph(board());
   assert.match(g, /^flowchart LR/);
