@@ -437,6 +437,50 @@ check_readme_drift() {
     echo "✅ README.md is in sync with frontmatter"
 }
 
+# CLAUDE.md states a one-way licence boundary: the repo is Apache-2.0 except
+# hud/, which is AGPL-3.0-only. Apache code may move INTO hud/; hud/ code may
+# not move out, or it ships under an Apache-2.0 notice and is mislicensed for
+# everyone downstream. The property that makes that checkable is hud/ importing
+# nothing above itself — which CLAUDE.md names and then admits nothing enforces.
+#
+# Resolve each specifier rather than grepping for "../..": hud/service/x.mjs
+# importing ../lib.mjs is legal and stays inside hud/, while hud/x.mjs importing
+# ../scripts/y.mjs is a violation with fewer dots.
+check_hud_boundary() {
+    [ -d hud ] || { echo "✅ no hud/ directory — licence boundary check skipped"; return 0; }
+    local escapes
+    escapes="$(python3 - <<'PY'
+import os, re
+root = "hud"
+pat = re.compile(r'''(?:\bfrom|\bimport|\brequire\()\s*["']([^"']+)["']''')
+for dirpath, dirnames, filenames in os.walk(root):
+    dirnames[:] = [d for d in dirnames if d != "node_modules"]
+    for fn in filenames:
+        if not fn.endswith((".mjs", ".js", ".cjs", ".ts", ".mts", ".tsx")):
+            continue
+        path = os.path.join(dirpath, fn)
+        try:
+            src = open(path, encoding="utf-8", errors="ignore").read()
+        except OSError:
+            continue
+        for spec in pat.findall(src):
+            if not spec.startswith("."):
+                continue  # bare specifier: a Node builtin or a package, not a path out
+            target = os.path.normpath(os.path.join(dirpath, spec))
+            if target != root and not target.startswith(root + os.sep):
+                print(f"{path}: {spec} -> {target}")
+PY
+)"
+    if [ -n "$escapes" ]; then
+        echo "❌ hud/ imports something outside hud/ — AGPL-3.0 code must not depend"
+        echo "   on the Apache-2.0 tree, and this dissolves the self-containment that"
+        echo "   makes a licence violation visible (see CLAUDE.md, Licensing):"
+        printf '%s\n' "$escapes" | sed 's/^/     /'
+        return 1
+    fi
+    echo "✅ hud/ is self-contained (licence boundary intact)"
+}
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -450,7 +494,9 @@ case "$cmd" in
     check)          # CI entry point: assert everything is in order.
                     lint_all \
                       && run_include_pass check \
-                      && check_readme_drift ;;
+                      && check_readme_drift \
+                      && check_hud_boundary ;;
+    hud-boundary)   check_hud_boundary ;;
     all)            lint_all && run_include_pass write && gen_readme ;;
-    *)              echo "Usage: $0 {lint|readme|expand|check-includes|check|all}"; exit 2 ;;
+    *)              echo "Usage: $0 {lint|readme|expand|check-includes|check|hud-boundary|all}"; exit 2 ;;
 esac
