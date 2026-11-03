@@ -47,6 +47,22 @@ test('a pending check, an unknown state, or an unavailable checks probe all cap 
   assert.equal(assess(base({ checksStatus: 'UNAVAILABLE', checks: undefined })).verdict_cap, 'COMMENT');
 });
 
+test('a check that waits on a review is listed apart and does not cap the verdict', () => {
+  const r = assess(base({ checks: [
+    { name: 'unit', state: 'SUCCESS' },
+    { name: 'codeowners-gate', state: 'PENDING' },
+    { name: 'Checks review gate', state: 'FAILURE' },
+  ] }));
+  assert.deepEqual(r.checks.awaiting_review, ['codeowners-gate', 'Checks review gate']);
+  assert.deepEqual(r.checks.pending, []);
+  assert.deepEqual(r.checks.failing, []);
+  assert.equal(r.verdict_cap, null);
+  // an ordinary pending check beside it still caps
+  assert.equal(assess(base({ checks: [{ name: 'codeowners-gate', state: 'PENDING' }, { name: 'build', state: 'IN_PROGRESS' }] })).verdict_cap, 'COMMENT');
+  // the pattern is overridable
+  assert.deepEqual(assess(base({ reviewGated: /^sign-off$/, checks: [{ name: 'codeowners-gate', state: 'PENDING' }] })).checks.pending, ['codeowners-gate']);
+});
+
 test('reviews and thread comments after the snapshot are listed; older ones and the viewer\'s own are not', () => {
   const recheckContext = ctx({
     reviews: { items: [

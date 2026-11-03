@@ -12,7 +12,12 @@
 //   checks    a check is failing or still pending in the recheck snapshot (or
 //             the checks probe was UNAVAILABLE): the verdict is capped at
 //             COMMENT. An approval on a red or unfinished PR asserts something
-//             the review did not see. Unknown states count as pending.
+//             the review did not see. Unknown states count as pending. A check
+//             that waits on a review (a codeowners or approval gate) is listed
+//             apart and never caps: it is pending *because* the approval has
+//             not been posted, so capping on it would block the very approval
+//             it waits for. FRESHNESS_REVIEW_GATED (a regex) overrides which
+//             check names count as such.
 //   activity  reviews, PR comments, or thread comments posted since the
 //             original snapshot by anyone but the viewer: each must be read
 //             before posting, and a finding it already raises is referenced,
@@ -27,10 +32,11 @@ import { fileURLToPath } from 'node:url';
 
 const FAILING = new Set(['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE']);
 const PASSING = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
+export const REVIEW_GATED = /codeowners|review[- ]?gate|approval/i;
 
 const firstLine = (s) => String(s ?? '').split('\n').find((l) => l.trim())?.trim().slice(0, 120) ?? '';
 
-export function assess({ origTarget, origContext, recheckTarget, recheckContext, checks, checksStatus, viewer, prState }) {
+export function assess({ origTarget, origContext, recheckTarget, recheckContext, checks, checksStatus, viewer, prState, reviewGated = REVIEW_GATED }) {
   const then = origTarget?.head ?? null;
   const now = recheckTarget?.head ?? null;
   const head = { then, now, moved: Boolean(then && now && then !== now) };
@@ -38,15 +44,17 @@ export function assess({ origTarget, origContext, recheckTarget, recheckContext,
   // and a missing state is printed so the operator sees it was not checked.
   const state = { value: prState ?? null, open: prState == null || String(prState).toUpperCase() === 'OPEN' };
 
-  const failing = []; const pending = [];
+  const failing = []; const pending = []; const awaitingReview = [];
   if (checksStatus === 'RAN' && Array.isArray(checks)) {
     for (const c of checks) {
       const st = String(c.state ?? '').toUpperCase();
-      if (FAILING.has(st)) failing.push(c.name);
-      else if (!PASSING.has(st)) pending.push(c.name);
+      if (PASSING.has(st)) continue;
+      if (reviewGated.test(String(c.name ?? ''))) awaitingReview.push(c.name);
+      else if (FAILING.has(st)) failing.push(c.name);
+      else pending.push(c.name);
     }
   }
-  const checksOut = { status: checksStatus ?? 'UNAVAILABLE', failing, pending };
+  const checksOut = { status: checksStatus ?? 'UNAVAILABLE', failing, pending, awaiting_review: awaitingReview };
 
   const since = origContext?.generated_at ?? null;
   const newer = (at) => since === null || (at && at > since);
@@ -85,6 +93,7 @@ function main() {
     checksStatus: checksProbe?.status,
     viewer: readJSON(path.join(run, 'state.json'))?.viewer ?? null,
     prState: readJSON(ev(recheck, 'probes/core/pr-shas.out'))?.data?.repository?.pullRequest?.state ?? null,
+    ...(process.env.FRESHNESS_REVIEW_GATED ? { reviewGated: new RegExp(process.env.FRESHNESS_REVIEW_GATED, 'i') } : {}),
   });
   fs.mkdirSync(path.join(run, 'work'), { recursive: true });
   fs.writeFileSync(path.join(run, 'work', 'freshness.json'), JSON.stringify(result, null, 2) + '\n');
@@ -97,6 +106,7 @@ function main() {
   else if (checks.failing.length || checks.pending.length) {
     console.log(`checks: ${checks.failing.length} failing${checks.failing.length ? ` (${checks.failing.join(', ')})` : ''}, ${checks.pending.length} pending${checks.pending.length ? ` (${checks.pending.join(', ')})` : ''} — verdict capped at COMMENT`);
   } else console.log('checks: all passing — ok');
+  if (checks.awaiting_review?.length) console.log(`checks: ${checks.awaiting_review.length} waiting on a review (${checks.awaiting_review.join(', ')}) — not capped; the approval is what they wait for`);
   console.log(`activity: ${activity.length} new item(s) since ${result.since ?? 'the snapshot'}${activity.length ? ' — read each before posting' : ' — ok'}`);
   for (const a of activity) console.log(`  - ${a.at} ${a.kind} ${a.author}${a.where ? ` ${a.where}` : ''}: ${a.text}`);
   process.exit(result.postable ? 0 : 1);
