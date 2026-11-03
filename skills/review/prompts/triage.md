@@ -32,5 +32,9 @@ where `claims` are ids from `{{WORK}}/claims.jsonl` (readers' ids and
 refute's `refute-<n>` ids, which carry what refute ran). `claims` ids must exist
 in `work/claims.jsonl`; the gate rejects a Blocking finding that cites an id
 it cannot find. A finding whose only support is an ASSUMED claim gets tag
-`Question`, never `Blocking`.
+`Question`, never `Blocking`. The same goes for a finding about what code
+does (`kind: behavior`) when its behavior claims were read but not run
+(`class` `READ` with no `unobservable` reason): tag it `Question` and say
+what would observe it. Reading isn't a substitute for a run that was
+possible.
 Reply with one line: `done: N in, N out, K confirmed`.
