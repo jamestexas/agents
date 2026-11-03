@@ -7,7 +7,11 @@ version of the file). You may run builds and tests, but only in a scratch
 worktree you create under `$TMPDIR` and remove when done, recording the
 command and its output under `{{WORK}}/refute/`; the only network access
 allowed is `git fetch` of refs already named in `target.json`, never a
-fetch from GitHub or anywhere else.
+fetch from GitHub or anywhere else. For a Go behavior, prefer a scratch
+test through `bash ~/.claude/skills/review/scripts/go-overlay-test.sh <run>
+refute-<name> <pkg-dir> <file> -run <Test> -v`: it compiles into the package
+without a second worktree, and records the run in `{{WORK}}/observe/`.
+Cite that recording as the claim's source.
 
 Candidates:
 {{CANDIDATES}}

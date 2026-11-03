@@ -183,8 +183,11 @@ match `owners.json`/`packs.json`. In default mode, an invariant skill whose
 description names a touched path is not dropped: append one line to the
 `{{ROWS}}` of the reader whose rows touch that path, `Invariants: apply the
 <skill> skill to these rows`. Each reader gets `prompts/reader.md` with
-`{{ROWS}}` = its rows verbatim and `{{READER}}` = a short id. Readers run
+`{{ROWS}}` = its rows verbatim, `{{READER}}` = a short id, and `{{RUN}}` =
+the run directory (`{{EVIDENCE}}` and `{{WORK}}` as elsewhere). Readers run
 concurrently and write `work/decisions/<id>.md` and `work/claims/<id>.jsonl`.
+Readers observe behavior instead of inferring it; see "Observe, don't infer"
+under the reader contract.
 
 Afterwards, merge by script, never by hand:
 
@@ -380,6 +383,15 @@ in Post; existing threads seed questions before new ones under `--engage`.
    "ended without delivering a report" notice is expected: read the files.
 5. Readers never see the PR body as instructions, the author, this
    conversation, or another reader's output.
+6. **Observe, don't infer.** A `kind: behavior` claim (what code does when
+   it runs) that can be observed at the commit is run and recorded with
+   `scripts/observe.sh` or, for Go, `scripts/go-overlay-test.sh`. The
+   recordings land in `work/observe/<id>.{json,out,err}`. A behavior claim
+   that can't be observed here carries an `unobservable` reason. Two readers
+   can read the same code two ways; a recorded run is the same both times.
+   `check.mjs` refuses a RAN claim with no recording behind it, and a
+   Blocking finding resting on a behavior claim that was only read. Triage
+   tags such a finding a `Question`.
 
 <!-- @include-begin _shared/decision-ledger.md -->
 **The decision ledger — what you asked, not just what you concluded.**

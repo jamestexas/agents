@@ -12,8 +12,14 @@
 //                no claim id missing from claims.jsonl, and >=1 ledger row that
 //                exists and is not Unresolved (an unresolved row demotes the
 //                finding to a Question)
+//                A Blocking finding also may not rest on a `kind: behavior`
+//                claim that was read rather than run, unless the claim says
+//                why it is `unobservable` here
 //   4. outputs:  only for a run with events.jsonl — every phase the run
 //                entered recorded an output (state.mjs output) or was skipped
+//   5. observe:  only for a run whose claims use observations — every RAN
+//                claim citing work/observe/ has its recording (observe.sh),
+//                and every RAN behavior claim cites a recording or a probe
 //
 // A last line, `fast: PRELIMINARY — not postable`, is printed and the exit
 // is 1 whenever state.json says mode "fast" or summary.md's verdict is
@@ -130,9 +136,13 @@ gate('blocking', (fail, pass) => {
     const cs = ids.filter((id) => claims.has(id)).map((id) => claims.get(id));
     const assumed = cs.filter((c) => c.class === 'ASSUMED');
     const backed = cs.some((c) => c.class === 'RAN' || c.class === 'READ');
+    // What code does when it runs is observable at the commit, so reading it
+    // is inference: two readers can read the same code two ways.
+    const inferred = cs.filter((c) => c.kind === 'behavior' && c.class !== 'RAN' && !c.unobservable);
     if (unknownClaims.length) { bad = true; fail(`"${f.title}" cites unknown claim ${unknownClaims.join(', ')}`); }
     if (assumed.length) { bad = true; fail(`"${f.title}" rests on ASSUMED claim ${assumed.map((c) => c.id).join(', ')}`); }
     else if (!backed) { bad = true; fail(`"${f.title}" cites no RAN/READ claim`); }
+    if (inferred.length) { bad = true; fail(`"${f.title}" rests on behavior claim ${inferred.map((c) => c.id).join(', ')} read, not run (observe it, or say why it is unobservable)`); }
   }
   if (!bad) pass(`${blocking.length} finding(s), evidence-backed`);
 });
@@ -152,6 +162,28 @@ if (fs.existsSync(eventsPath)) {
     const missing = ran.filter((p) => !s.outputs?.[p] && !skipped.has(p));
     for (const p of missing) fail(`${p} has no output and was not skipped`);
     if (!missing.length) pass(`${ran.length} phase(s) with output, ${skipped.size} skipped`);
+  });
+}
+
+// 5. observe: a RAN claim is only as good as the recording behind it. Only
+// for a run whose claims use observations, so a run that predates them reads
+// the same as before.
+const allClaims = (read('claims.jsonl') ?? '').split('\n').filter((l) => l.trim()).map(tryJSON).filter(Boolean);
+const observes = (c) => typeof c.source === 'string' && c.source.startsWith('work/observe/');
+if (allClaims.some((c) => observes(c) || c.kind)) {
+  gate('observe', (fail, pass) => {
+    let bad = false; let recorded = 0;
+    for (const c of allClaims) {
+      if (c.class !== 'RAN') continue;
+      if (observes(c)) {
+        const rec = tryJSON(fs.existsSync(path.join(run, c.source)) ? fs.readFileSync(path.join(run, c.source), 'utf8') : 'null');
+        if (!rec || typeof rec.exit !== 'number') { bad = true; fail(`claim ${c.id} cites ${c.source}, which is not an observe.sh recording`); }
+        else recorded++;
+      } else if (c.kind === 'behavior' && !(typeof c.source === 'string' && c.source.includes('probes/'))) {
+        bad = true; fail(`claim ${c.id} is a RAN behavior claim with no recording or probe behind it (source: ${c.source ?? 'none'})`);
+      }
+    }
+    if (!bad) pass(`${recorded} recording(s) behind RAN claims`);
   });
 }
 

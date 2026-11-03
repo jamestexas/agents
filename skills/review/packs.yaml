@@ -59,6 +59,17 @@ packs:
       # partner function (file:line of the existing copy), tagged with the
       # changed file it overlaps. The db lives in a temp dir, never in OUTDIR.
       mechanism-overlap: 'cd "$WORKTREE" || exit 1; tmp="$(mktemp -d)"; trap ''rm -rf "$tmp"'' EXIT; mache build . "$tmp/head.db" >/dev/null 2>"$tmp/build.err" || { cat "$tmp/build.err" >&2; exit 1; }; grep -E "\.go$" "$FILES" | grep -vE "_test\.go$" | while read -r f; do [ -e "$f" ] || continue; mache find-smells --db "$tmp/head.db" --rules-dir "$SKILL_DIR/smell-rules" --rule mechanism_overlap --source-id "$f" --fail-on none --format ci | grep "\[mechanism_overlap\]" | sed "s|$| overlaps $f|"; done; true'
+  # Structural providers: packs named structure-* answer "which functions
+  # changed, and what exactly calls and is called by them", each as one
+  # review-structure/1 document (docs/structure-providers.md). This is the
+  # default; a site pack adds others (a cross-module depgraph tool, say) under
+  # its own structure-<name>, or replaces this one by the same name.
+  structure-gopls:
+    question: "Which functions does the change touch, and exactly which call sites reach them and what do they call, at head?"
+    match: ["**/*.go"]
+    needs: [gopls, node]
+    probes:
+      paths: 'node "$SKILL_DIR/scripts/structure-gopls.mjs"'
   terraform:
     question: "Does the Terraform format, and which resources does the diff add, change, or remove?"
     match: ["**/*.tf", "**/*.tfvars"]
