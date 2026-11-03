@@ -11,6 +11,41 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const check = path.join(here, '..', 'scripts', 'check.mjs');
 const run = (fixture) => spawnSync('node', [check, path.join(here, 'fixtures', fixture)], { encoding: 'utf8' });
 
+// A copy of fixtures/good whose claims.jsonl replaces c1 with `c1`.
+const withClaim = (c1) => {
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rv-obs-')), 'run');
+  fs.cpSync(path.join(here, 'fixtures', 'good'), dir, { recursive: true });
+  const p = path.join(dir, 'work', 'claims.jsonl');
+  const lines = fs.readFileSync(p, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  fs.writeFileSync(p, lines.map((c) => JSON.stringify(c.id === 'c1' ? { ...c, ...c1 } : c)).join('\n') + '\n');
+  return dir;
+};
+const runDir = (dir) => spawnSync('node', [check, dir], { encoding: 'utf8' });
+
+test('a Blocking finding resting on a behavior claim that was read, not run, fails; marked unobservable it passes', () => {
+  const read = runDir(withClaim({ kind: 'behavior' }));
+  assert.equal(read.status, 1);
+  assert.match(read.stdout, /blocking: "[^"]+" rests on behavior claim c1 read, not run/);
+  const unobs = runDir(withClaim({ kind: 'behavior', unobservable: 'needs the prod database' }));
+  assert.equal(unobs.status, 0, unobs.stdout);
+  assert.match(unobs.stdout, /observe: 0 recording\(s\) behind RAN claims — ok/);
+});
+
+test('a RAN claim citing an observation needs the recording behind it', () => {
+  const dir = withClaim({ kind: 'behavior', class: 'RAN', source: 'work/observe/miss.json' });
+  const missing = runDir(dir);
+  assert.equal(missing.status, 1);
+  assert.match(missing.stdout, /observe: claim c1 cites work\/observe\/miss\.json, which is not an observe\.sh recording/);
+  fs.mkdirSync(path.join(dir, 'work', 'observe'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'work', 'observe', 'miss.json'), JSON.stringify({ id: 'miss', exit: 0, cmd: ['go', 'test'] }));
+  const ok = runDir(dir);
+  assert.equal(ok.status, 0, ok.stdout);
+  assert.match(ok.stdout, /observe: 1 recording\(s\) behind RAN claims — ok/);
+  // a RAN behavior claim with neither a recording nor a probe behind it fails
+  const bare = runDir(withClaim({ kind: 'behavior', class: 'RAN', source: 'I ran it in my head' }));
+  assert.match(bare.stdout, /observe: claim c1 is a RAN behavior claim with no recording or probe behind it/);
+});
+
 test('good fixture passes all three gates', () => {
   const r = run('good');
   assert.equal(r.status, 0, r.stdout + r.stderr);
