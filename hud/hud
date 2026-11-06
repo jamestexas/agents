@@ -97,6 +97,9 @@
 #                $XDG_BIN_HOME (else ~/.local/bin). Installs no service.
 #   unlink       remove that COMMAND symlink, if it points at this checkout
 #
+#   board <verb> validate, render or list hud.board/1 status documents —
+#                a JSON board under projects/<p>/boards/ rendered to the page
+#                beside it plus a history snapshot (boards.mjs, docs/BOARDS.md)
 #   index        rebuild the mache index (hud-index.mjs)
 #   lint         report tags that restate a path, status or ticket, and notes
 #                that belong in one PR folder or one note (hud-lint.mjs);
@@ -2309,6 +2312,7 @@ case "$command" in
     unlink) cmd_unlink "$@" ;;
     install) exec bash "$MACHINERY_DIR/service/install.sh" "$@" ;;
     uninstall) exec bash "$MACHINERY_DIR/service/uninstall.sh" "$@" ;;
+    board) exec node "$MACHINERY_DIR/boards.mjs" "$@" ;;
     index) exec node "$MACHINERY_DIR/hud-index.mjs" "$@" ;;
     lint) exec node "$MACHINERY_DIR/hud-lint.mjs" "$@" ;;
     smoke) exec bash "$MACHINERY_DIR/smoke.sh" "$@" ;;

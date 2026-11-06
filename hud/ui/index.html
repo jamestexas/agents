@@ -953,6 +953,18 @@
         title.textContent = e.title || e.name || e.path;
         b.appendChild(title);
 
+        // A type the tree did not infer from a directory — `board`, or
+        // whatever a producer declares next — is the one fact about an entry
+        // the row otherwise hides. Notes and the brief are the defaults and
+        // stay unlabelled; everything else says what it is.
+        if (e.type && e.type !== "note" && e.type !== "context") {
+          const ty = document.createElement("span");
+          ty.className = "badge type";
+          ty.textContent = e.type;
+          ty.title = "type, from this file's frontmatter";
+          b.appendChild(ty);
+        }
+
         if (showStore && e.store && e.store !== "local") {
           const st = document.createElement("span");
           st.className = "badge";
