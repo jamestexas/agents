@@ -215,14 +215,15 @@ export function renderGraph(doc) {
  */
 export function renderBoardMarkdown(doc) {
   const day = doc.generated.slice(0, 10);
-  const tags = ["board", ...(doc.tags ?? [])];
+  // type: board already says what this page is; tags are topics only.
+  const tags = doc.tags ?? [];
   const out = [];
   out.push("---");
   out.push(`title: ${yamlString(doc.title)}`);
   out.push(`date: ${day}`);
   out.push("type: board");
   out.push("status: active");
-  out.push(`tags: [${tags.map(yamlString).join(", ")}]`);
+  if (tags.length) out.push(`tags: [${tags.map(yamlString).join(", ")}]`);
   out.push("---");
   out.push("");
   out.push(`# ${doc.title}`);

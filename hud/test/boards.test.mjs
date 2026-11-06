@@ -111,7 +111,10 @@ test("renderGraph is empty for a single row with no edges", () => {
 
 test("renderBoardMarkdown produces frontmatter, graph, table, notes and provenance", () => {
   const md = renderBoardMarkdown({ ...board(), __name: "widgets" });
-  assert.match(md, /^---\ntitle: "Widgets vs the bar"\ndate: 2026-01-02\ntype: board\nstatus: active\ntags: \["board"\]\n---\n/);
+  // No tags on the board, no tags line: type: board already says what it is.
+  assert.match(md, /^---\ntitle: "Widgets vs the bar"\ndate: 2026-01-02\ntype: board\nstatus: active\n---\n/);
+  const tagged = renderBoardMarkdown({ ...board(), tags: ["m1"], __name: "widgets" });
+  assert.match(tagged, /\nstatus: active\ntags: \["m1"\]\n---\n/, "a board's own topic tags pass through, with no board tag added");
   assert.match(md, /Generated 2026-01-02 03:04:05 UTC from git: example\/main@abc1234/);
   assert.match(md, /boards\/widgets\.json/);
   assert.match(md, /```mermaid\nflowchart LR/);
