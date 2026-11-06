@@ -102,9 +102,9 @@ test("api reviews serves runs running-first with the derived fields", async (t) 
   // Running first, then newest started first; the unreadable row, which has
   // no `started`, lands last.
   assert.deepEqual(paths(body), [
-    "projects/example-one/raw/PR-101/state.json",
-    "projects/example-two/raw/PR-7/state.json",
-    "projects/example-one/raw/PR-9/state.json",
+    "projects/example-one/prs/PR-101/raw/state.json",
+    "projects/example-two/prs/PR-7/raw/state.json",
+    "projects/example-one/prs/PR-9/raw/state.json",
   ]);
   // Neither the non-state file nor the dot-prefixed project is a run.
   assert.ok(!text.includes("evidence.txt"));
@@ -122,7 +122,7 @@ test("api reviews serves runs running-first with the derived fields", async (t) 
     `elapsed_s ${run.elapsed_s} is not about ${RUNNING_FOR_S}`,
   );
   assert.equal(run.pr_url, "https://github.com/owner/repo/pull/101");
-  assert.equal(run.note_url, "/n/projects/example-one/notes/PR-101-still-running");
+  assert.equal(run.note_url, "/n/projects/example-one/prs/PR-101/review");
   assert.deepEqual(run.probes, running.probes);
   assert.deepEqual(run.findings, running.findings);
   assert.deepEqual(run.gates, running.gates);
@@ -161,7 +161,7 @@ test("api reviews serves runs running-first with the derived fields", async (t) 
   assert.equal(done.running, false);
   assert.equal(done.elapsed_s, 31 * 60 + 30, "ended − started, not now − started");
   assert.equal(done.pr_url, "https://github.com/owner/repo/pull/7");
-  assert.equal(done.note_url, "/n/projects/example-two/notes/PR-7-finished");
+  assert.equal(done.note_url, "/n/projects/example-two/prs/PR-7/review");
   assert.deepEqual(done.posted, finished.posted);
   assert.equal(done.verdict, "APPROVE");
   // `review_state` is passed through whole, field by field: an unknown key at
@@ -174,7 +174,7 @@ test("api reviews serves runs running-first with the derived fields", async (t) 
   // The unreadable file is a row that says so, with the path, and nothing
   // pretending to be state.
   assert.equal(bad.unreadable, true);
-  assert.equal(bad.path, "projects/example-one/raw/PR-9/state.json");
+  assert.equal(bad.path, "projects/example-one/prs/PR-9/raw/state.json");
   assert.equal(bad.project, "example-one");
   assert.ok(bad.error, "the parse error is carried");
   assert.equal(bad.pr, undefined);
@@ -280,7 +280,7 @@ test("phase_seconds: ended − started per phase, now for the open one, fraction
   const root = fixture(t, "hud-reviews-phases-", {
     // Every phase closed, each stamp carrying fractional seconds as a
     // high-resolution clock writes them.
-    "projects/p/raw/PR-1/state.json": JSON.stringify({
+    "projects/p/prs/PR-1/raw/state.json": JSON.stringify({
       started: "2026-10-27T10:00:00.250Z",
       ended: "2026-10-27T10:31:42.250Z",
       phases: {
@@ -297,7 +297,7 @@ test("phase_seconds: ended − started per phase, now for the open one, fraction
       },
     }),
     // Still running: the open phase is measured against the clock passed in.
-    "projects/p/raw/PR-2/state.json": JSON.stringify({
+    "projects/p/prs/PR-2/raw/state.json": JSON.stringify({
       started: "2026-10-27T11:00:00.000Z",
       ended: null,
       phases: {
@@ -306,13 +306,13 @@ test("phase_seconds: ended − started per phase, now for the open one, fraction
       },
     }),
     // Backfilled: no phases recorded.
-    "projects/p/raw/PR-3/state.json": JSON.stringify({
+    "projects/p/prs/PR-3/raw/state.json": JSON.stringify({
       started: "2026-10-27T12:00:00.000Z",
       ended: "2026-10-27T12:10:00.000Z",
       phases: {},
     }),
     // `phases` not an object at all: no key served, no timings.
-    "projects/p/raw/PR-4/state.json": JSON.stringify({
+    "projects/p/prs/PR-4/raw/state.json": JSON.stringify({
       started: "2026-10-27T12:00:00.000Z",
       ended: "2026-10-27T12:10:00.000Z",
       phases: ["evidence"],
@@ -321,7 +321,7 @@ test("phase_seconds: ended − started per phase, now for the open one, fraction
   const now = Date.parse("2026-10-27T11:05:30.000Z");
   const byPath = new Map(listReviews(root, { now }).items.map((i) => [i.path, i]));
 
-  const full = byPath.get("projects/p/raw/PR-1/state.json");
+  const full = byPath.get("projects/p/prs/PR-1/raw/state.json");
   assert.deepEqual(full.phase_seconds, {
     evidence: 114,
     questions: 240,
@@ -333,48 +333,48 @@ test("phase_seconds: ended − started per phase, now for the open one, fraction
   assert.deepEqual(Object.keys(full.phases), ["evidence", "questions", "settle", "refute", "triage", "teach"]);
   assert.deepEqual(full.phases.evidence, { started: "2026-10-27T10:00:00.250Z", ended: "2026-10-27T10:01:54.250Z" });
 
-  const open = byPath.get("projects/p/raw/PR-2/state.json");
+  const open = byPath.get("projects/p/prs/PR-2/raw/state.json");
   assert.deepEqual(open.phase_seconds, { evidence: 90, questions: 240 }, "the open phase runs to `now`");
   assert.equal(open.phases.questions.ended, null);
 
-  assert.deepEqual(byPath.get("projects/p/raw/PR-3/state.json").phase_seconds, {});
-  assert.deepEqual(byPath.get("projects/p/raw/PR-3/state.json").phases, {});
+  assert.deepEqual(byPath.get("projects/p/prs/PR-3/raw/state.json").phase_seconds, {});
+  assert.deepEqual(byPath.get("projects/p/prs/PR-3/raw/state.json").phases, {});
 
-  const junk = byPath.get("projects/p/raw/PR-4/state.json");
+  const junk = byPath.get("projects/p/prs/PR-4/raw/state.json");
   assert.equal(junk.phases, undefined, "a phases value that is not an object is not served");
   assert.deepEqual(junk.phase_seconds, {});
 });
 
 test("derived links are refused when the state cannot back them", (t) => {
   const root = fixture(t, "hud-reviews-links-", {
-    "projects/p/raw/PR-1/state.json": JSON.stringify({
+    "projects/p/prs/PR-1/raw/state.json": JSON.stringify({
       repo: "https://evil.example/owner/repo",
       pr: 1,
       note: "../../outside.md",
       started: "2026-10-27T10:00:00.000Z",
       ended: "2026-10-27T10:00:05.000Z",
     }),
-    "projects/p/raw/PR-2/state.json": JSON.stringify({ repo: "owner/repo", pr: "77", note: "/abs/note.md" }),
-    "projects/p/raw/PR-3/state.json": JSON.stringify([1, 2, 3]),
-    "projects/p/raw/PR-4/state.json": JSON.stringify({}),
+    "projects/p/prs/PR-2/raw/state.json": JSON.stringify({ repo: "owner/repo", pr: "77", note: "/abs/note.md" }),
+    "projects/p/prs/PR-3/raw/state.json": JSON.stringify([1, 2, 3]),
+    "projects/p/prs/PR-4/raw/state.json": JSON.stringify({}),
   });
   const byPath = new Map(listReviews(root).items.map((i) => [i.path, i]));
 
-  const one = byPath.get("projects/p/raw/PR-1/state.json");
+  const one = byPath.get("projects/p/prs/PR-1/raw/state.json");
   assert.equal(one.pr_url, null, "a repo that is not owner/name is not a GitHub URL");
   assert.equal(one.note_url, null, "a note path that climbs out of the tree is not a link");
   assert.equal(one.elapsed_s, 5);
 
-  const two = byPath.get("projects/p/raw/PR-2/state.json");
+  const two = byPath.get("projects/p/prs/PR-2/raw/state.json");
   assert.equal(two.pr_url, "https://github.com/owner/repo/pull/77", "a digit-string pr is accepted");
   assert.equal(two.note_url, null, "an absolute note path is not a link");
   assert.equal(two.elapsed_s, null, "no started means no elapsed");
 
-  const three = byPath.get("projects/p/raw/PR-3/state.json");
+  const three = byPath.get("projects/p/prs/PR-3/raw/state.json");
   assert.equal(three.unreadable, true, "a JSON array is not a state object");
 
   // Nothing in it at all: still a row, every optional field simply absent.
-  const four = byPath.get("projects/p/raw/PR-4/state.json");
+  const four = byPath.get("projects/p/prs/PR-4/raw/state.json");
   assert.equal(four.unreadable, undefined);
   assert.equal(four.pr_url, null);
   assert.equal(four.note_url, null);
@@ -385,16 +385,16 @@ test("review_state is kept only in the shape the panel reads", (t) => {
   const at = { started: "2026-10-27T10:00:00.000Z", ended: "2026-10-27T10:00:05.000Z" };
   const root = fixture(t, "hud-reviews-state-", {
     // Not an object at all: dropped.
-    "projects/p/raw/PR-1/state.json": JSON.stringify({ ...at, review_state: ["APPROVED"] }),
+    "projects/p/prs/PR-1/raw/state.json": JSON.stringify({ ...at, review_state: ["APPROVED"] }),
     // Every field the wrong type: each one is nulled or dropped, and a block
     // left with nothing in it is no block.
-    "projects/p/raw/PR-2/state.json": JSON.stringify({
+    "projects/p/prs/PR-2/raw/state.json": JSON.stringify({
       ...at,
       review_state: { authorship: "theirs", humans: "none", bots: 3, threads: "two", mine: "APPROVED" },
     }),
     // Mixed: a state outside the vocabulary, a non-integer count, a bot with
     // no findings number.
-    "projects/p/raw/PR-3/state.json": JSON.stringify({
+    "projects/p/prs/PR-3/raw/state.json": JSON.stringify({
       ...at,
       review_state: {
         authorship: "own",
@@ -407,9 +407,9 @@ test("review_state is kept only in the shape the panel reads", (t) => {
   });
   const byPath = new Map(listReviews(root).items.map((i) => [i.path, i]));
 
-  assert.equal(byPath.get("projects/p/raw/PR-1/state.json").review_state, undefined);
-  assert.equal(byPath.get("projects/p/raw/PR-2/state.json").review_state, undefined);
-  assert.deepEqual(byPath.get("projects/p/raw/PR-3/state.json").review_state, {
+  assert.equal(byPath.get("projects/p/prs/PR-1/raw/state.json").review_state, undefined);
+  assert.equal(byPath.get("projects/p/prs/PR-2/raw/state.json").review_state, undefined);
+  assert.deepEqual(byPath.get("projects/p/prs/PR-3/raw/state.json").review_state, {
     authorship: "own",
     mine: { state: null, at: null, head_matches: null },
     humans: [],
@@ -419,11 +419,11 @@ test("review_state is kept only in the shape the panel reads", (t) => {
 });
 
 test("the glob subset matches within a segment only", () => {
-  const ok = parseReviewsGlob("projects/*/raw/PR-*/state.json");
+  const ok = parseReviewsGlob("projects/*/prs/PR-*/raw/state.json");
   assert.equal(ok.error, undefined);
   assert.deepEqual(
     ok.segments.map((s) => (s.literal !== undefined ? "lit" : "re")),
-    ["lit", "re", "lit", "re", "lit"],
+    ["lit", "re", "lit", "re", "lit", "lit"],
   );
   assert.ok(ok.segments[3].re.test("PR-76409"));
   assert.ok(!ok.segments[3].re.test("PR-7/6409"), "a star never crosses a separator");
@@ -496,7 +496,7 @@ const REVIEW_OF_FINISHED = {
   gates: finished.gates,
   probes: { unavailable: 0 },
   findings: finished.findings,
-  note_url: "/n/projects/example-two/notes/PR-7-finished",
+  note_url: "/n/projects/example-two/prs/PR-7/review",
   posted: finished.posted,
   review_state: REVIEW_STATE_SERVED,
   running: false,
@@ -529,7 +529,7 @@ test("board rows carry their latest review run when both sources are on", async 
   assert.equal(running.review.posted, null);
   assert.equal(running.review.review_state, null, "a run without the block says so with null");
   assert.deepEqual(running.review.probes, { unavailable: 1 });
-  assert.equal(running.review.note_url, "/n/projects/example-one/notes/PR-101-still-running");
+  assert.equal(running.review.note_url, "/n/projects/example-one/prs/PR-101/review");
   assert.ok(Number.isInteger(running.review.elapsed_s) && running.review.elapsed_s >= RUNNING_FOR_S - 2);
 
   assert.equal("review" in unseen, false, "a PR with no run has no review key, not a null one");
@@ -629,9 +629,9 @@ test("joinReviews keys on repo+number, else a GitHub pull URL, in any accepted p
 test("the latest run per PR wins the join", (t) => {
   const older = { ...finished, started: "2026-10-26T10:00:00.000Z", ended: "2026-10-26T10:10:00.000Z", verdict: "COMMENT" };
   const root = fixture(t, "hud-reviews-latest-", {
-    "projects/a/raw/PR-7/state.json": JSON.stringify(older),
-    "projects/b/raw/PR-7/state.json": JSON.stringify(finished),
-    "projects/c/raw/PR-7/state.json": "not json",
+    "projects/a/prs/PR-7/raw/state.json": JSON.stringify(older),
+    "projects/b/prs/PR-7/raw/state.json": JSON.stringify(finished),
+    "projects/c/prs/PR-7/raw/state.json": "not json",
   });
   const [row] = joinReviews([{ repo: "owner/repo", number: 7 }], listReviews(root).items);
   assert.equal(row.review.verdict, "APPROVE", "newest started wins over an older run of the same PR");
@@ -642,9 +642,9 @@ test("the latest run per PR wins the join", (t) => {
 test("?scope=open keeps runs in flight or not yet posted; all keeps every run", async (t) => {
   const hudRoot = reviewsFixture(t);
   // A finished run that never posted stays open; a finished, posted one does not.
-  fs.mkdirSync(path.join(hudRoot, "projects/example-two/raw/PR-8"), { recursive: true });
+  fs.mkdirSync(path.join(hudRoot, "projects/example-two/prs/PR-8/raw"), { recursive: true });
   fs.writeFileSync(
-    path.join(hudRoot, "projects/example-two/raw/PR-8/state.json"),
+    path.join(hudRoot, "projects/example-two/prs/PR-8/raw/state.json"),
     JSON.stringify({ ...finished, pr: 8, posted: null, started: "2026-10-27T12:00:00.000Z", ended: "2026-10-27T12:05:00.000Z" }),
   );
   writeConfig(hudRoot, { reviews: {} });
@@ -655,15 +655,15 @@ test("?scope=open keeps runs in flight or not yet posted; all keeps every run", 
   assert.equal(open.count, 3);
   assert.equal(open.truncated, false);
   assert.deepEqual(paths(open), [
-    "projects/example-one/raw/PR-101/state.json",
-    "projects/example-two/raw/PR-8/state.json",
-    "projects/example-one/raw/PR-9/state.json",
+    "projects/example-one/prs/PR-101/raw/state.json",
+    "projects/example-two/prs/PR-8/raw/state.json",
+    "projects/example-one/prs/PR-9/raw/state.json",
   ]);
 
   const all = await (await hud.get("/api/reviews?scope=all")).json();
   assert.equal(all.scope, "all");
   assert.equal(all.count, 4);
-  assert.ok(paths(all).includes("projects/example-two/raw/PR-7/state.json"));
+  assert.ok(paths(all).includes("projects/example-two/prs/PR-7/raw/state.json"));
 
   const bare = await (await hud.get("/api/reviews")).json();
   assert.equal(bare.scope, "all", "no query is today's answer");

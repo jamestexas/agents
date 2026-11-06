@@ -26,6 +26,21 @@ delete env.CLAUDE_CODE_SESSION_ID;
 delete env.CLAUDE_PID;
 const run = (dir, args, input) => spawnSync(process.execPath, [state, dir, ...args], { encoding: 'utf8', input, env });
 const read = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8'));
+// The ended runs state.mjs packed: each archive's member list and the
+// history.jsonl line that names it.
+const archives = (dir) => {
+  const runs = path.join(dir, 'runs');
+  if (!fs.existsSync(runs)) return [];
+  const history = fs.existsSync(path.join(runs, 'history.jsonl'))
+    ? fs.readFileSync(path.join(runs, 'history.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+    : [];
+  return fs.readdirSync(runs).filter((f) => f.endsWith('.tar.gz')).map((f) => ({
+    file: path.join(runs, f),
+    members: spawnSync('tar', ['-tzf', path.join(runs, f)], { encoding: 'utf8' }).stdout.split('\n').filter(Boolean),
+    history: history.find((h) => h.archive === `runs/${f}`),
+  }));
+};
+const extract = (file, member) => spawnSync('tar', ['-xzOf', file, member], { encoding: 'utf8' }).stdout;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
 // Phases only move forward and a default run skips none, so a test that
 // finishes walks every phase between evidence and the one it needs, and
@@ -321,7 +336,12 @@ test('a second review in the same run dir: an ended run is set aside, an open on
   assert.equal(s.mode, 'light');
   assert.equal(s.ended, null);
   assert.deepEqual(events(dir).map((e) => e.op), ['init']);
-  assert.equal(fs.readdirSync(dir).filter((f) => /^events\.superseded-.*\.jsonl$/.test(f)).length, 1);
+  const [packed, ...more] = archives(dir);
+  assert.equal(more.length, 0, 'one ended run, one archive');
+  assert.deepEqual(packed.members.sort(), ['events.jsonl', 'state.json']);
+  assert.ok(fs.existsSync(path.join(dir, 'evidence')), 'the evidence-time init leaves evidence/ to the new run');
+  assert.equal(packed.history.mode, 'default');
+  assert.match(packed.history.ended, ISO);
 });
 
 test('init --pending --new after an ended run starts the next review and sets the old evidence and work aside', () => {
@@ -341,20 +361,41 @@ test('init --pending --new after an ended run starts the next review and sets th
   assert.equal(read(dir).phase, 'pending');
   const names = fs.readdirSync(dir);
   assert.ok(!names.includes('evidence') && !names.includes('work'), 'the old run\'s dirs must not be left for the new run to read');
-  const oldWork = names.find((f) => /^work\.superseded-/.test(f));
-  assert.ok(oldWork && names.some((f) => /^evidence\.superseded-/.test(f)));
-  assert.ok(fs.existsSync(path.join(dir, oldWork, 'decisions', 'old.md')));
-  assert.equal(names.filter((f) => /^events\.superseded-.*\.jsonl$/.test(f)).length, 1);
+  assert.deepEqual(names.filter((f) => /superseded/.test(f)), [], 'nothing is left beside the run as a renamed copy');
+  const [packed] = archives(dir);
+  assert.ok(packed.members.includes('work/decisions/old.md') && packed.members.some((m) => m.startsWith('evidence/')));
+  assert.equal(extract(packed.file, 'work/decisions/old.md'), '| 1 | from the first run |\n', 'the old run is recoverable from its archive');
+  assert.equal(packed.history.archive, path.relative(dir, packed.file));
 });
 
-test('init over a state.json from before the log keeps the old file beside the new run', () => {
+test('init --pending --new packs the ended run\'s note with it, so a re-render cannot lose the earlier review', () => {
   const dir = copyGood();
-  fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ version: 1, phase: 'rendered' }));
+  const hud = fs.mkdtempSync(path.join(os.tmpdir(), 'rv-hud-'));
+  const note = 'projects/p/prs/PR-1/review.md';
+  fs.mkdirSync(path.join(hud, path.dirname(note)), { recursive: true });
+  fs.writeFileSync(path.join(hud, note), '# first round\n');
+  const at = (args, input) => spawnSync(process.execPath, [state, dir, ...args], { encoding: 'utf8', input, env: { ...env, HUD_ROOT: hud } });
+  assert.equal(at(['init', '--pending', 'pr=owner/repo#1']).status, 0);
+  assert.equal(at(['init', 'viewer=v']).status, 0);
+  walk(dir);
+  at(['finish', `note=${note}`, 'gates=-'], 'ledger: x — ok\n');
+  assert.equal(at(['init', '--pending', '--new', 'pr=owner/repo#1']).status, 0);
+  const [packed] = archives(dir);
+  assert.ok(packed.members.includes(note), `archive holds the note: ${packed.members.join(', ')}`);
+  assert.equal(extract(packed.file, note), '# first round\n');
+  assert.ok(fs.existsSync(path.join(hud, note)), 'the note itself stays until render replaces it');
+});
+
+test('init over a state.json from before the log packs the old file into an archive', () => {
+  const dir = copyGood();
+  fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ version: 1, phase: 'rendered', verdict: 'APPROVE' }));
   assert.equal(run(dir, ['init', 'viewer=v']).status, 0);
   assert.equal(read(dir).phase, 'evidence');
-  const kept = fs.readdirSync(dir).filter((f) => /^state\.superseded-.*\.json$/.test(f));
-  assert.equal(kept.length, 1);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, kept[0]), 'utf8')).phase, 'rendered');
+  const [packed, ...more] = archives(dir);
+  assert.equal(more.length, 0);
+  assert.deepEqual(packed.members, ['state.json']);
+  assert.equal(JSON.parse(extract(packed.file, 'state.json')).phase, 'rendered');
+  assert.equal(packed.history.verdict, 'APPROVE', 'a pre-log state still reports its verdict to the history');
 });
 
 test('init --pending writes a visible pending run with its owner before any evidence exists', () => {

@@ -23,13 +23,13 @@ import os from "node:os";
 import path from "node:path";
 
 const SERVER = path.join(import.meta.dirname, "..", "server.mjs");
-const STATE = "projects/example-one/raw/PR-1/state.json";
+const STATE = "projects/example-one/prs/PR-1/raw/state.json";
 const EVENT_DEADLINE_MS = 1000;
 const TOTAL_BUDGET_MS = 5000;
 
 const CONFIG = `[cards.reviews]
 kind    = "fs"
-glob    = "projects/*/raw/PR-*/state.json"
+glob    = "projects/*/prs/PR-*/raw/state.json"
 shape   = "review-state"
 key     = "pr_url"
 title   = "Review runs"

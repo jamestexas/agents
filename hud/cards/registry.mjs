@@ -31,7 +31,7 @@ export const DEFAULT_LAYOUT_ORDER = Object.freeze([
 ]);
 
 /** Where a run's `state.json` is looked for when a legacy `[sources.reviews]` names no glob. */
-export const DEFAULT_REVIEWS_GLOB = "projects/*/raw/PR-*/state.json";
+export const DEFAULT_REVIEWS_GLOB = "projects/*/prs/PR-*/raw/state.json";
 
 /**
  * Every kind the design names. `status: "now"` kinds have a module that reads

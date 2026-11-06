@@ -87,3 +87,26 @@ test('a finding whose claims include an ASSUMED id is marked (assumed) after its
   assert.match(md, /\[Question\] rolling deploy reads the new column — `migrate\.sql:3`\. Blast: one deploy window\. Ledger row 2\. \(assumed\)/);
   assert.match(md, /\[Blocking\] parse before signature check — `handler\.go:88`\. Blast: every inbound webhook\. Ledger row 1\.\n/, 'a RAN/READ-backed finding carries no marker');
 });
+
+test('earlier reviews of the PR render as a History section linking each archive from the note', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rv-'));
+  const run = path.join(root, 'prs', 'PR-1', 'raw');
+  fs.cpSync(path.join(here, 'fixtures', 'good'), run, { recursive: true });
+  fs.mkdirSync(path.join(run, 'runs'));
+  fs.writeFileSync(path.join(run, 'runs', 'history.jsonl'),
+    `${JSON.stringify({ archive: 'runs/2026-11-01T00-00-00-000Z.tar.gz', ended: '2026-11-01T00:00:00.000Z', mode: 'default', verdict: 'REQUEST_CHANGES', head: 'abc1234' })}\nnot json\n`);
+  const out = path.join(root, 'prs', 'PR-1', 'review.md');
+  const r = spawnSync('node', [render, run, '--out', out], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  const md = fs.readFileSync(out, 'utf8');
+  assert.match(md, /## History\n\n\| Ended \| Mode \| Verdict \| Archive \|/);
+  assert.match(md, /\| REQUEST_CHANGES \| \[2026-11-01T00-00-00-000Z\.tar\.gz\]\(raw\/runs\/2026-11-01T00-00-00-000Z\.tar\.gz\) \|/);
+  assert.ok(md.indexOf('## History') < md.indexOf('<details>'), 'history is open, above the details');
+  assert.doesNotMatch(md.slice(0, md.indexOf('<details>')), /abc1234/, 'no head sha in the open part');
+});
+
+test('no history file, no History section', () => {
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rv-')), 'artifact.md');
+  spawnSync('node', [render, path.join(here, 'fixtures', 'good'), '--out', out], { encoding: 'utf8' });
+  assert.doesNotMatch(fs.readFileSync(out, 'utf8'), /## History/);
+});

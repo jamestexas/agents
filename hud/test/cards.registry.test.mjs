@@ -25,7 +25,7 @@ const ENV = { hudRoot: HUD_ROOT };
 const REVIEWS_TOML = `
 [cards.reviews]
 kind    = "fs"
-glob    = "projects/*/raw/PR-*/state.json"
+glob    = "projects/*/prs/PR-*/raw/state.json"
 shape   = "review-state"
 key     = "pr_url"
 title   = "Review runs"
@@ -36,7 +36,7 @@ columns = ["pr", "project", "mode", "phase", "phases", "verdict", "mine", "human
 const REVIEWS_CARD = {
   name: "reviews",
   kind: "fs",
-  glob: "projects/*/raw/PR-*/state.json",
+  glob: "projects/*/prs/PR-*/raw/state.json",
   root: HUD_ROOT,
   shape: "review-state",
   key: "pr_url",
@@ -191,7 +191,7 @@ test("legacy synthesis covers only the sources this release serves as cards", ()
   assert.deepEqual(synthesizeLegacy({}), {});
   assert.deepEqual(synthesizeLegacy({ sources: { reviews: "yes", board: "no" } }), {}, "a source that is not a table is not a source");
   assert.deepEqual(synthesizeLegacy({ sources: { reviews: {} } }), {
-    reviews: { kind: "fs", glob: "projects/*/raw/PR-*/state.json", shape: "review-state", key: "pr_url", title: "Review runs", scope: "open" },
+    reviews: { kind: "fs", glob: "projects/*/prs/PR-*/raw/state.json", shape: "review-state", key: "pr_url", title: "Review runs", scope: "open" },
   });
 });
 
@@ -225,7 +225,7 @@ test("the JSON config form is accepted with the same keys", () => {
     cards: {
       reviews: {
         kind: "fs",
-        glob: "projects/*/raw/PR-*/state.json",
+        glob: "projects/*/prs/PR-*/raw/state.json",
         shape: "review-state",
         key: "pr_url",
         title: "Review runs",
@@ -298,7 +298,7 @@ test("an array outside the subset is skipped like any other bad line", () => {
 const BOARD_TOML = `
 [cards.reviews]
 kind    = "fs"
-glob    = "projects/*/raw/PR-*/state.json"
+glob    = "projects/*/prs/PR-*/raw/state.json"
 shape   = "review-state"
 key     = "pr_url"
 title   = "Review runs"
@@ -369,7 +369,7 @@ test("a join must name a declared card, other than itself, with the same key", (
   }
   // A join onto a card that is itself misconfigured is declared fine: it is
   // the join that goes unavailable at serve time, not the card.
-  const onBroken = fromToml(BOARD_TOML.replace('glob    = "projects/*/raw/PR-*/state.json"', 'glob = "../x"'));
+  const onBroken = fromToml(BOARD_TOML.replace('glob    = "projects/*/prs/PR-*/raw/state.json"', 'glob = "../x"'));
   assert.equal(onBroken.cards.get("board").error, undefined);
   assert.ok(onBroken.cards.get("reviews").error);
   // Optional parts default: no columns, no latest.

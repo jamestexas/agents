@@ -45,7 +45,7 @@ rather than the whole switchboard.
 | `[sources.sessions]` `lectio` | string URL | the graft daemon answering | sessions stay **200** with `graft: "off"` — tier 1 intact |
 | `[sources.reviews]` (the table itself) | — | review runs writing `state.json` into the tree | `/api/reviews` → **404**; the panel does not exist |
 | `[sources.reviews]` `root` | string, leading `~` expanded | — | defaults to `HUD_ROOT` |
-| `[sources.reviews]` `glob` | string, `*` within one segment | — | defaults to `projects/*/raw/PR-*/state.json` |
+| `[sources.reviews]` `glob` | string, `*` within one segment | — | defaults to `projects/*/prs/PR-*/raw/state.json` |
 | `[sources] loadout` | `false` only | — (it is the off switch) | — |
 | `[sources.loadout]` `claude_root` | string, `~` expanded | a non-default install to inspect | defaults to `~/.claude` |
 
@@ -97,7 +97,7 @@ nothing for `hud init` to probe.
 ```toml
 [sources.reviews]
 # root = "~/hud"                              # defaults to HUD_ROOT
-# glob = "projects/*/raw/PR-*/state.json"     # the default
+# glob = "projects/*/prs/PR-*/raw/state.json"     # the default
 ```
 
 `glob` is not a globbing library. It is split on `/`, and each segment is
@@ -205,7 +205,7 @@ tooltip.
 
 Sections are an **open set**: the five above fix the left-column order, and any
 other top-level directory becomes a section too, appended alphabetically with a
-fallback sentence. Kinds are the opposite — closed, and there are exactly 6.
+fallback sentence. Kinds are the opposite — closed, and there are exactly 7.
 <!-- @generated-end: sections-table -->
 
 **Groups** exist only inside `projects`: the subdirectory *is* the group, and
@@ -222,6 +222,7 @@ that had no home before this file had a generated one.
 | --- | --- | --- | --- | --- |
 | `notes/` | `projects` | **no — never heard of it** | exactly its declared depth | Where dated project entries go. Writer-side only: `projects/p/notes/x.md` and `projects/p/x.md` are the same entry to the reader. |
 | `raw/` | `projects` | yes, and renders differently | any depth | Immutable drops — transcripts, exports, patches. Listed and never opened; the meta slot shows a size instead of a date. |
+| `prs/` | `projects` | **no — never heard of it** | exactly its declared depth | One folder per pull request, `prs/PR-N/`: `review.md` is the current review, other notes about the PR sit beside it, and the review runs live under its `raw/`. A second review replaces `review.md`; earlier rounds are archived under `raw/runs/`. |
 
 Those two columns are not the same claim. `notes/` means nothing to the
 reader because the reader has **never heard of it** — the name appears
@@ -248,7 +249,7 @@ carries.
 | `date` | date | — | The day the entry is about. The reader falls back to the filename prefix, then mtime. |
 | `type` | scalar | — | What kind of entry this is. The reader infers it from the path when absent. |
 | `status` | scalar | `active` | Lifecycle. On a project brief it drives group rank and fold state; elsewhere it means what the author meant. |
-| `tags` | list | — | Free-form labels. |
+| `tags` | list | — | Cross-cutting topics a view filters on. Not the project or PR (the path says that), a status or kind (their own fields say that), or a ticket id (`tickets`); `hud lint` reports a tag that restates one of them. |
 | `repos` | list | — | owner/name — lights up the PR panels for this entry. |
 | `tickets` | list | — | Ticket ids, rendered as links through hud.toml's ticket_url_template. |
 | `gh` | scalar | — | A GitHub handle. Drives the peers panel's PR lookup. |
@@ -269,6 +270,7 @@ rather than a claim about the file:
 | `playbook` | `title`, `type`, `last_verified` | `status`, `tags`, `repos`, `tickets`, `applies_to`, `last_verified` | `title`, `type` (derived) |
 | `context` | `title` (if given), `status` | `status`, `repos`, `tickets`, `links` | `title`, `type` (derived) |
 | `peer` | `gh` | `gh`, `repos` | `type` (derived) |
+| `pr` | `title`, `date`, `type` | `status`, `tags`, `repos`, `tickets` | `title`, `date`, `type` (derived) |
 | `raw` | — | — (nothing) | everything |
 <!-- @generated-end: frontmatter-table -->
 

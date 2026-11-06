@@ -98,6 +98,9 @@
 #   unlink       remove that COMMAND symlink, if it points at this checkout
 #
 #   index        rebuild the mache index (hud-index.mjs)
+#   lint         report tags that restate a path, status or ticket, and notes
+#                that belong in one PR folder or one note (hud-lint.mjs);
+#                writes nothing. --json for the machine form
 #   smoke        integration gate against the real tree (smoke.sh)
 #   test         hermetic unit suite (node --test test/)
 #
@@ -2307,6 +2310,7 @@ case "$command" in
     install) exec bash "$MACHINERY_DIR/service/install.sh" "$@" ;;
     uninstall) exec bash "$MACHINERY_DIR/service/uninstall.sh" "$@" ;;
     index) exec node "$MACHINERY_DIR/hud-index.mjs" "$@" ;;
+    lint) exec node "$MACHINERY_DIR/hud-lint.mjs" "$@" ;;
     smoke) exec bash "$MACHINERY_DIR/smoke.sh" "$@" ;;
     test) exec node --test "$MACHINERY_DIR/test/" "$@" ;;
     help | --help | -h) usage 0 ;;

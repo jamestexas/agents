@@ -15,7 +15,7 @@ import path from "node:path";
 const SERVER = path.join(import.meta.dirname, "..", "server.mjs");
 const CONFIG = `[cards.reviews]
 kind    = "fs"
-glob    = "projects/*/raw/PR-*/state.json"
+glob    = "projects/*/prs/PR-*/raw/state.json"
 shape   = "review-state"
 key     = "pr_url"
 title   = "Review runs"
@@ -66,7 +66,7 @@ test("a run whose owner pid has exited reads abandoned on the card; a live owner
 
   const started = new Date(Date.now() - 60 * 1000).toISOString();
   const write = (n, pid) => {
-    const file = path.join(root, `projects/example-one/raw/PR-${n}/state.json`);
+    const file = path.join(root, `projects/example-one/prs/PR-${n}/raw/state.json`);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify({
       version: 1, repo: "owner/repo", pr: n, mode: "default", phase: "settle", started, ended: null, posted: null,

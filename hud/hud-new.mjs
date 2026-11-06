@@ -207,6 +207,7 @@ export function plan(opts = {}) {
     haveTitle = title !== undefined,
     project,
     handle,
+    pr,
     slug: slugArg,
     date: dateArg,
     ext: extArg,
@@ -241,6 +242,7 @@ export function plan(opts = {}) {
     const wantsProject = pathNeeds(kind, "project");
     if (project && !wantsProject) refuse(`kind ${kind} takes no --project`);
     if (handle && kind !== "peer") refuse(`kind ${kind} takes no --handle — did you mean --title?`);
+    if (pr !== undefined && !pathNeeds(kind, "pr")) refuse(`kind ${kind} takes no --pr — a note about a pull request is kind pr`);
     if (extArg && kind !== "raw") {
       refuse(`kind ${kind} takes no --ext — only a raw drop is not markdown`);
     }
@@ -275,6 +277,10 @@ export function plan(opts = {}) {
       vars.handle = kebab(handle);
       if (!vars.handle) refuse(`--handle ${handle} has no usable characters`);
       doc.slug = vars.handle;
+    }
+    if (pathNeeds(kind, "pr")) {
+      vars.pr = String(pr ?? "").replace(/^#/, "");
+      if (!/^[1-9]\d{0,9}$/.test(vars.pr)) refuse(`kind pr needs --pr <number>, got ${pr ?? "nothing"}`);
     }
     if (pathNeeds(kind, "slug")) {
       if (slugArg) vars.slug = kebab(slugArg);
@@ -573,6 +579,7 @@ const FLAGS = {
   "--title": "title",
   "--project": "project",
   "--handle": "handle",
+  "--pr": "pr",
   "--slug": "slug",
   "--date": "date",
   "--ext": "ext",

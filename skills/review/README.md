@@ -7,10 +7,11 @@ disagree with it.
 **What a run leaves behind**
 
 ```
-$HUD_ROOT/projects/<project>/notes/PR-N-<slug>.md   the artifact
-$HUD_ROOT/projects/<project>/raw/PR-N/evidence/     every probe's output + manifest.json
-$HUD_ROOT/projects/<project>/raw/PR-N/work/         ledger, claims, refutations, triage, findings
-$HUD_ROOT/projects/<project>/raw/PR-N/state.json    phase, gates, verdict; what the HUD reviews panel shows
+$HUD_ROOT/projects/<project>/prs/PR-N/review.md          the artifact
+$HUD_ROOT/projects/<project>/prs/PR-N/raw/evidence/      every probe's output + manifest.json
+$HUD_ROOT/projects/<project>/prs/PR-N/raw/work/          ledger, claims, refutations, triage, findings
+$HUD_ROOT/projects/<project>/prs/PR-N/raw/state.json     phase, gates, verdict; what the HUD reviews panel shows
+$HUD_ROOT/projects/<project>/prs/PR-N/raw/runs/          earlier reviews of the PR, one .tar.gz each
 ```
 
 **Reading the artifact.** TL;DR, verdict, confirmed findings, job-level

@@ -90,7 +90,11 @@ export const FIELDS = Object.freeze({
     readDefault: "active",
     about: "Lifecycle. On a project brief it drives group rank and fold state; elsewhere it means what the author meant.",
   }),
-  tags: Object.freeze({ type: "list", readDefault: null, about: "Free-form labels." }),
+  tags: Object.freeze({
+    type: "list",
+    readDefault: null,
+    about: "Cross-cutting topics a view filters on. Not the project or PR (the path says that), a status or kind (their own fields say that), or a ticket id (`tickets`); `hud lint` reports a tag that restates one of them.",
+  }),
   repos: Object.freeze({
     type: "list",
     readDefault: null,
@@ -182,6 +186,15 @@ export const CONTAINERS = Object.freeze({
     matches: "any-depth",
     display: "listed",
     about: "Immutable drops — transcripts, exports, patches. Listed and never opened; the meta slot shows a size instead of a date.",
+  }),
+  // A pull request is the unit work is merged by, so it is the unit notes about
+  // it are kept by: one folder, not a `PR-N-<slug>.md` per round in notes/.
+  // `unknown` for the same reason as notes/: the reader has never heard of it.
+  prs: Object.freeze({
+    within: "projects",
+    role: "unknown",
+    matches: "exact-depth",
+    about: "One folder per pull request, `prs/PR-N/`: `review.md` is the current review, other notes about the PR sit beside it, and the review runs live under its `raw/`. A second review replaces `review.md`; earlier rounds are archived under `raw/runs/`.",
   }),
 });
 
@@ -330,6 +343,10 @@ export const BOOKKEEPING = Object.freeze({
 
 const lit = (value) => Object.freeze({ lit: value });
 const dir = (name) => Object.freeze({ var: name });
+// A directory component with a fixed prefix and its own alphabet, for a name
+// the outside world already spells: `PR-41` is GitHub's, not a slug of ours.
+const tagged = (name, prefix, re, what) => Object.freeze({ var: name, prefix, re, what });
+const PR_NUMBER = /^[1-9]\d{0,9}$/;
 const file = (spec) => Object.freeze({ file: Object.freeze(spec) });
 
 /**
@@ -349,10 +366,12 @@ const file = (spec) => Object.freeze({ file: Object.freeze(spec) });
 export const rest = (name) => Object.freeze({ rest: name });
 
 /**
- * The six shapes. `segments` is the grammar both directions read:
+ * The seven shapes. `segments` is the grammar both directions read:
  *
  *   {lit: "projects"}                  a fixed directory name
  *   {var: "project"}                   one directory component, slug alphabet
+ *   {var: "pr", prefix: "PR-", re}     one component, a fixed prefix and then
+ *                                      the declared alphabet (`re`), not slugs
  *   {file: {...}}                      the leaf, always last
  *     .lit      the whole filename, fixed
  *     .prefix   "date" — a YYYY-MM-DD- prefix on the stem
@@ -448,6 +467,27 @@ export const KINDS = Object.freeze({
     about: "One file per colleague, naming the handle whose PRs light up the panel.",
   }),
 
+  pr: Object.freeze({
+    intent: "capture a note about a pull request",
+    segments: Object.freeze([
+      lit("projects"),
+      dir("project"),
+      lit("prs"),
+      tagged("pr", "PR-", PR_NUMBER, "a pull request number"),
+      file({ stem: "slug", ext: "md" }),
+    ]),
+    onUnresolvedProject: "refuse",
+    emit: Object.freeze([
+      Object.freeze({ key: "title", from: "title" }),
+      Object.freeze({ key: "date", from: "date" }),
+      Object.freeze({ key: "type", value: "note" }),
+    ]),
+    settable: Object.freeze(["status", "tags", "repos", "tickets"]),
+    derived: Object.freeze(["title", "date", "type"]),
+    body: "heading",
+    about: "A note about one pull request, in that PR's folder: `review.md` is the current review, and replies or follow-ups sit beside it rather than in notes/.",
+  }),
+
   raw: Object.freeze({
     intent: "drop raw material in",
     segments: Object.freeze([
@@ -496,7 +536,7 @@ export function pathPattern(kind) {
   return KINDS[kind].segments
     .map((seg) => {
       if (seg.lit) return seg.lit;
-      if (seg.var) return `<${seg.var}>`;
+      if (seg.var) return `${seg.prefix ?? ""}<${seg.var}>`;
       if (seg.rest) return `<${seg.rest}>/…`;
       const f = seg.file;
       if (f.lit) return f.lit;
@@ -543,7 +583,9 @@ export function composeSegments(segments, vars = {}, kind = "?") {
       continue;
     }
     if (seg.var) {
-      out.push(need(seg.var, SEGMENT_RE, `a ${SLUG.alphabet} component`));
+      out.push(seg.prefix
+        ? `${seg.prefix}${need(seg.var, seg.re, seg.what)}`
+        : need(seg.var, SEGMENT_RE, `a ${SLUG.alphabet} component`));
       continue;
     }
     if (seg.rest) {
@@ -627,8 +669,9 @@ export function matchSegments(segments, parts) {
       continue;
     }
     if (seg.var) {
-      if (!SEGMENT_RE.test(part)) return null;
-      vars[seg.var] = part;
+      const value = seg.prefix ? (part.startsWith(seg.prefix) ? part.slice(seg.prefix.length) : null) : part;
+      if (value === null || !(seg.re ?? SEGMENT_RE).test(value)) return null;
+      vars[seg.var] = value;
       continue;
     }
     const f = seg.file;

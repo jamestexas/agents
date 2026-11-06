@@ -51,7 +51,7 @@ const runs = [
   { pr_url: "https://github.com/owner/repo/pull/7", started: "2026-10-26T10:00:00.000Z", verdict: "COMMENT", secret: "x" },
   { pr_url: "https://github.com/owner/repo/pull/7", started: "2026-10-27T10:00:00.000Z", verdict: "APPROVE", secret: "y" },
   { pr_url: "https://github.com/owner/repo/pull/101", started: "2026-10-27T12:00:00.000Z", verdict: null },
-  { unreadable: true, path: "p/raw/PR-9/state.json" },
+  { unreadable: true, path: "p/prs/PR-9/raw/state.json" },
   { pr_url: null, started: "2026-10-27T13:00:00.000Z" },
   "not a row",
 ];

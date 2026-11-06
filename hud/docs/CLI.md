@@ -86,6 +86,7 @@ The first of those writes
 | `playbook` | `playbooks/<slug>.md` | no |
 | `context` | `projects/<project>/CONTEXT.md` | no |
 | `peer` | `peers/<handle>.md` | no |
+| `pr` | `projects/<project>/prs/PR-<pr>/<slug>.md` | no |
 | `raw` | `projects/<project>/raw/<date>-<slug>.<ext>` | yes |
 <!-- @generated-end: kinds-table -->
 
@@ -104,6 +105,7 @@ refuses because the verb owns it:
 | `playbook` | `title`, `type`, `last_verified` | `status`, `tags`, `repos`, `tickets`, `applies_to`, `last_verified` | `title`, `type` (derived) |
 | `context` | `title` (if given), `status` | `status`, `repos`, `tickets`, `links` | `title`, `type` (derived) |
 | `peer` | `gh` | `gh`, `repos` | `type` (derived) |
+| `pr` | `title`, `date`, `type` | `status`, `tags`, `repos`, `tickets` | `title`, `date`, `type` (derived) |
 | `raw` | — | — (nothing) | everything |
 <!-- @generated-end: frontmatter-table -->
 

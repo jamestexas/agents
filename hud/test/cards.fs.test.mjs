@@ -24,7 +24,7 @@ import {
   running,
 } from "./review-fixtures.mjs";
 
-const GLOB = "projects/*/raw/PR-*/state.json";
+const GLOB = "projects/*/prs/PR-*/raw/state.json";
 
 const card = (root, extra = {}) => ({
   name: "reviews",
@@ -49,9 +49,9 @@ test("fs.read: one row per file the glob names, raw data or an unreadable row", 
   assert.deepEqual(
     rows.map((r) => r.path).sort(),
     [
-      "projects/example-one/raw/PR-101/state.json",
-      "projects/example-one/raw/PR-9/state.json",
-      "projects/example-two/raw/PR-7/state.json",
+      "projects/example-one/prs/PR-101/raw/state.json",
+      "projects/example-one/prs/PR-9/raw/state.json",
+      "projects/example-two/prs/PR-7/raw/state.json",
     ],
   );
   const text = JSON.stringify(rows);
@@ -59,13 +59,13 @@ test("fs.read: one row per file the glob names, raw data or an unreadable row", 
   assert.ok(!text.includes(".hidden"), "a dot-prefixed project is skipped");
 
   const m = byPath(rows);
-  const run = m.get("projects/example-one/raw/PR-101/state.json");
+  const run = m.get("projects/example-one/prs/PR-101/raw/state.json");
   // The kind parses and hands over; it does not interpret. The canary is
   // still here because the whitelist is the normaliser's job.
-  assert.deepEqual(run, { path: "projects/example-one/raw/PR-101/state.json", project: "example-one", data: running });
-  assert.equal(m.get("projects/example-two/raw/PR-7/state.json").project, "example-two");
+  assert.deepEqual(run, { path: "projects/example-one/prs/PR-101/raw/state.json", project: "example-one", data: running });
+  assert.equal(m.get("projects/example-two/prs/PR-7/raw/state.json").project, "example-two");
 
-  const bad = m.get("projects/example-one/raw/PR-9/state.json");
+  const bad = m.get("projects/example-one/prs/PR-9/raw/state.json");
   assert.equal(bad.unreadable, true);
   assert.equal(bad.project, "example-one");
   assert.ok(bad.error, "the parse error is carried");
@@ -74,36 +74,36 @@ test("fs.read: one row per file the glob names, raw data or an unreadable row", 
 
 test("fs.read: a JSON value that is not an object is an unreadable row, as is a file over budget", (t) => {
   const root = fixture(t, "hud-cards-fs-shape-", {
-    "projects/p/raw/PR-1/state.json": JSON.stringify([1, 2, 3]),
-    "projects/p/raw/PR-2/state.json": "null",
-    "projects/p/raw/PR-3/state.json": `{"pad":"${"x".repeat(LIMITS.maxBytes)}"}`,
-    "projects/p/raw/PR-4/state.json": "{}",
+    "projects/p/prs/PR-1/raw/state.json": JSON.stringify([1, 2, 3]),
+    "projects/p/prs/PR-2/raw/state.json": "null",
+    "projects/p/prs/PR-3/raw/state.json": `{"pad":"${"x".repeat(LIMITS.maxBytes)}"}`,
+    "projects/p/prs/PR-4/raw/state.json": "{}",
   });
   const m = byPath(read(card(root)).rows);
-  assert.equal(m.get("projects/p/raw/PR-1/state.json").unreadable, true, "an array");
-  assert.equal(m.get("projects/p/raw/PR-1/state.json").error, "not a JSON object");
-  assert.equal(m.get("projects/p/raw/PR-2/state.json").unreadable, true, "null");
-  assert.equal(m.get("projects/p/raw/PR-3/state.json").unreadable, true, "over budget");
-  assert.match(m.get("projects/p/raw/PR-3/state.json").error, new RegExp(`larger than ${LIMITS.maxBytes} bytes`));
-  assert.deepEqual(m.get("projects/p/raw/PR-4/state.json"), { path: "projects/p/raw/PR-4/state.json", project: "p", data: {} });
+  assert.equal(m.get("projects/p/prs/PR-1/raw/state.json").unreadable, true, "an array");
+  assert.equal(m.get("projects/p/prs/PR-1/raw/state.json").error, "not a JSON object");
+  assert.equal(m.get("projects/p/prs/PR-2/raw/state.json").unreadable, true, "null");
+  assert.equal(m.get("projects/p/prs/PR-3/raw/state.json").unreadable, true, "over budget");
+  assert.match(m.get("projects/p/prs/PR-3/raw/state.json").error, new RegExp(`larger than ${LIMITS.maxBytes} bytes`));
+  assert.deepEqual(m.get("projects/p/prs/PR-4/raw/state.json"), { path: "projects/p/prs/PR-4/raw/state.json", project: "p", data: {} });
 });
 
 test("fs.read: symlinks are neither followed nor listed; an unreadable directory contributes nothing", (t) => {
   const elsewhere = fixture(t, "hud-cards-fs-elsewhere-", {
-    "raw/PR-77/state.json": JSON.stringify(finished),
+    "prs/PR-77/raw/state.json": JSON.stringify(finished),
   });
   const root = fixture(t, "hud-cards-fs-links-", {
-    "projects/real/raw/PR-1/state.json": JSON.stringify(finished),
+    "projects/real/prs/PR-1/raw/state.json": JSON.stringify(finished),
   });
   // A symlinked project directory, and a symlinked state file inside a real one.
   fs.symlinkSync(elsewhere, path.join(root, "projects", "linked"));
-  fs.mkdirSync(path.join(root, "projects/real/raw/PR-2"));
+  fs.mkdirSync(path.join(root, "projects/real/prs/PR-2/raw"), { recursive: true });
   fs.symlinkSync(
-    path.join(elsewhere, "raw/PR-77/state.json"),
-    path.join(root, "projects/real/raw/PR-2/state.json"),
+    path.join(elsewhere, "prs/PR-77/raw/state.json"),
+    path.join(root, "projects/real/prs/PR-2/raw/state.json"),
   );
   const { rows } = read(card(root));
-  assert.deepEqual(rows.map((r) => r.path), ["projects/real/raw/PR-1/state.json"]);
+  assert.deepEqual(rows.map((r) => r.path), ["projects/real/prs/PR-1/raw/state.json"]);
 
   // A root that does not exist is an empty card, not a fault: the tree is
   // allowed to have no runs yet.
@@ -137,13 +137,13 @@ test("review-state.normalize derives the panel's fields and drops unknown keys a
   const root = reviewsFixture(t);
   const now = Date.parse(RUNNING_STARTED) + 90 * 1000;
   const m = byPath(read(card(root)).rows);
-  const item = reviewState.normalize(m.get("projects/example-one/raw/PR-101/state.json"), { now });
+  const item = reviewState.normalize(m.get("projects/example-one/prs/PR-101/raw/state.json"), { now });
 
   assert.equal(item.project, "example-one");
   assert.equal(item.running, true);
   assert.equal(item.elapsed_s, 90, "now − started, exactly, with `now` passed in");
   assert.equal(item.pr_url, "https://github.com/owner/repo/pull/101");
-  assert.equal(item.note_url, "/n/projects/example-one/notes/PR-101-still-running");
+  assert.equal(item.note_url, "/n/projects/example-one/prs/PR-101/review");
   assert.deepEqual(item.phases, {
     evidence: { started: RUNNING_STARTED, ended: atMin(1) },
     questions: { started: atMin(1), ended: atMin(5) },
@@ -164,7 +164,7 @@ test("review-state.normalize derives the panel's fields and drops unknown keys a
   assert.ok(!JSON.stringify(item).includes(EXTRA_CANARY), "an unlisted key leaked at some depth");
   assert.equal("data" in item, false, "the raw row never reaches the page");
 
-  const done = reviewState.normalize(m.get("projects/example-two/raw/PR-7/state.json"), { now });
+  const done = reviewState.normalize(m.get("projects/example-two/prs/PR-7/raw/state.json"), { now });
   assert.equal(done.running, false);
   assert.equal(done.elapsed_s, 31 * 60 + 30, "ended − started");
   assert.deepEqual(done.review_state, REVIEW_STATE_SERVED);
@@ -175,14 +175,14 @@ test("review-state.normalize derives the panel's fields and drops unknown keys a
   assert.ok(!JSON.stringify(done).includes(EXTRA_CANARY));
 
   // An unreadable row is an item that says so — never null, never dropped.
-  const bad = m.get("projects/example-one/raw/PR-9/state.json");
+  const bad = m.get("projects/example-one/prs/PR-9/raw/state.json");
   assert.deepEqual(reviewState.normalize(bad, { now }), bad);
   assert.equal(reviewState.normalize(bad, { now }).running, undefined);
 });
 
 test("review-state.normalize refuses the links the state cannot back, and never rejects a row", () => {
   const now = Date.parse("2026-10-27T11:00:00.000Z");
-  const row = (data) => ({ path: "p/raw/PR-1/state.json", project: "p", data });
+  const row = (data) => ({ path: "p/prs/PR-1/raw/state.json", project: "p", data });
   const one = reviewState.normalize(
     row({ repo: "https://evil.example/owner/repo", pr: 1, note: "../../outside.md", started: "2026-10-27T10:00:00.000Z", ended: "2026-10-27T10:00:05.000Z" }),
     { now },
@@ -225,9 +225,9 @@ test("review-state declares its columns, scopes and order", () => {
 
 test("collectRows reads, normalises, sorts and scopes through one path", (t) => {
   const root = reviewsFixture(t);
-  fs.mkdirSync(path.join(root, "projects/example-two/raw/PR-8"), { recursive: true });
+  fs.mkdirSync(path.join(root, "projects/example-two/prs/PR-8/raw"), { recursive: true });
   fs.writeFileSync(
-    path.join(root, "projects/example-two/raw/PR-8/state.json"),
+    path.join(root, "projects/example-two/prs/PR-8/raw/state.json"),
     JSON.stringify({ ...finished, pr: 8, posted: null, started: "2026-10-27T12:00:00.000Z", ended: "2026-10-27T12:05:00.000Z" }),
   );
   const now = Date.parse(RUNNING_STARTED) + RUNNING_FOR_S * 1000;
@@ -240,10 +240,10 @@ test("collectRows reads, normalises, sorts and scopes through one path", (t) => 
   assert.deepEqual(
     all.items.map((i) => i.path),
     [
-      "projects/example-one/raw/PR-101/state.json",
-      "projects/example-two/raw/PR-8/state.json",
-      "projects/example-two/raw/PR-7/state.json",
-      "projects/example-one/raw/PR-9/state.json",
+      "projects/example-one/prs/PR-101/raw/state.json",
+      "projects/example-two/prs/PR-8/raw/state.json",
+      "projects/example-two/prs/PR-7/raw/state.json",
+      "projects/example-one/prs/PR-9/raw/state.json",
     ],
   );
   assert.equal(all.items[0].elapsed_s, RUNNING_FOR_S);
@@ -252,9 +252,9 @@ test("collectRows reads, normalises, sorts and scopes through one path", (t) => 
   assert.deepEqual(
     open.items.map((i) => i.path),
     [
-      "projects/example-one/raw/PR-101/state.json",
-      "projects/example-two/raw/PR-8/state.json",
-      "projects/example-one/raw/PR-9/state.json",
+      "projects/example-one/prs/PR-101/raw/state.json",
+      "projects/example-two/prs/PR-8/raw/state.json",
+      "projects/example-one/prs/PR-9/raw/state.json",
     ],
   );
   assert.equal(open.scanned, 4, "scope narrows the items, not what was read");

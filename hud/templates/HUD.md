@@ -15,6 +15,7 @@ rewritten, and the declaration is where an edit actually belongs.
 | `playbook` | `playbooks/<slug>.md` | no |
 | `context` | `projects/<project>/CONTEXT.md` | no |
 | `peer` | `peers/<handle>.md` | no |
+| `pr` | `projects/<project>/prs/PR-<pr>/<slug>.md` | no |
 | `raw` | `projects/<project>/raw/<date>-<slug>.<ext>` | yes |
 
 A slug is the title, lowercased, reduced to `a-z0-9-`, with `a`, `an`, `the` dropped and the result bounded at 60 characters on a word boundary. The dropped article is not a liberty — it is what SKILL.md's own worked example does.
@@ -30,7 +31,7 @@ entry — filename and directory supply defaults.
 | `date` | date | — | The day the entry is about. The reader falls back to the filename prefix, then mtime. |
 | `type` | scalar | — | What kind of entry this is. The reader infers it from the path when absent. |
 | `status` | scalar | `active` | Lifecycle. On a project brief it drives group rank and fold state; elsewhere it means what the author meant. |
-| `tags` | list | — | Free-form labels. |
+| `tags` | list | — | Cross-cutting topics a view filters on. Not the project or PR (the path says that), a status or kind (their own fields say that), or a ticket id (`tickets`); `hud lint` reports a tag that restates one of them. |
 | `repos` | list | — | owner/name — lights up the PR panels for this entry. |
 | `tickets` | list | — | Ticket ids, rendered as links through hud.toml's ticket_url_template. |
 | `gh` | scalar | — | A GitHub handle. Drives the peers panel's PR lookup. |
@@ -52,6 +53,7 @@ What each kind actually writes:
 | `playbook` | `title`, `type`, `last_verified` | `status`, `tags`, `repos`, `tickets`, `applies_to`, `last_verified` | `title`, `type` (derived) |
 | `context` | `title` (if given), `status` | `status`, `repos`, `tickets`, `links` | `title`, `type` (derived) |
 | `peer` | `gh` | `gh`, `repos` | `type` (derived) |
+| `pr` | `title`, `date`, `type` | `status`, `tags`, `repos`, `tickets` | `title`, `date`, `type` (derived) |
 | `raw` | — | — (nothing) | everything |
 
 - **Dates are normalized on READ**, not on write: `YYYY-MM-DD` and `ISO-8601 timestamp` are both accepted and both become `YYYY-MM-DD`. A writer-side convention would depend on a per-machine setting that is not committed; a reader that accepts both depends on nothing.
@@ -71,7 +73,7 @@ What each kind actually writes:
 
 Sections are an **open set**: the five above fix the left-column order, and any
 other top-level directory becomes a section too, appended alphabetically with a
-fallback sentence. Kinds are the opposite — closed, and there are exactly 6.
+fallback sentence. Kinds are the opposite — closed, and there are exactly 7.
 
 **Groups** exist only inside `projects`: the subdirectory *is* the group, and
 its `CONTEXT.md` is the brief.
@@ -80,6 +82,7 @@ its `CONTEXT.md` is the brief.
 | --- | --- | --- | --- | --- |
 | `notes/` | `projects` | **no — never heard of it** | exactly its declared depth | Where dated project entries go. Writer-side only: `projects/p/notes/x.md` and `projects/p/x.md` are the same entry to the reader. |
 | `raw/` | `projects` | yes, and renders differently | any depth | Immutable drops — transcripts, exports, patches. Listed and never opened; the meta slot shows a size instead of a date. |
+| `prs/` | `projects` | **no — never heard of it** | exactly its declared depth | One folder per pull request, `prs/PR-N/`: `review.md` is the current review, other notes about the PR sit beside it, and the review runs live under its `raw/`. A second review replaces `review.md`; earlier rounds are archived under `raw/runs/`. |
 
 Those two columns are not the same claim. `notes/` means nothing to the
 reader because the reader has **never heard of it** — the name appears
