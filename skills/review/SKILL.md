@@ -27,12 +27,15 @@ No phase reads another phase's chat reply. Spec:
 **Where the notes file goes.** Resolve the destination in this order, and state
 which one you used when you hand the review over:
 
-1. **`$HUD_ROOT/projects/<project>/notes/PR-N-<slug>.md`** when `HUD_ROOT`
+1. **`$HUD_ROOT/projects/<project>/prs/PR-N/review.md`** when `HUD_ROOT`
    resolves — the env var if set, else `~/hud` if that directory exists. This is
    the default, and it is the HUD consolidation rule applied: a review artifact
    *is* a note, and notes live in exactly one tree — the one that is backed up,
-   indexed, and searchable months later when you need the matrix again.
-2. **`/tmp/<owner>-<repo>-review/PR-N-<slug>.md`** only when no HUD tree
+   indexed, and searchable months later when you need the matrix again. The PR
+   folder is the PR's one home: a second review of the same PR replaces
+   `review.md` rather than adding a sibling, and anything else about that PR
+   (reply drafts, follow-up notes) goes in the same folder, not in `notes/`.
+2. **`/tmp/<owner>-<repo>-review/PR-N/review.md`** only when no HUD tree
    resolves. A scratch path is an honest "this is not being kept"; say so
    rather than letting the author assume it was filed somewhere.
 
@@ -44,10 +47,11 @@ commit. And never inside the agents/skills repo either: that repo holds the
 review machinery, not the output of running it.
 <!-- @include-end _shared/review-artifact-destination.md -->
 
-The run directory is the `raw/PR-N/` sibling of that notes path
-(`$HUD_ROOT/projects/<project>/raw/PR-N/`), or `/tmp/review/<owner>-<repo>-N/`
+The run directory is the `raw/` beside that note
+(`$HUD_ROOT/projects/<project>/prs/PR-N/raw/`), or `/tmp/review/<owner>-<repo>-N/`
 when no HUD tree resolves. `evidence/` and `work/` live under it; the
-rendered artifact is copied to the notes path at the end of phase 6.
+rendered artifact is written to the note path at the end of phase 6. It sits
+under `raw/` so the HUD lists those files without opening them as notes.
 
 Resolve `<project>` as: an existing `$HUD_ROOT/projects/<x>/` whose
 `CONTEXT.md` names a touched path or the repo; else the project the operator
@@ -77,8 +81,10 @@ dead one (see Run state).
 
 Every new invocation of `/review` passes `--new` right after `--pending`
 (`init --pending --new pr=...`). When `<run>` holds a run that ended, this
-starts the next review and sets the old log, `evidence/` and `work/` aside
-as `*.superseded-<stamp>`. Without it, the same arguments read as a replay
+starts the next review and packs the old log, `evidence/`, `work/` and
+`review.md` into `raw/runs/<stamp>.tar.gz`, with one line in
+`raw/runs/history.jsonl` that `render.mjs` turns into the note's History
+section. Without it, the same arguments read as a replay
 of the ended run and nothing moves, so the new readers would merge the old
 run's decision files. Leave `--new` off only when repeating a call within
 the same invocation.
@@ -297,7 +303,7 @@ refute, triage; fast: refute, triage, teach) or the zero-candidate rule
 skips, and is recorded as `skipped`. A backward or unknown phase exits 1,
 names the allowed next phases, and writes nothing. `abandon` and `fail`
 end a run from any open phase. A second review of the same PR in the same
-`raw/PR-N/` sets the ended run's log aside; a run still open there is
+`prs/PR-N/raw/` packs the ended run into `runs/`; a run still open there is
 refused until it finishes or is abandoned.
 
 A run whose session dies would otherwise read "running" forever. Install
@@ -316,11 +322,11 @@ it.
 
 Read `$HUD_ROOT/review-policy.md`. If absent, print "no posting policy; not
 posting" and stop. Otherwise, re-run `review-evidence.sh --pr ... --core-only
---out <run>-recheck` (core probes only: head, checks and threads, in
+--out <run>/recheck` (core probes only: head, checks and threads, in
 seconds, with no second round of builds and tests), then:
 
 ```bash
-node $SKILL/scripts/freshness.mjs <run> <run>-recheck
+node $SKILL/scripts/freshness.mjs <run> <run>/recheck
 ```
 
 The review ran against a snapshot, and the PR keeps moving while the review

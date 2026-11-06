@@ -603,3 +603,21 @@ test("--body-file reads a file, and - reads stdin", (t) => {
   ]);
   assert.match(both.stderr, /two answers to the same question/);
 });
+
+test("kind pr files a note in the PR's folder, GitHub's PR-<n>, and refuses without a number", (t) => {
+  const ctx = tree(t, "pr");
+  fs.mkdirSync(path.join(ctx.root, "projects/widget"), { recursive: true });
+  run(ctx, ["pr", "--project", "widget", "--pr", "#41", "--title", "Replies to review", "--date", DAY]);
+  const rel = "projects/widget/prs/PR-41/replies-to-review.md";
+  assert.match(read(ctx.root, rel), /^---\ntitle: Replies to review\ndate: /);
+  assert.equal(mentions(ctx.root, "index.md", rel).length, 1);
+  for (const c of [
+    { args: ["pr", "--project", "widget", "--title", "x"], re: /needs --pr <number>/ },
+    { args: ["pr", "--project", "widget", "--pr", "4a", "--title", "x"], re: /needs --pr <number>, got 4a/ },
+    { args: ["note", "--project", "widget", "--pr", "41", "--title", "x"], re: /takes no --pr/ },
+  ]) {
+    const r = runFailing(ctx, [...c.args, "--date", DAY]);
+    assert.notEqual(r.status, 0, `${c.args.join(" ")} was accepted`);
+    assert.match(r.stderr, c.re);
+  }
+});

@@ -18,7 +18,7 @@ synthesised into cards where a card exists for them (below).
 ```toml
 [cards.reviews]
 kind    = "fs"
-glob    = "projects/*/raw/PR-*/state.json"
+glob    = "projects/*/prs/PR-*/raw/state.json"
 shape   = "review-state"
 key     = "pr_url"
 title   = "Review runs"
@@ -164,7 +164,7 @@ singular, and keeps doing so — that is the one place the old name survives.
   "count": 3,
   "truncated": false,
   "rejected": 0,
-  "items": [ { "path": "projects/example-one/raw/PR-101/state.json", "project": "example-one", "pr_url": "https://github.com/owner/repo/pull/101", "running": true } ]
+  "items": [ { "path": "projects/example-one/prs/PR-101/raw/state.json", "project": "example-one", "pr_url": "https://github.com/owner/repo/pull/101", "running": true } ]
 }
 ```
 

@@ -45,6 +45,7 @@ fails when it drifts, and the unit suite runs that check.
 | capture a playbook | `playbook` | `$HUD_ROOT/playbooks/<slug>.md` |
 | create a project brief | `context` | `$HUD_ROOT/projects/<project>/CONTEXT.md` |
 | add a peer | `peer` | `$HUD_ROOT/peers/<handle>.md` |
+| capture a note about a pull request | `pr` | `$HUD_ROOT/projects/<project>/prs/PR-<pr>/<slug>.md` |
 | drop raw material in | `raw` | `$HUD_ROOT/projects/<project>/raw/<date>-<slug>.<ext>` |
 <!-- @generated-end: intent-table -->
 
@@ -106,7 +107,7 @@ nothing here is a second copy of it.
 | `date` | date | — | The day the entry is about. The reader falls back to the filename prefix, then mtime. |
 | `type` | scalar | — | What kind of entry this is. The reader infers it from the path when absent. |
 | `status` | scalar | `active` | Lifecycle. On a project brief it drives group rank and fold state; elsewhere it means what the author meant. |
-| `tags` | list | — | Free-form labels. |
+| `tags` | list | — | Cross-cutting topics a view filters on. Not the project or PR (the path says that), a status or kind (their own fields say that), or a ticket id (`tickets`); `hud lint` reports a tag that restates one of them. |
 | `repos` | list | — | owner/name — lights up the PR panels for this entry. |
 | `tickets` | list | — | Ticket ids, rendered as links through hud.toml's ticket_url_template. |
 | `gh` | scalar | — | A GitHub handle. Drives the peers panel's PR lookup. |
@@ -127,6 +128,7 @@ says nothing. What each kind actually writes:
 | `playbook` | `title`, `type`, `last_verified` | `status`, `tags`, `repos`, `tickets`, `applies_to`, `last_verified` | `title`, `type` (derived) |
 | `context` | `title` (if given), `status` | `status`, `repos`, `tickets`, `links` | `title`, `type` (derived) |
 | `peer` | `gh` | `gh`, `repos` | `type` (derived) |
+| `pr` | `title`, `date`, `type` | `status`, `tags`, `repos`, `tickets` | `title`, `date`, `type` (derived) |
 | `raw` | — | — (nothing) | everything |
 <!-- @generated-end: frontmatter-table -->
 
@@ -175,7 +177,7 @@ log. (Notes are the log; CONTEXT.md is the summary.)
 
 Sections are an **open set**: the five above fix the left-column order, and any
 other top-level directory becomes a section too, appended alphabetically with a
-fallback sentence. Kinds are the opposite — closed, and there are exactly 6.
+fallback sentence. Kinds are the opposite — closed, and there are exactly 7.
 <!-- @generated-end: sections-table -->
 
 <!-- @generated-begin: containers-table -->
@@ -183,6 +185,7 @@ fallback sentence. Kinds are the opposite — closed, and there are exactly 6.
 | --- | --- | --- | --- | --- |
 | `notes/` | `projects` | **no — never heard of it** | exactly its declared depth | Where dated project entries go. Writer-side only: `projects/p/notes/x.md` and `projects/p/x.md` are the same entry to the reader. |
 | `raw/` | `projects` | yes, and renders differently | any depth | Immutable drops — transcripts, exports, patches. Listed and never opened; the meta slot shows a size instead of a date. |
+| `prs/` | `projects` | **no — never heard of it** | exactly its declared depth | One folder per pull request, `prs/PR-N/`: `review.md` is the current review, other notes about the PR sit beside it, and the review runs live under its `raw/`. A second review replaces `review.md`; earlier rounds are archived under `raw/runs/`. |
 
 Those two columns are not the same claim. `notes/` means nothing to the
 reader because the reader has **never heard of it** — the name appears
@@ -244,8 +247,26 @@ where you already are.
 
 ## 8. `lint` argument
 
-When invoked with `lint`, do not write anything yet. Walk `$HUD_ROOT` and
-report:
+When invoked with `lint`, do not write anything yet. Start from `hud lint`
+(`--json` for the machine form): it reads the tree the way the page does and
+reports the two things below that a walk by eye misses at a few hundred
+entries. Then walk `$HUD_ROOT` for the rest, and report all of it together.
+
+- **Tags** — a tag is for a cross-cutting topic a view filters on. `hud lint`
+  flags one that restates the path (`ces` on a note under `projects/ces/`),
+  a status or kind (`archive`, `review`, `scratch`), or a ticket (`cus-1325`,
+  which belongs in `tickets:`), plus spellings of one tag (`read-path`,
+  `Read_Paths`) and tags carrying their own quotes. Propose the edit it names;
+  list the used-once tags without proposing anything — a stray may be the
+  start of a topic.
+- **PR clusters** — notes about one pull request that are not in its folder.
+  Propose moving each into `projects/<p>/prs/PR-N/`. When a PR has several
+  review notes, the newest becomes `review.md` and the earlier ones go into the
+  same folder under their own names; merging their text is a separate,
+  per-PR proposal, never part of the move.
+- **Ticket clusters** — loose notes in one project that name the same ticket.
+  Propose one of: leave them (they are a dated log), or merge them into one
+  note with the sources moved to `archive/`. Never delete a source.
 
 - **Stale actives** — any entry with `status: active` in its frontmatter
   (typically `CONTEXT.md` files) with no note under its project's
@@ -258,7 +279,8 @@ report:
   longer exist.
 
 Present the report first. Only make fixes (updating `index.md`, flagging
-`CONTEXT.md`, archiving stale entries) if the user approves them after
-seeing the report — this mirrors the review-then-write posture of every
+`CONTEXT.md`, archiving stale entries, editing tags, moving a cluster) if the
+user approves them after seeing the report. Move with `git mv` so history
+follows the file, and append one `log.md` line per move — this mirrors the review-then-write posture of every
 other write path in this skill, just applied to cleanup instead of
 capture.

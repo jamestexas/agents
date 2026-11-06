@@ -141,7 +141,7 @@ test("a card answer carries an ETag; If-None-Match on unchanged rows is a 304 wi
   assert.notEqual(open.headers.get("etag"), etag);
 
   // A changed state file is a new ETag and a full answer.
-  write(hudRoot, "projects/example-one/raw/PR-101/state.json", { ...running, phase: "render" });
+  write(hudRoot, "projects/example-one/prs/PR-101/raw/state.json", { ...running, phase: "render" });
   const changed = await hud.get("/api/card/reviews?scope=all", { "if-none-match": etag });
   assert.equal(changed.status, 200);
   assert.notEqual(changed.headers.get("etag"), etag);
@@ -182,7 +182,7 @@ test("a join is part of the answer: a change to the joined card's rows moves the
   assert.equal((await first.json()).items[0].reviews.verdict, "APPROVE");
   assert.equal((await hud.get("/api/card/board", { "if-none-match": etag })).status, 304);
 
-  write(hudRoot, "projects/example-two/raw/PR-7/state.json", { ...finished, verdict: "REQUEST_CHANGES" });
+  write(hudRoot, "projects/example-two/prs/PR-7/raw/state.json", { ...finished, verdict: "REQUEST_CHANGES" });
   const changed = await hud.get("/api/card/board", { "if-none-match": etag });
   assert.equal(changed.status, 200, "the upstream's bytes are the same; the joined run is not");
   assert.equal((await changed.json()).items[0].reviews.verdict, "REQUEST_CHANGES");
@@ -206,7 +206,7 @@ test("only the card route answers conditionally: errors carry no ETag, and the a
 test("refresh is served in seconds: the card's own, 60 by default, 15 while a run is in flight", async (t) => {
   const hudRoot = reviewsFixture(t);
   const toml = (refresh) =>
-    `[cards.reviews]\nkind = "fs"\nglob = "projects/*/raw/PR-*/state.json"\nshape = "review-state"\nkey = "pr_url"\n` +
+    `[cards.reviews]\nkind = "fs"\nglob = "projects/*/prs/PR-*/raw/state.json"\nshape = "review-state"\nkey = "pr_url"\n` +
     (refresh ? `refresh = "${refresh}"\n` : "");
   fs.writeFileSync(path.join(hudRoot, "hud.toml"), toml(null));
   const hud = await serveLive(t, hudRoot);
@@ -214,13 +214,13 @@ test("refresh is served in seconds: the card's own, 60 by default, 15 while a ru
   const live = await (await hud.get("/api/card/reviews")).json();
   assert.equal(live.refresh, 15, "the fixture has a running run");
   // Without the running run, the card's own cadence.
-  fs.rmSync(path.join(hudRoot, "projects/example-one/raw/PR-101/state.json"));
+  fs.rmSync(path.join(hudRoot, "projects/example-one/prs/PR-101/raw/state.json"));
   assert.equal((await (await hud.get("/api/card/reviews")).json()).refresh, DEFAULT_REFRESH_S);
   fs.writeFileSync(path.join(hudRoot, "hud.toml"), toml("2m"));
   assert.equal((await (await hud.get("/api/card/reviews")).json()).refresh, 120);
   // A card asking for faster than the in-flight cadence keeps its own.
   fs.writeFileSync(path.join(hudRoot, "hud.toml"), toml("5s"));
-  write(hudRoot, "projects/example-one/raw/PR-101/state.json", running);
+  write(hudRoot, "projects/example-one/prs/PR-101/raw/state.json", running);
   assert.equal((await (await hud.get("/api/card/reviews")).json()).refresh, 5);
 });
 
@@ -266,7 +266,7 @@ test("GET /api/events is an event stream naming the card a tree change belongs t
   assert.deepEqual(hello.data, { watching: true, cards: ["reviews"] });
 
   const t0 = Date.now();
-  write(hudRoot, "projects/example-three/raw/PR-12/state.json", { ...running, pr: 12 });
+  write(hudRoot, "projects/example-three/prs/PR-12/raw/state.json", { ...running, pr: 12 });
   await events.next(isCard("reviews"), 1000);
   assert.ok(Date.now() - t0 < 1000);
 });
@@ -280,14 +280,14 @@ test("a write outside every card's glob names no card", async (t) => {
   await events.next((ev) => ev.event === "hello");
 
   write(hudRoot, "notes/2026-10-29-a-note.md", "# a note\n");
-  write(hudRoot, "projects/example-one/raw/PR-5/evidence.txt", "still not a state file\n");
-  write(hudRoot, "projects/.hidden/raw/PR-3/state.json", JSON.stringify(finished));
+  write(hudRoot, "projects/example-one/prs/PR-5/raw/evidence.txt", "still not a state file\n");
+  write(hudRoot, "projects/.hidden/prs/PR-3/raw/state.json", JSON.stringify(finished));
   write(hudRoot, ".generated/cards/board.json", "{}");
   await sleep(700);
   assert.deepEqual(events.seen.filter((ev) => ev.event === "card"), []);
 
   // The watcher is still there: the next change inside the glob is named.
-  write(hudRoot, "projects/example-one/raw/PR-101/state.json", { ...running, phase: "render" });
+  write(hudRoot, "projects/example-one/prs/PR-101/raw/state.json", { ...running, phase: "render" });
   await events.next(isCard("reviews"), 1000);
 });
 

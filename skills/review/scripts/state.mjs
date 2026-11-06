@@ -11,8 +11,9 @@
 //          HUD shows the run at dispatch and can tell when its session died.
 //          --new starts the next review of a PR whose last run ended, even
 //          with the same arguments; without it the same call is a replay.
-//          Either way, starting over sets the ended run's log, evidence/
-//          and work/ aside as *.superseded-<stamp>.
+//          Either way, starting over packs the ended run's log, evidence/,
+//          work/ and note into runs/<stamp>.tar.gz and adds a line to
+//          runs/history.jsonl.
 //   init   mode=<light|default|deep> [viewer=<login>]
 //          evidence/target.json + evidence/manifest.json (+ core/pr-shas.out,
 //          pr/context.json for title and author) -> a fresh state.json.
@@ -137,35 +138,57 @@ const terminal = (opName, target) => {
   transition(s, target);
   append(opName, { reason });
 };
-// A run directory is per PR (raw/PR-N), so a second review of the same PR
-// starts in the first one's directory. A run that ended is set aside under a
-// name the HUD's state.json glob does not match, and the new run gets a fresh
-// log; a run still open is refused, since two writers on one log is the
-// corruption the log exists to prevent.
+// A run directory is per PR (prs/PR-N/raw), so a second review of the same PR
+// starts in the first one's directory. A run that ended is packed into one
+// runs/<stamp>.tar.gz, which the HUD's state.json glob does not match, and the
+// new run gets a fresh log; a run still open is refused, since two writers on
+// one log is the corruption the log exists to prevent. Packing rather than
+// renaming keeps a PR reviewed five times at one run's file count.
 //
-// With `dirs`, the ended run's evidence/ and work/ go aside with its log. Only
-// `init --pending` passes it: it runs before the new run's evidence, so those
-// dirs can only be the old run's, and a reader would otherwise merge the old
-// run's decision files into the new ledger. The evidence-time `init` must not:
-// by then evidence/ is the new run's.
+// With `dirs`, the ended run's evidence/, work/, recheck/ and rendered note go
+// into the archive with its log. Only `init --pending` passes it: it runs
+// before the new run's evidence, so those dirs can only be the old run's, and a
+// reader would otherwise merge the old run's decision files into the new
+// ledger. The evidence-time `init` must not: by then evidence/ is the new run's.
+//
+// Each archive also gets one line in runs/history.jsonl, which render.mjs
+// turns into the note's History section, so the current note says what the
+// earlier rounds concluded without anyone opening a tarball.
+const RUNS = 'runs';
 const startOver = ({ dirs = false } = {}) => {
   const stamp = now().replace(/[:.]/g, '-');
   const events = readEvents();
-  if (events.length === 0) {
-    if (fs.existsSync(statePath)) fs.renameSync(statePath, path.join(run, `state.superseded-${stamp}.json`));
-    return;
-  }
-  const prior = fold(events);
-  if (prior.ended == null) {
+  let prior = events.length > 0 ? fold(events) : null;
+  if (prior && prior.ended == null) {
     console.error(`state.mjs ${op}: ${run} holds a run still open at ${prior.phase}; finish it, or \`state.mjs ${run} abandon\` it if its session is gone`);
     process.exit(1);
   }
-  fs.renameSync(eventsPath, path.join(run, `events.superseded-${stamp}.jsonl`));
-  if (dirs) {
-    for (const d of ['evidence', 'work']) {
-      if (fs.existsSync(path.join(run, d))) fs.renameSync(path.join(run, d), path.join(run, `${d}.superseded-${stamp}`));
-    }
+  const members = [];
+  if (prior) members.push('events.jsonl');
+  if (fs.existsSync(statePath)) {
+    members.push('state.json');
+    // A state.json from before the log is the only record of that run.
+    if (!prior) { try { prior = JSON.parse(fs.readFileSync(statePath, 'utf8')); } catch { prior = {}; } }
   }
+  if (members.length === 0) return;
+  if (dirs) for (const d of ['evidence', 'work', 'recheck']) if (fs.existsSync(path.join(run, d))) members.push(d);
+  // The note sits outside the run directory, so it goes in under its own -C.
+  const hud = process.env.HUD_ROOT || path.join(os.homedir(), 'hud');
+  const note = dirs && typeof prior?.note === 'string' && !path.isAbsolute(prior.note) && fs.existsSync(path.join(hud, prior.note))
+    ? prior.note : null;
+  fs.mkdirSync(path.join(run, RUNS), { recursive: true });
+  const archive = `${RUNS}/${stamp}.tar.gz`;
+  // PATH first; the fixed locations cover a caller that narrowed PATH to keep
+  // gh out, which is every test here.
+  const tarBin = ['tar', '/usr/bin/tar', '/bin/tar'].find((b) => !spawnSync(b, ['--version']).error) ?? 'tar';
+  const tar = spawnSync(tarBin, ['-czf', path.join(run, archive), '-C', run, ...members, ...(note ? ['-C', hud, note] : [])], { encoding: 'utf8' });
+  if (tar.status !== 0) {
+    console.error(`state.mjs ${op}: could not pack the ended run into ${archive}: ${(tar.stderr || tar.error?.message || '').trim()}`);
+    process.exit(1);
+  }
+  for (const m of members) fs.rmSync(path.join(run, m), { recursive: true, force: true });
+  const line = { archive, started: prior?.started ?? null, ended: prior?.ended ?? null, mode: prior?.mode ?? null, verdict: prior?.verdict ?? null, head: prior?.head ?? null };
+  fs.appendFileSync(path.join(run, RUNS, 'history.jsonl'), `${JSON.stringify(line)}\n`);
 };
 const priorEnded = () => { const es = readEvents(); return es.length > 0 && fold(es).ended != null; };
 

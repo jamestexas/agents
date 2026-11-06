@@ -16,7 +16,7 @@ Before categorizing or drafting anything, generate a per-PR reply-tracking file.
 
 The key insight: `Code-addressed` and `Reply-posted` are two independent states. A comment can be fully fixed in code yet have no reply posted — leaving the reviewer's thread visibly open on a merged or approved PR. The tracking file makes this gap impossible to miss.
 
-**Location**: same `<notes-dir>` as Phase 7 notes, named `PR-N-<short-title>-replies.md`. Keep it outside the repo being reviewed.
+**Location**: the same PR folder as the Phase 7 notes, named `replies.md` (`…/prs/PR-N/replies.md`). Keep it outside the repo being reviewed.
 
 **Generate raw comment data** (root comments only — not replies — sorted by file):
 

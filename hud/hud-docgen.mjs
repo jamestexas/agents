@@ -157,7 +157,7 @@ export const REGIONS = {
       `fallback sentence. Kinds are the opposite — closed, and there are exactly ${KIND_NAMES.length}.`,
     ].join("\n"),
 
-  /** The two conventional containers, and their opposite asymmetries. */
+  /** The conventional containers, and their asymmetries. */
   "containers-table": () =>
     [
       table(

@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { normalize, isLive, STALE_AFTER_MS } from "../cards/normalize/review-state.mjs";
 
 const NOW = Date.parse("2026-01-01T01:00:00Z");
-const row = (data) => ({ path: "projects/example-one/raw/PR-1/state.json", project: "example-one", data });
+const row = (data) => ({ path: "projects/example-one/prs/PR-1/raw/state.json", project: "example-one", data });
 const open = (extra = {}) => ({ version: 1, phase: "settle", started: "2026-01-01T00:50:00Z", ended: null, phases: {}, ...extra });
 const owner = { session_id: "s", pid: 42, transcript_path: "/t/s.jsonl" };
 const probe = ({ alive = true, mtimeMs = NOW - 60_000 } = {}) => ({ alive: () => alive, mtimeMs: () => mtimeMs });

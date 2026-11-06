@@ -233,7 +233,7 @@ test("GET /api/card/board: normalised rows with the latest review run joined on 
     gates: finished.gates,
     probes: { unavailable: 0 },
     findings: finished.findings,
-    note_url: "/n/projects/example-two/notes/PR-7-finished",
+    note_url: "/n/projects/example-two/prs/PR-7/review",
     posted: finished.posted,
     review_state: REVIEW_STATE_SERVED,
     running: false,

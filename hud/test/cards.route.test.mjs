@@ -21,7 +21,7 @@ const CARD_KEYS = [
 const CARDS_TOML = `
 [cards.reviews]
 kind    = "fs"
-glob    = "projects/*/raw/PR-*/state.json"
+glob    = "projects/*/prs/PR-*/raw/state.json"
 shape   = "review-state"
 key     = "pr_url"
 title   = "Review runs"
@@ -53,9 +53,9 @@ test("GET /api/card/reviews serves the card envelope over the same rows", async 
   assert.equal(body.truncated, false);
   assert.equal(body.rejected, 0);
   assert.deepEqual(paths(body), [
-    "projects/example-one/raw/PR-101/state.json",
-    "projects/example-two/raw/PR-7/state.json",
-    "projects/example-one/raw/PR-9/state.json",
+    "projects/example-one/prs/PR-101/raw/state.json",
+    "projects/example-two/prs/PR-7/raw/state.json",
+    "projects/example-one/prs/PR-9/raw/state.json",
   ]);
   assert.equal(body.items[0].running, true);
   assert.equal(body.items[2].unreadable, true);
@@ -70,8 +70,8 @@ test("scope defaults to the card's, is overridden by the query, and is refused o
   const bare = await (await hud.get("/api/card/reviews")).json();
   assert.equal(bare.count, 2);
   assert.deepEqual(paths(bare), [
-    "projects/example-one/raw/PR-101/state.json",
-    "projects/example-one/raw/PR-9/state.json",
+    "projects/example-one/prs/PR-101/raw/state.json",
+    "projects/example-one/prs/PR-9/raw/state.json",
   ]);
   assert.equal((await (await hud.get("/api/card/reviews?scope=open")).json()).count, 2);
   assert.equal((await (await hud.get("/api/card/reviews?scope=all")).json()).count, 3);
@@ -189,7 +189,7 @@ test("an absent root is an empty card, and the row budget marks truncation", asy
   // served are the first by the shape's order.
   const many = {};
   for (let i = 1; i <= 205; i++) {
-    many[`projects/p/raw/PR-${i}/state.json`] = JSON.stringify({
+    many[`projects/p/prs/PR-${i}/raw/state.json`] = JSON.stringify({
       repo: "owner/repo", pr: i, started: `2026-10-${String(1 + (i % 28)).padStart(2, "0")}T10:00:00.000Z`, ended: "2026-10-29T00:00:00.000Z", posted: null,
     });
   }

@@ -71,12 +71,25 @@ const claimsMd = claims === undefined ? undefined : !claims.length ? '' : ['RAN'
 
 const replay = `\`\`\`\n${e('replay.txt')}\n\`\`\`\nmanifest sha256: ${e('manifest.sha256') || 'absent'}`;
 
+// Earlier reviews of this PR, one row per archive state.mjs packed. The link is
+// relative to the note so it survives the tree moving as a whole. No head sha:
+// the open part of the artifact carries none.
+const historyFile = path.join(run, 'runs', 'history.jsonl');
+const history = fs.existsSync(historyFile)
+  ? fs.readFileSync(historyFile, 'utf8').split('\n').filter(Boolean).map(tryJSON).filter((h) => h && typeof h.archive === 'string')
+  : [];
+const historyMd = history.length
+  ? ['## History', '', '| Ended | Mode | Verdict | Archive |', '|---|---|---|---|',
+     ...history.map((h) => `| ${h.ended ?? '—'} | ${h.mode ?? '—'} | ${h.verdict ?? '—'} | [${path.basename(h.archive)}](${path.relative(path.dirname(path.resolve(outFile)), path.resolve(run, h.archive))}) |`), '']
+  : [];
+
 const md = [
   `# ${title}`, '',
   noH1(w('summary.md')), '',
   '## Confirmed findings', '', findingsMd, '',
   ...earlyMd,
   '## Job-level impact', '', noH1(w('impact.md')) || '_no impact section produced_', '',
+  ...historyMd,
   '---', '',
   details('Decision ledger', w('ledger.md')),
   details('Triage', noH1(w('triage.md'))),

@@ -31,9 +31,9 @@ async function serveFrozen(t, root) {
 /** A tree with every row kind: running, finished and posted, finished and unposted, unreadable. */
 function parityFixture(t) {
   const root = reviewsFixture(t);
-  fs.mkdirSync(path.join(root, "projects/example-two/raw/PR-8"), { recursive: true });
+  fs.mkdirSync(path.join(root, "projects/example-two/prs/PR-8/raw"), { recursive: true });
   fs.writeFileSync(
-    path.join(root, "projects/example-two/raw/PR-8/state.json"),
+    path.join(root, "projects/example-two/prs/PR-8/raw/state.json"),
     JSON.stringify({ ...finished, pr: 8, posted: null, started: "2026-10-27T12:00:00.000Z", ended: "2026-10-27T12:05:00.000Z" }),
   );
   return root;
@@ -100,14 +100,14 @@ test("the [cards.reviews] form serves the alias too", async (t) => {
   const hudRoot = parityFixture(t);
   fs.writeFileSync(
     path.join(hudRoot, "hud.toml"),
-    '[cards.reviews]\nkind = "fs"\nglob = "projects/*/raw/PR-*/state.json"\nshape = "review-state"\nscope = "open"\n',
+    '[cards.reviews]\nkind = "fs"\nglob = "projects/*/prs/PR-*/raw/state.json"\nshape = "review-state"\nscope = "open"\n',
   );
   const get = await serveFrozen(t, hudRoot);
   const old = await get("/api/reviews?scope=all");
   const card = await get("/api/card/reviews?scope=all");
   assert.equal(old.status, 200);
   assert.deepEqual(card.body.items, old.body.items);
-  assert.equal(old.body.glob, "projects/*/raw/PR-*/state.json");
+  assert.equal(old.body.glob, "projects/*/prs/PR-*/raw/state.json");
 });
 
 // --------------------------------------------------------------- the board

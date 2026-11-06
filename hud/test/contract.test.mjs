@@ -49,6 +49,7 @@ function varsFor(kind, over = {}) {
     project: "widget-service",
     slug: "flaky-retry-test",
     handle: "octo-cat",
+    pr: "76326",
     date: "2026-04-07",
     ext: "txt",
   };
@@ -87,7 +88,7 @@ test("decompose agrees with the reader's inferType on every composed path", () =
   // this grammar, the grammar has to already agree with it. `inbox` and `note`
   // are both `type: note` to the reader — the kind is the WRITE intent, the
   // type is what the tree renders.
-  const expected = { note: "note", inbox: "note", playbook: "playbook", context: "context", peer: "peer", raw: "note" };
+  const expected = { note: "note", inbox: "note", playbook: "playbook", context: "context", peer: "peer", pr: "note", raw: "note" };
   for (const kind of KIND_NAMES) {
     const rel = composePath(kind, varsFor(kind));
     assert.equal(inferType(rel), expected[kind], `${rel}: reader and declaration disagree`);
@@ -190,6 +191,7 @@ test("the container roles distinguish never-heard-of-it from ignored-on-purpose"
   // the two values apart is what lets the generated prose say which is which.
   assert.equal(CONTAINERS.notes.role, "unknown");
   assert.equal(CONTAINERS.raw.role, "display");
+  assert.equal(CONTAINERS.prs.role, "unknown");
   assert.notEqual(CONTAINER_ROLES.unknown, CONTAINER_ROLES.inert);
   for (const [name, c] of Object.entries(CONTAINERS)) {
     assert.ok(CONTAINER_ROLES[c.role], `${name} has role ${c.role}, which is not a declared role`);
@@ -197,6 +199,7 @@ test("the container roles distinguish never-heard-of-it from ignored-on-purpose"
   // The claim behind `unknown`, asserted rather than trusted: an entry inside
   // the container and one beside it read identically to the reader.
   assert.equal(inferType("projects/p/notes/2026-04-07-x.md"), inferType("projects/p/2026-04-07-x.md"));
+  assert.equal(inferType("projects/p/prs/PR-1/review.md"), inferType("projects/p/review.md"));
 });
 
 test("compose refuses a component that did not come from the normalizer", () => {
@@ -360,4 +363,14 @@ test("the bookkeeping line formats name only variables the writer has", () => {
   }
   assert.equal(BOOKKEEPING.index.semantics, "catalog");
   assert.equal(BOOKKEEPING.log.semantics, "append-only");
+});
+
+test("a PR folder is GitHub's spelling, PR-<number>, in both directions and nowhere else", () => {
+  assert.equal(composePath("pr", { project: "p", pr: "41", slug: "review" }), "projects/p/prs/PR-41/review.md");
+  assert.deepEqual(decomposePath("projects/p/prs/PR-41/review.md"), { kind: "pr", vars: { project: "p", pr: "41", slug: "review" } });
+  for (const bad of ["pr-41", "PR-", "PR-041", "PR-4a", "41"]) {
+    assert.equal(decomposePath(`projects/p/prs/${bad}/review.md`), null, bad);
+  }
+  assert.throws(() => composePath("pr", { project: "p", pr: "../x", slug: "review" }), /not a pull request number/);
+  assert.equal(pathPattern("pr"), "projects/<project>/prs/PR-<pr>/<slug>.md");
 });

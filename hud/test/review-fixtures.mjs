@@ -101,7 +101,7 @@ export const running = {
   gates: { ledger: "ok", triage: null, blocking: null },
   probes: { total: 20, ran: 19, failed: 0, unavailable: 1 },
   findings: { blocking: 0, non_blocking: 1, question: 1, observation: 0 },
-  note: "projects/example-one/notes/PR-101-still-running.md",
+  note: "projects/example-one/prs/PR-101/review.md",
   posted: null,
   extra: EXTRA_CANARY,
 };
@@ -123,7 +123,7 @@ export const finished = {
   gates: { ledger: "ok", triage: "ok", blocking: "ok" },
   probes: { total: 20, ran: 20, failed: 0, unavailable: 0 },
   findings: { blocking: 0, non_blocking: 0, question: 0, observation: 2 },
-  note: "projects/example-two/notes/PR-7-finished.md",
+  note: "projects/example-two/prs/PR-7/review.md",
   posted: {
     url: "https://github.com/owner/repo/pull/7#pullrequestreview-1",
     state: "APPROVED",
@@ -158,18 +158,18 @@ export const REVIEW_STATE_SERVED = {
 
 /**
  * Two projects, three runs: running, finished, and one whose state file is
- * not JSON. Plus the things the glob must not match: a file under `raw/PR-*`
+ * not JSON. Plus the things the glob must not match: a file in a run directory
  * that is not `state.json`, the note the running run points at, and a run in
  * a dot-prefixed project.
  */
 export function reviewsFixture(t) {
   return fixture(t, "hud-reviews-", {
-    "projects/example-one/raw/PR-101/state.json": JSON.stringify(running),
-    "projects/example-two/raw/PR-7/state.json": JSON.stringify(finished),
-    "projects/example-one/raw/PR-9/state.json": "not json {\n",
-    "projects/example-one/raw/PR-5/evidence.txt": "not a state file\n",
-    "projects/example-one/notes/PR-101-still-running.md": "# still running\n",
-    "projects/.hidden/raw/PR-3/state.json": JSON.stringify(finished),
+    "projects/example-one/prs/PR-101/raw/state.json": JSON.stringify(running),
+    "projects/example-two/prs/PR-7/raw/state.json": JSON.stringify(finished),
+    "projects/example-one/prs/PR-9/raw/state.json": "not json {\n",
+    "projects/example-one/prs/PR-5/raw/evidence.txt": "not a state file\n",
+    "projects/example-one/prs/PR-101/review.md": "# still running\n",
+    "projects/.hidden/prs/PR-3/raw/state.json": JSON.stringify(finished),
   });
 }
 
