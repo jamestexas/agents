@@ -288,7 +288,8 @@ run entered recorded an `output`, or was recorded as skipped. A `--fast`
 run gets a last line, `fast: PRELIMINARY — not postable`, and a non-zero
 exit regardless of the gates.
 
-Print the notes path and the check lines. Append one line to
+Print the notes path and the check lines. `finish` has already added the
+note's `index.md` line (once per path); append one line to
 `$HUD_ROOT/log.md`. Stop here unless `--post`.
 
 ## Run state
