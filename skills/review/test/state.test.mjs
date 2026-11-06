@@ -546,3 +546,29 @@ test('replaying a whole run reproduces state.json byte for byte', () => {
   assert.ok(fs.readFileSync(path.join(dir, 'state.json')).equals(first), 'state.json is byte-identical');
   assert.equal(events(dir).length, lines);
 });
+
+test('finish catalogs the note in index.md once, and leaves a tree without one alone', () => {
+  const dir = copyGood();
+  const hud = fs.mkdtempSync(path.join(os.tmpdir(), 'rv-hud-'));
+  fs.writeFileSync(path.join(hud, 'index.md'), '- [Other](projects/p/notes/x.md) — note');
+  const note = 'projects/p/prs/PR-1/review.md';
+  const at = (args, input, root = hud) => spawnSync(process.execPath, [state, dir, ...args], { encoding: 'utf8', input, env: { ...env, HUD_ROOT: root } });
+  assert.equal(at(['init', '--pending', 'pr=owner/repo#1']).status, 0);
+  assert.equal(at(['init', 'viewer=v']).status, 0);
+  walk(dir);
+  assert.equal(at(['finish', `note=${note}`, 'gates=-'], 'ledger: x — ok\n').status, 0);
+  const lines = () => fs.readFileSync(path.join(hud, 'index.md'), 'utf8').split('\n').filter((l) => l.includes(`](${note})`));
+  assert.equal(lines().length, 1);
+  assert.match(lines()[0], /^- \[PR 1[^\]]*\]\(projects\/p\/prs\/PR-1\/review\.md\) — pr review/);
+  assert.match(fs.readFileSync(path.join(hud, 'index.md'), 'utf8'), /— note\n- \[PR 1/, 'a file with no trailing newline gets one before the new line');
+  // A finish re-run with new gates appends to the log; the index keeps one line.
+  assert.equal(at(['finish', `note=${note}`, 'gates=-'], 'ledger: x — fail\n').status, 0);
+  assert.equal(lines().length, 1);
+
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'rv-hud-'));
+  const dir2 = copyGood();
+  const at2 = (args, input) => spawnSync(process.execPath, [state, dir2, ...args], { encoding: 'utf8', input, env: { ...env, HUD_ROOT: bare } });
+  at2(['init', 'viewer=v']); walk(dir2);
+  assert.equal(at2(['finish', `note=${note}`, 'gates=-'], 'ledger: x — ok\n').status, 0);
+  assert.ok(!fs.existsSync(path.join(bare, 'index.md')), 'a tree without index.md is not given one');
+});

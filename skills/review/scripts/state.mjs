@@ -29,6 +29,7 @@
 //          from stdin when gates=- (pipe `check.mjs <run> | state.mjs ...`),
 //          otherwise check.mjs is re-run here. Explicit rather than "stdin if
 //          not a TTY", so a harness with an open-but-silent stdin cannot hang.
+//          A note under HUD_ROOT also gets its index.md line, once per path.
 //   early                copy work/early.json (early-signal.mjs's list) to
 //                        `early`; an absent or unreadable file is []
 //   output <phase>       record that questions|settle|refute|triage|teach left
@@ -286,6 +287,7 @@ const ops = {
     const t = transition(s, 'rendered');
     if (t.skipped.length) append('skip', { skipped: t.skipped });
     append('finish', data);
+    catalogNote(data.note, s, data.verdict);
   },
 
   early() {
@@ -321,6 +323,21 @@ const ops = {
     append('posted', data);
   },
 };
+
+// Every HUD write gets an index.md line (the HUD skill's §7); a review note
+// written without one is an orphan the tree's catalog never shows. One line
+// per path, so a re-review of the same PR keeps the line it already has. A
+// scratch-path note, or a tree with no index.md, is left alone.
+function catalogNote(note, s, verdict) {
+  if (typeof note !== 'string' || note === '' || path.isAbsolute(note)) return;
+  const hud = process.env.HUD_ROOT || path.join(os.homedir(), 'hud');
+  const index = path.join(hud, 'index.md');
+  const text = readIf(index);
+  if (text === null || text.includes(`](${note})`)) return;
+  const title = `${s.pr ? `PR ${s.pr}` : 'Review'}${s.title ? ` — ${s.title}` : ''}`.replace(/[[\]]/g, '');
+  const sep = text === '' || text.endsWith('\n') ? '' : '\n';
+  fs.appendFileSync(index, `${sep}- [${title}](${note}) — pr review${verdict ? `: ${verdict}` : ''}\n`);
+}
 
 // The HUD links a note by its path under HUD_ROOT and refuses an absolute
 // one; an absolute path under the HUD tree is relativised, anything else is
