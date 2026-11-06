@@ -73,6 +73,16 @@ const apply = {
     if (d.review_state) s.review_state = d.review_state;
   },
   posted(s, d, at) { closeOpen(s, at); s.phase = 'posted'; s.posted = { url: d.url, state: d.state, at }; },
+  // An earlier version of the skill wrote `verdict` and `post` where it now
+  // writes `finish` and `posted`, with no `finish` before them. Those runs
+  // did end, so they fold as ended instead of reading as open forever, which
+  // would refuse the next review of the same PR.
+  verdict(s, d) { if (d.verdict !== undefined) s.verdict = d.verdict; },
+  post(s, d, at) {
+    closeOpen(s, at); s.phase = 'posted';
+    if (s.ended === null) s.ended = at;
+    s.posted = { url: d.url ?? null, state: d.state ?? null, at };
+  },
   abandon(s, d, at) { closeOpen(s, at); s.phase = 'abandoned'; s.ended = at; s.abandoned = d.reason ?? 'unknown'; },
   fail(s, d, at) { closeOpen(s, at); s.phase = 'failed'; s.ended = at; s.failed = d.reason ?? 'unknown'; },
 };

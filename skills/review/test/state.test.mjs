@@ -309,6 +309,23 @@ test('a jump over a phase this mode runs is refused', () => {
   assert.match(r.stderr, /questions has not run/);
 });
 
+test('a log from an earlier skill version that ended with verdict + post folds as ended, so --new can start over it', () => {
+  const dir = copyGood();
+  const at = (m) => `2026-10-30T20:0${m}:00Z`;
+  const legacy = [
+    { at: at(0), op: 'init-pending', data: { repo: 'owner/repo', pr: 1, mode: 'default' } },
+    { at: at(1), op: 'init', data: { mode: 'default', head: 'aaa' } },
+    { at: at(2), op: 'phase', data: { name: 'teach' } },
+    { at: at(3), op: 'verdict', data: { verdict: 'REQUEST_CHANGES', blocking: 1 } },
+    { at: at(4), op: 'post', data: { review_id: 1, state: 'CHANGES_REQUESTED' } },
+  ];
+  fs.writeFileSync(path.join(dir, 'events.jsonl'), legacy.map((e) => JSON.stringify(e)).join('\n') + '\n');
+  const r = run(dir, ['init', '--pending', '--new', 'pr=owner/repo#1']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(events(dir).map((e) => e.op), ['init-pending']);
+  assert.ok(fs.readdirSync(dir).some((f) => /^events\.superseded-.*\.jsonl$/.test(f)), 'the legacy log is set aside');
+});
+
 test('a run from before events.jsonl is still readable and is never rewritten', () => {
   const dir = copyGood();
   const legacy = { version: 1, phase: 'rendered', phases: {}, ended: '2026-01-01T00:00:00Z' };

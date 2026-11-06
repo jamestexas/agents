@@ -117,7 +117,12 @@ if [ "$MODE" = pr ]; then
             u=$2; sub(/\.git$/, "", u); n=length(r)
             if (length(u) > n && substr(u, length(u)-n+1) == r && substr(u, length(u)-n, 1) ~ /[:\/]/) { print $1; exit } }')"
         [ -n "$REMOTE" ] || die "no remote in $REPO_DIR points at $REPO"
-        probe core fetch -- git -C "$REPO_DIR" fetch -q "$REMOTE" "refs/pull/$PR/head:refs/review/$PR" "$BASE_BRANCH"
+        # Retried only on a busy ref lock: reviews running at once against one
+        # clone race on it. The helper's path travels by --env, so the recorded
+        # command (and the manifest hash) does not depend on the install path.
+        # shellcheck disable=SC2016  # $FETCH_RETRY expands inside the probe's bash, by design
+        probe core fetch --env "FETCH_RETRY=$HERE/git-fetch-retry.sh" -- bash -c '"$FETCH_RETRY" "$@"' _ \
+            "$REPO_DIR" "$REMOTE" "refs/pull/$PR/head:refs/review/$PR" "$BASE_BRANCH"
         require_ran core/fetch
         BASE="$REMOTE/$BASE_BRANCH"
         TMP="${TMPDIR:-/tmp}"; WT="${REVIEW_WORKTREE_ROOT:-${TMP%/}/review-worktrees}/${REPO//\//-}-$PR"

@@ -19,8 +19,11 @@ Write three files:
   if `probes/core/pr-checks.out` shows any check failing or still pending,
   or that probe is UNAVAILABLE, an APPROVE becomes COMMENT, and the verdict
   line names the checks. The code may be fine, but an approval on an
-  unfinished or red PR claims something nobody saw. Phase 7 re-checks this
-  against the live PR before posting.
+  unfinished or red PR claims something nobody saw. A check that waits on a
+  review (a codeowners or approval gate) doesn't count. It is pending because
+  the approval hasn't been posted yet, so capping on it would block the very
+  approval it waits for. Name it in the verdict line instead. Phase 7
+  re-checks this against the live PR before posting.
 - `{{WORK}}/impact.md`: one bullet per job-level axis (deploy, metrics,
   callers, on-call), each naming the probe that produced it or saying
   `UNAVAILABLE`.
