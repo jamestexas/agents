@@ -62,7 +62,9 @@
 #                configured upstream answers. Always exits 0 — it reports state, it does
 #                not assert it. --json emits the same facts as one document
 #                (schema hud-status/v1); the exit code is the same.
-#   open         open the HUD in your browser
+#   open [PATH]  open the HUD in your browser; with PATH (relative to the
+#                tree or absolute under it, .md optional), open that
+#                entry's page, /n/<path>
 #   logs [-f] [-n N]
 #                tail the server log ($HUD_ROOT/.generated/service.log)
 #   root         print the resolved HUD_ROOT
@@ -1023,6 +1025,20 @@ cmd_status() {
 
 cmd_open() {
     load_config
+    # With a path, open that entry's page rather than the front page. The
+    # path is checked here, because the page answers 200 for any path (it
+    # resolves in the browser) and a typo would open a quiet "not found".
+    if [[ $# -gt 0 ]]; then
+        local rel="$1" abs
+        [[ "$rel" == /* ]] || rel="$HUD_ROOT_R/$rel"
+        abs="$rel"
+        [[ -f "$abs" || "$abs" == *.md ]] || abs="$abs.md"
+        [[ -f "$abs" ]] || die "no entry at $abs"
+        abs="$(cd -- "$(dirname -- "$abs")" && pwd -P)/$(basename -- "$abs")"
+        [[ "$abs" == "$HUD_ROOT_R"/* ]] || die "$1 is not under the tree at $HUD_ROOT_R"
+        rel="${abs#"$HUD_ROOT_R"/}"
+        URL="${URL}n/${rel%.md}"
+    fi
     # Say what is being opened, and whether anything is there to open. Handing
     # the URL to the OS is silent by construction: if the tab already exists
     # the browser just focuses it, and if the server is down you get a dead

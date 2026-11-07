@@ -90,6 +90,13 @@ resolve routes a note to `inbox/` rather than guessing at one; a destination
 that already exists is refused rather than overwritten. A refusal is the only
 non-zero exit, and nothing is written when one happens.
 
+**Hand the user the link.** Every markdown entry has a page at
+`http://<host>:<port>/n/<path without .md>`, and `hud new` prints it as the
+`url` row (`url` in `--json`). Give that link when you report the write; never
+guess at routes. For an entry written another way, `hud open <path>` opens its
+page. The page loads the entry in the browser, so a curl of it shows the app
+shell, not the note: that is not a missing route.
+
 `hud new` is the *mechanism*; §3 below is the *contract* it implements, and is
 what you need when you are reading an existing entry, editing one in place, or
 writing into a tree whose `HUD.md` (§1) overrides something here.

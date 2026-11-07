@@ -33,7 +33,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { defaultRoot } from "./server.mjs";
+import { DEFAULT_PORT, defaultRoot, loadConfig, localDay } from "./server.mjs";
 import {
   BOOKKEEPING,
   KINDS,
@@ -266,7 +266,7 @@ export function plan(opts = {}) {
       }
     }
 
-    const date = dateArg || today || new Date().toISOString().slice(0, 10);
+    const date = dateArg || today || localDay();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) refuse(`--date wants YYYY-MM-DD, got ${date}`);
     doc.date = date;
 
@@ -330,6 +330,7 @@ export function plan(opts = {}) {
     const rel = composePath(effectiveKind, vars);
     doc.path = rel;
     doc.absolute = path.join(root, rel);
+    doc.url = noteUrl(root, rel);
 
     // Frontmatter: what the kind emits, then what --set adds, in order.
     const pairs = [];
@@ -400,6 +401,7 @@ function skeleton(kind) {
     project: null,
     path: null,
     absolute: null,
+    url: null,
     slug: null,
     date: null,
     title: null,
@@ -555,6 +557,7 @@ export function report(doc) {
     row("routed", "no project resolved — filed under inbox/ rather than guessed at");
   }
   row("dest", doc.path);
+  if (doc.url) row("url", doc.url);
   const keys = Object.keys(doc.frontmatter);
   if (keys.length > 0) {
     out.push("  frontmatter");
@@ -565,6 +568,26 @@ export function report(doc) {
   out.push(`  ${"index".padEnd(11)} ${doc.index.action.padEnd(7)} ${doc.index.line}`);
   out.push(`  ${"log".padEnd(11)} ${doc.log.action.padEnd(7)} ${doc.log.line}`);
   return out.join("\n");
+}
+
+/**
+ * Where the HUD page shows this entry: the `/n/<path>` deep link, the path
+ * without `.md`. Host and port resolve as the `hud` CLI resolves them
+ * (HUD_PORT, then hud.toml [serve], then the default), so the link points at
+ * the HUD that is actually running. A raw drop is listed, never opened, so it
+ * has no page and no link.
+ */
+export function noteUrl(root, rel) {
+  if (!rel.endsWith(".md")) return null;
+  let serve = {};
+  try {
+    serve = loadConfig(root).serve ?? {};
+  } catch {
+    // An unreadable config still has a default HUD to point at.
+  }
+  const host = serve.host || "127.0.0.1";
+  const port = process.env.HUD_PORT || serve.port || DEFAULT_PORT;
+  return `http://${host}:${port}/n/${encodeURI(rel.replace(/\.md$/, ""))}`;
 }
 
 /** The document a consumer sees: the internals of `execute` are not part of it. */

@@ -69,11 +69,10 @@ test("bare md without frontmatter is listed with defaults", (t) => {
 
   const bare = byPath(tree, "inbox", "inbox/no-date-no-heading.md");
   assert.equal(bare.title, "no-date-no-heading", "falls back to filename without .md");
-  const mtimeDay = fs
-    .statSync(path.join(root, "inbox/no-date-no-heading.md"))
-    .mtime.toISOString()
-    .slice(0, 10);
-  assert.equal(bare.date, mtimeDay, "falls back to mtime day");
+  const mtime = fs.statSync(path.join(root, "inbox/no-date-no-heading.md")).mtime;
+  const pad = (n) => String(n).padStart(2, "0");
+  const mtimeDay = `${mtime.getFullYear()}-${pad(mtime.getMonth() + 1)}-${pad(mtime.getDate())}`;
+  assert.equal(bare.date, mtimeDay, "falls back to the mtime's local day");
   assert.equal(bare.status, "active");
 });
 
