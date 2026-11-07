@@ -621,3 +621,16 @@ test("kind pr files a note in the PR's folder, GitHub's PR-<n>, and refuses with
     assert.match(r.stderr, c.re);
   }
 });
+
+test("hud new names the entry's page: /n/<path> on the configured port, none for a raw drop", (t) => {
+  const ctx = tree(t, "url");
+  fs.mkdirSync(path.join(ctx.root, "projects/widget"), { recursive: true });
+  const note = JSON.parse(run(ctx, ["note", "--project", "widget", "--title", "Linked", "--date", DAY, "--dry-run", "--json"]));
+  assert.match(note.url, /^http:\/\/127\.0\.0\.1:\d+\/n\/projects\/widget\/notes\/2026-04-07-linked$/);
+  const human = run(ctx, ["note", "--project", "widget", "--title", "Linked", "--date", DAY, "--dry-run"]);
+  assert.match(human, /\n  url {9}http:\/\/127\.0\.0\.1:\d+\/n\/projects\/widget\/notes\/2026-04-07-linked\n/);
+  const port = JSON.parse(run(ctx, ["note", "--project", "widget", "--title", "Linked", "--date", DAY, "--dry-run", "--json"], { env: { ...process.env, HUD_ROOT: ctx.root, PATH: offlinePath(), HUD_PORT: "4999" } }));
+  assert.match(port.url, /^http:\/\/127\.0\.0\.1:4999\//, "HUD_PORT wins, as it does for the CLI");
+  const raw = JSON.parse(run(ctx, ["raw", "--project", "widget", "--title", "drop", "--ext", "txt", "--body", "x", "--date", DAY, "--dry-run", "--json"]));
+  assert.equal(raw.url, null, "a raw drop is listed, never opened, so it has no page");
+});

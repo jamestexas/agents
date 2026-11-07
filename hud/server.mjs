@@ -470,8 +470,19 @@ function firstHeading(body) {
   return m ? m[1] : null;
 }
 
+/**
+ * The calendar day `ms` falls on where the HUD runs, as YYYY-MM-DD. Not
+ * toISOString: that is the UTC day, so anything written in the evening west
+ * of Greenwich was filed under tomorrow.
+ */
+export function localDay(ms = Date.now()) {
+  const d = new Date(ms);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 function isoDay(ms) {
-  return new Date(ms).toISOString().slice(0, 10);
+  return localDay(ms);
 }
 
 function asArray(v) {

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 // Tests for hud-contract.mjs — the declaration the write path, the read path
 // and the doc generator all read.
 //
@@ -373,4 +374,14 @@ test("a PR folder is GitHub's spelling, PR-<number>, in both directions and nowh
   }
   assert.throws(() => composePath("pr", { project: "p", pr: "../x", slug: "review" }), /not a pull request number/);
   assert.equal(pathPattern("pr"), "projects/<project>/prs/PR-<pr>/<slug>.md");
+});
+
+test("an entry's default day is the local calendar day, not the UTC one", () => {
+  // 02:00 UTC on Nov 7 is still the evening of Nov 6 in Denver.
+  const at = Date.UTC(2026, 10, 7, 2, 0, 0);
+  const day = (tz) => execFileSync(process.execPath, ["--input-type=module", "-e",
+    `import("${new URL("../server.mjs", import.meta.url).href}").then((m) => process.stdout.write(m.localDay(${at})))`],
+    { encoding: "utf8", env: { ...process.env, TZ: tz } });
+  assert.equal(day("America/Denver"), "2026-11-06");
+  assert.equal(day("UTC"), "2026-11-07");
 });
