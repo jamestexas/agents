@@ -219,3 +219,16 @@ test("the mermaid renderer is vendored and click directives stay links", () => {
   assert.match(html, /startOnLoad:\s*false/, "rendering is driven from openDoc");
   assert.match(html, /suppressErrorRendering:\s*true/, "a parse error must not draw over the code");
 });
+
+test("a rendered diagram gets pan/zoom from in-page code, after mermaid, with no new script", () => {
+  assert.match(html, /renderMermaidBlocks\(rendered, window\.mermaid\)\s*\.then\(\(\) => \{\s*for \(const block of rendered\.querySelectorAll\('\.mermaid-block\[data-mermaid="rendered"\]'\)\) attachDiagramZoom\(block\);/);
+  const srcs = [...html.matchAll(/<script[^>]*\bsrc="([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(srcs.every((s) => s.startsWith("/ui/")), "every script still loads from /ui/");
+  assert.match(html, /function zoomable\(viewport, svg\)/);
+  assert.match(html, /if \(ev\.ctrlKey \|\| ev\.metaKey\) \{/, "ctrl/⌘ + wheel zooms; plain wheel pans");
+  assert.match(html, /\{ passive: false \}/, "the wheel can be claimed inside the viewport");
+  assert.match(html, /if \(scale >= 0\.75 && vb\.height \* scale <= maxH\) return;/, "a diagram that reads fine fitted is left as drawn");
+  assert.match(html, /btn\("reset", /, "a reset back to the first view");
+  assert.match(html, /if \(!moved\) return;\s*moved = false;\s*ev\.preventDefault\(\);\s*ev\.stopPropagation\(\);/, "a drag never fires a node link");
+  assert.match(html, /ev\.key === "Escape"/, "the overlay closes on Esc");
+});

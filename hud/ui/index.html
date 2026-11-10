@@ -419,6 +419,63 @@
         max-width: 100%;
         height: auto;
       }
+      /* A rendered diagram is a pan/zoom viewport (attachDiagramZoom): the
+         SVG keeps its natural size and is scaled by a transform, so text
+         stays readable when zoomed in. The block stops scrolling itself, and
+         the viewport clips. */
+      #docbody .mermaid-block[data-zoom="on"] {
+        overflow: hidden;
+        padding: 0;
+        text-align: left;
+      }
+      .diagram-viewport {
+        position: relative;
+        overflow: hidden;
+        height: 60vh;
+        cursor: grab;
+        touch-action: none;
+      }
+      .diagram-viewport.panning {
+        cursor: grabbing;
+      }
+      .diagram-viewport > svg {
+        position: absolute;
+        left: 0;
+        top: 0;
+      }
+      .diagram-tools {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        padding: 6px 8px;
+        border-bottom: 1px solid var(--card);
+        font: 12px/1 var(--mono);
+      }
+      .diagram-tools button {
+        font: inherit;
+        color: var(--fg, inherit);
+        background: var(--card);
+        border: 1px solid var(--card);
+        border-radius: 4px;
+        padding: 4px 8px;
+        cursor: pointer;
+      }
+      .diagram-tools .hint {
+        margin-left: auto;
+        color: var(--muted);
+      }
+      .diagram-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        display: flex;
+        flex-direction: column;
+        background: var(--panel);
+      }
+      .diagram-overlay .diagram-viewport {
+        flex: 1;
+        height: auto;
+      }
       /* Mermaid marks a node carrying a click directive `clickable`; say so
          with the cursor, since the link is drawn inside the SVG and gets none
          of the page's own anchor styling. */
@@ -1528,6 +1585,184 @@
       // renderMermaidBlocks:end
 
       /**
+       * Pan and zoom for a rendered diagram. A graph wider than the column
+       * has text too small to read when fitted, so the block becomes a
+       * viewport. It opens at the column's width (never above full size),
+       * from the top, so labels are readable at once; wheel and drag pan,
+       * ctrl/⌘ + wheel (and a trackpad pinch, which arrives as ctrl + wheel)
+       * zooms around the pointer, and the buttons zoom, reset to that first
+       * view, fit the whole graph, or open it full size over the page. A drag
+       * never fires the click it ends on, so a node's link only opens on a
+       * click that did not move. The SVG is mermaid's own output, moved, not
+       * re-rendered, so its click links keep working.
+       */
+      function zoomable(viewport, svg) {
+        const vb = svg.viewBox && svg.viewBox.baseVal;
+        const w = vb && vb.width ? vb.width : svg.getBoundingClientRect().width || 1;
+        const h = vb && vb.height ? vb.height : svg.getBoundingClientRect().height || 1;
+        svg.removeAttribute("width");
+        svg.removeAttribute("height");
+        svg.style.maxWidth = "none";
+        svg.style.width = w + "px";
+        svg.style.height = h + "px";
+        svg.style.transformOrigin = "0 0";
+        const view = { s: 1, x: 0, y: 0 };
+        const apply = () => {
+          svg.style.transform = "translate(" + view.x + "px," + view.y + "px) scale(" + view.s + ")";
+        };
+        const clamp = (s) => Math.min(8, Math.max(0.05, s));
+        const zoomAt = (factor, cx, cy) => {
+          const s = clamp(view.s * factor);
+          view.x = cx - ((cx - view.x) * s) / view.s;
+          view.y = cy - ((cy - view.y) * s) / view.s;
+          view.s = s;
+          apply();
+        };
+        const fit = () => {
+          const box = viewport.getBoundingClientRect();
+          view.s = clamp(Math.min(box.width / w, box.height / h));
+          view.x = (box.width - w * view.s) / 2;
+          view.y = (box.height - h * view.s) / 2;
+          apply();
+        };
+        const reset = () => {
+          const box = viewport.getBoundingClientRect();
+          view.s = clamp(Math.min(1, box.width / w));
+          view.x = Math.max(0, (box.width - w * view.s) / 2);
+          view.y = 0;
+          apply();
+        };
+        viewport.addEventListener(
+          "wheel",
+          (ev) => {
+            ev.preventDefault();
+            if (ev.ctrlKey || ev.metaKey) {
+              const box = viewport.getBoundingClientRect();
+              zoomAt(Math.exp(-ev.deltaY * 0.01), ev.clientX - box.left, ev.clientY - box.top);
+              return;
+            }
+            view.x -= ev.deltaX;
+            view.y -= ev.deltaY;
+            apply();
+          },
+          { passive: false },
+        );
+        let drag = null;
+        let moved = false;
+        viewport.addEventListener("pointerdown", (ev) => {
+          if (ev.button !== 0) return;
+          drag = { px: ev.clientX, py: ev.clientY, x: view.x, y: view.y };
+          moved = false;
+        });
+        viewport.addEventListener("pointermove", (ev) => {
+          if (!drag) return;
+          const dx = ev.clientX - drag.px;
+          const dy = ev.clientY - drag.py;
+          if (!moved && Math.hypot(dx, dy) < 4) return;
+          if (!moved) {
+            moved = true;
+            viewport.setPointerCapture(ev.pointerId);
+            viewport.classList.add("panning");
+          }
+          view.x = drag.x + dx;
+          view.y = drag.y + dy;
+          apply();
+        });
+        const end = () => {
+          drag = null;
+          viewport.classList.remove("panning");
+        };
+        viewport.addEventListener("pointerup", end);
+        viewport.addEventListener("pointercancel", end);
+        // Capture phase, so the click a drag ends on never reaches a node link.
+        viewport.addEventListener(
+          "click",
+          (ev) => {
+            if (!moved) return;
+            moved = false;
+            ev.preventDefault();
+            ev.stopPropagation();
+          },
+          true,
+        );
+        const center = (factor) => {
+          const box = viewport.getBoundingClientRect();
+          zoomAt(factor, box.width / 2, box.height / 2);
+        };
+        return { fit, reset, zoomIn: () => center(1.25), zoomOut: () => center(0.8) };
+      }
+
+      function diagramTools(ctl, extra) {
+        const bar = node("div", "diagram-tools");
+        const btn = (label, title, fn) => {
+          const b = node("button", null, label);
+          b.type = "button";
+          b.title = title;
+          b.addEventListener("click", fn);
+          bar.appendChild(b);
+        };
+        btn("−", "zoom out", ctl.zoomOut);
+        btn("+", "zoom in", ctl.zoomIn);
+        btn("reset", "back to the first view: the column's width, from the top", ctl.reset);
+        btn("fit", "fit the whole diagram", ctl.fit);
+        for (const [label, title, fn] of extra) btn(label, title, fn);
+        bar.appendChild(node("span", "hint", "scroll or drag to pan · ctrl/⌘ + scroll to zoom"));
+        return bar;
+      }
+
+      /**
+       * Wrap a rendered block's SVG in a viewport with tools, idempotent per
+       * block. Only a diagram that would not read well fitted to the column
+       * gets one: fitting would shrink it below three quarters of its size,
+       * or leave it taller than the viewport. One that reads fine, such as a
+       * board's legend, is left as drawn, since a viewport would only cost it
+       * space. The viewport is no taller than the diagram at its first view.
+       */
+      function attachDiagramZoom(block) {
+        const svg = block.querySelector(":scope > svg");
+        if (!svg || block.dataset.zoom === "on") return;
+        const vb = svg.viewBox && svg.viewBox.baseVal;
+        if (!vb || !vb.width || !vb.height) return;
+        const maxH = window.innerHeight * 0.6;
+        const scale = Math.min(1, block.clientWidth / vb.width);
+        if (scale >= 0.75 && vb.height * scale <= maxH) return;
+        block.dataset.zoom = "on";
+        const viewport = node("div", "diagram-viewport");
+        block.appendChild(viewport);
+        viewport.appendChild(svg);
+        const ctl = zoomable(viewport, svg);
+        block.insertBefore(diagramTools(ctl, [["open full size", "open the diagram over the whole page", () => openDiagramOverlay(svg)]]), viewport);
+        viewport.style.height = Math.min(maxH, vb.height * scale) + "px";
+        ctl.reset();
+      }
+
+      /**
+       * The diagram over the whole page, with the same controls; Esc or the
+       * close button removes it. A copy of the SVG, so closing it leaves the
+       * block on the page exactly as it was.
+       */
+      function openDiagramOverlay(svg) {
+        const overlay = node("div", "diagram-overlay");
+        const viewport = node("div", "diagram-viewport");
+        const copy = svg.cloneNode(true);
+        copy.style.transform = "";
+        viewport.appendChild(copy);
+        const close = () => {
+          overlay.remove();
+          document.removeEventListener("keydown", onKey);
+        };
+        const onKey = (ev) => {
+          if (ev.key === "Escape") close();
+        };
+        const ctl = zoomable(viewport, copy);
+        overlay.appendChild(diagramTools(ctl, [["close", "close (Esc)", close]]));
+        overlay.appendChild(viewport);
+        document.body.appendChild(overlay);
+        document.addEventListener("keydown", onKey);
+        ctl.reset();
+      }
+
+      /**
        * Mermaid's theme, expressed in this page's own palette, so a diagram
        * reads as part of the HUD rather than as a pasted-in image. The values
        * come from the CSS custom properties rather than a second copy of the
@@ -1608,7 +1843,11 @@
             // laid-out labels, and no part of reading the entry should wait on
             // it. Unawaited on purpose — a throw in here must not turn the
             // entry into the "could not load" message below.
-            renderMermaidBlocks(rendered, window.mermaid).catch(() => {});
+            renderMermaidBlocks(rendered, window.mermaid)
+              .then(() => {
+                for (const block of rendered.querySelectorAll('.mermaid-block[data-mermaid="rendered"]')) attachDiagramZoom(block);
+              })
+              .catch(() => {});
           } else {
             // Raw drops and non-markdown are shown verbatim, never interpreted.
             const pre = document.createElement("pre");

@@ -50,9 +50,11 @@ writer, a ticket, a bead, a service, a person's queue; the shape is the same.
 | `generated` | yes | ISO-8601. When the producer ran; the page prints it and the history snapshot is named by it. |
 | `tags` | no | Extra tags for the page's frontmatter; `board` is always added. |
 | `layout` | no | `LR` (default) or `TD`: the direction of the rendered graph. Use `TD` when the graph fans out into many parallel branches. |
-| `sources` | no | Where the producer looked: `kind` (git, gh, linear, beads, tf, …), `ref`, optional `at`. Printed under the title. |
+| `group_by` | no | A declared column id. The table is split into one table per run of equal values in that column, each under a subheading, in row order; sort the rows to group them. A row with no value for the column groups under `(none)`. |
+| `sources` | no | Where the producer looked: `kind` (git, gh, linear, beads, tf, …), `ref`, optional `at`. Listed as a table under the title. |
 | `columns` | no | The table's columns, in order: `id` (used by cells) and `label`. No columns, no table. |
 | `rows` | yes | The things. `id` is unique and is what edges name; `label`, optional `sub`, free-text `status`, `external` (outside this board, drawn dashed), `url`, and `cells` keyed by column id. |
+| `rows[].shape` | no | The node's shape in the graph: `group` (stadium, e.g. an initiative), `box` (rectangle, e.g. a project), `item` (rounded, e.g. an issue) or `gap` (hexagon, known work with no ticket). Anything else is refused; no shape draws the plain rectangle. When a board uses a shape or more than one status class, a legend sampling exactly those is drawn above the graph, in its own block. |
 | `rows[].cells.<col>` | no | `value` (string, number, boolean or null), optional `chip` (a short class word shown in a code span), `source` (where the value came from), `url`. |
 | `edges` | no | `from`/`to` are row ids. `kind` is `dep` (declared, solid) or `inferred` (dotted, with `why` on the edge). |
 | `notes` | no | Sections after the table: `title` plus `items`, one bullet each. |
