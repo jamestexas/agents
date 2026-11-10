@@ -15,6 +15,9 @@ import {
   renderBoardMarkdown,
   renderGraph,
   renderLegend,
+  renderOverview,
+  renderGroupGraph,
+  groupsOf,
   SHAPES,
   statusClass,
   validateBoard,
@@ -173,15 +176,45 @@ test("group_by must name a declared column", () => {
   }
 });
 
-test("group_by splits the table where the column's value changes, in row order", () => {
+test("group_by draws an overview of the groups and one section per group, the first open", () => {
   const doc = board({ group_by: "stage" });
   doc.rows[1].cells.stage.value = "shadow";
   doc.rows.push({ id: "w-three", label: "Widget three", cells: { stage: { value: "ces" } } });
+  doc.edges.push({ from: "w-three", to: "w-one", kind: "dep" }, { from: "w-three", to: "w-two", kind: "dep" });
+  const groups = groupsOf(doc);
+  assert.deepEqual(groups.map((g) => [g.value, g.rows.map((r) => r.id)]), [["shadow", ["w-one", "w-two"]], ["(none)", ["EXT-1"]], ["ces", ["w-three"]]]);
+  assert.deepEqual(groups.map((g) => g.id), ["group-1-shadow", "group-2-none", "group-3-ces"]);
+
+  const overview = renderOverview(doc, groups);
+  assert.match(overview, /g0\(\["shadow<br\/>2 rows · 1 done · 1 started"\]\):::started/);
+  assert.match(overview, /g2 -->\|"2"\| g0/, "two edges from ces into shadow fold into one, counted");
+  assert.match(overview, /g1 -\.->\|"1"\| g0/, "an inferred-only crossing stays dotted");
+  assert.match(overview, /click g0 "#group-1-shadow"/);
+
   const md = renderBoardMarkdown(doc);
-  const heads = [...md.matchAll(/^### (.+)$/gm)].map((m) => m[1]);
-  assert.deepEqual(heads, ["shadow", "(none)", "ces"], "one subheading per run of equal values; a row without the cell is (none)");
-  assert.equal((md.match(/^\| \| Stage \| Prod \|$/gm) || []).length, 3, "each group carries its own header row");
-  assert.equal(/^### /m.test(renderBoardMarkdown(board())), false, "no group_by, one table");
+  const sections = [...md.matchAll(/^<details class="board-group" id="([^"]+)"( open)?>$/gm)].map((m) => [m[1], !!m[2]]);
+  assert.deepEqual(sections, [["group-1-shadow", true], ["group-2-none", false], ["group-3-ces", false]], "the first section starts open");
+  assert.match(md, /^<summary>shadow · 2 rows<\/summary>$/m);
+  assert.equal((md.match(/^\| \| Stage \| Prod \|$/gm) || []).length, 3, "each section carries its own table");
+  assert.equal(/^## Table$/m.test(md), false, "the sections replace the one table");
+  assert.equal(/<details/.test(renderBoardMarkdown(board())), false, "no group_by, the page as before");
+});
+
+test("a group's graph stubs the far end of an edge that leaves it, linked to that group", () => {
+  const doc = board({ group_by: "stage" });
+  doc.rows[1].cells.stage.value = "shadow";
+  doc.rows.push({ id: "w-three", label: "Widget three", cells: { stage: { value: "ces" } } });
+  doc.edges.push({ from: "w-three", to: "w-one", kind: "dep" });
+  const groups = groupsOf(doc);
+  const shadow = renderGroupGraph(doc, groups, 0);
+  assert.match(shadow, /n1 --> n0/, "the edge inside the group is drawn as before");
+  assert.match(shadow, /x\d\["w-three<br\/>in ces"\]:::external/);
+  assert.match(shadow, /click x\d "#group-3-ces"/);
+  assert.match(shadow, /classDef external/);
+  const ces = renderGroupGraph(doc, groups, 2);
+  assert.match(ces, /n0\["w-three<br\/>Widget three"\]:::open/, "a one-row group still draws its row");
+  assert.match(ces, /n0 --> x0/);
+  assert.ok(ces.indexOf("n0[") < ces.indexOf("n0 -->"), "the row is drawn before an edge names it");
 });
 
 test("renderBoardMarkdown escapes pipes in cells", () => {

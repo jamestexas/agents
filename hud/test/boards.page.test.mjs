@@ -53,6 +53,7 @@ test("/api/md renders the page from the JSON on every read, ignoring a stale sto
   assert.equal(res.status, 200);
   const md = await res.text();
   assert.match(md, /^# Fresh title$/m);
+  assert.match(md, /Rendered from `boards\/w\.json`/, "the page names its own file");
   assert.ok(!md.includes("Stale"));
   assert.equal(entries(root).filter((e) => e.path.includes("/boards/")).length, 1, "the stored page does not add a second entry");
   // The JSON itself is still served verbatim, for agents.

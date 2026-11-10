@@ -221,7 +221,11 @@ test("the mermaid renderer is vendored and click directives stay links", () => {
 });
 
 test("a rendered diagram gets pan/zoom from in-page code, after mermaid, with no new script", () => {
-  assert.match(html, /renderMermaidBlocks\(rendered, window\.mermaid\)\s*\.then\(\(\) => \{\s*for \(const block of rendered\.querySelectorAll\('\.mermaid-block\[data-mermaid="rendered"\]'\)\) attachDiagramZoom\(block\);/);
+  assert.match(html, /renderMermaidBlocks\(root, window\.mermaid\)\s*\.then\(\(\) => \{\s*for \(const block of root\.querySelectorAll\('\.mermaid-block\[data-mermaid="rendered"\]'\)\) attachDiagramZoom\(block\);/);
+  assert.match(html, /drawDiagrams\(rendered\);\s*wireSections\(rendered, drawDiagrams\);/, "sections draw their diagrams when opened");
+  assert.match(html, /if \(d\.open\) drawDiagrams\(d\);/);
+  assert.match(html, /block\.closest\("details:not\(\[open\]\)"\)\) continue;/, "a diagram in a closed section waits");
+  assert.match(html, /target\.open = true;/, "an overview link opens its section");
   const srcs = [...html.matchAll(/<script[^>]*\bsrc="([^"]+)"/g)].map((m) => m[1]);
   assert.ok(srcs.every((s) => s.startsWith("/ui/")), "every script still loads from /ui/");
   assert.match(html, /function zoomable\(viewport, svg\)/);

@@ -476,6 +476,18 @@
         flex: 1;
         height: auto;
       }
+      /* A board's group sections: the summary reads as a subheading. */
+      #docbody details.board-group {
+        margin: 0 0 12px;
+        border: 1px solid var(--card);
+        border-radius: 8px;
+        padding: 0 12px;
+      }
+      #docbody details.board-group > summary {
+        cursor: pointer;
+        padding: 10px 0;
+        font-weight: 600;
+      }
       /* Mermaid marks a node carrying a click directive `clickable`; say so
          with the cursor, since the link is drawn inside the SVG and gets none
          of the page's own anchor styling. */
@@ -1565,6 +1577,9 @@
         const blocks = Array.from(root.querySelectorAll('.mermaid-block[data-mermaid="pending"]'));
         for (let i = 0; i < blocks.length; i++) {
           const block = blocks[i];
+          // A diagram in a closed section has no size to be laid out in; it is
+          // drawn when the section first opens (wireSections).
+          if (typeof block.closest === "function" && block.closest("details:not([open])")) continue;
           const code = block.querySelector("code");
           const src = code && code.textContent;
           if (!src || !src.trim()) continue;
@@ -1711,6 +1726,31 @@
       }
 
       /**
+       * Collapsible sections in an entry (a board's groups): a section's
+       * diagrams are drawn the first time it opens, and a link to `#<id>` of a
+       * section on the page, such as a node in a board's overview, opens that
+       * section and scrolls to it instead of changing the page's address.
+       */
+      function wireSections(root, drawDiagrams) {
+        for (const d of root.querySelectorAll("details")) {
+          d.addEventListener("toggle", () => {
+            if (d.open) drawDiagrams(d);
+          });
+        }
+        root.addEventListener("click", (ev) => {
+          const a = ev.target && ev.target.closest ? ev.target.closest("a") : null;
+          if (!a) return;
+          const href = a.getAttribute("href") || a.getAttribute("xlink:href") || "";
+          if (!href.startsWith("#")) return;
+          const target = root.querySelector('details[id="' + href.slice(1).replace(/"/g, "") + '"]');
+          if (!target) return;
+          ev.preventDefault();
+          target.open = true;
+          target.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      }
+
+      /**
        * Wrap a rendered block's SVG in a viewport with tools, idempotent per
        * block. Only a diagram that would not read well fitted to the column
        * gets one: fitting would shrink it below three quarters of its size,
@@ -1843,11 +1883,14 @@
             // laid-out labels, and no part of reading the entry should wait on
             // it. Unawaited on purpose — a throw in here must not turn the
             // entry into the "could not load" message below.
-            renderMermaidBlocks(rendered, window.mermaid)
-              .then(() => {
-                for (const block of rendered.querySelectorAll('.mermaid-block[data-mermaid="rendered"]')) attachDiagramZoom(block);
-              })
-              .catch(() => {});
+            const drawDiagrams = (root) =>
+              renderMermaidBlocks(root, window.mermaid)
+                .then(() => {
+                  for (const block of root.querySelectorAll('.mermaid-block[data-mermaid="rendered"]')) attachDiagramZoom(block);
+                })
+                .catch(() => {});
+            drawDiagrams(rendered);
+            wireSections(rendered, drawDiagrams);
           } else {
             // Raw drops and non-markdown are shown verbatim, never interpreted.
             const pre = document.createElement("pre");

@@ -53,7 +53,7 @@ writer, a ticket, a bead, a service, a person's queue; the shape is the same.
 | `generated` | yes | ISO-8601. When the producer ran; the page prints it and the history snapshot is named by it. |
 | `tags` | no | Extra tags for the page's frontmatter; `board` is always added. |
 | `layout` | no | `LR` (default) or `TD`: the direction of the rendered graph. Use `TD` when the graph fans out into many parallel branches. |
-| `group_by` | no | A declared column id. The table is split into one table per run of equal values in that column, each under a subheading, in row order; sort the rows to group them. A row with no value for the column groups under `(none)`. |
+| `group_by` | no | A declared column id. Rows are grouped by runs of equal values in that column, in row order (sort the rows to group them; a row with no value groups under `(none)`). The graph becomes an overview, one node per group with its size and status mix, edges between groups folded into one per pair and labelled with their count. Below it, each group is a collapsible section with its own graph and its rows of the table; an edge leaving the group ends at a dashed stub naming the other row. Clicking a group in the overview, or a stub, opens that section. The first section starts open, and a section's graph is drawn when it first opens. |
 | `sources` | no | Where the producer looked: `kind` (git, gh, linear, beads, tf, …), `ref`, optional `at`. Listed as a table under the title. |
 | `columns` | no | The table's columns, in order: `id` (used by cells) and `label`. No columns, no table. |
 | `rows` | yes | The things. `id` is unique and is what edges name; `label`, optional `sub`, free-text `status`, `external` (outside this board, drawn dashed), `url`, and `cells` keyed by column id. |

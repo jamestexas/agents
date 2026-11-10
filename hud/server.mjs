@@ -546,7 +546,7 @@ export function boardPage(jsonAbs) {
     return `# ${name}\n\nThis board's JSON (\`${name}.json\`) could not be read: ${errText(err)}\n`;
   }
   const { ok, errors } = validateBoard(doc);
-  if (ok) return renderBoardMarkdown(doc);
+  if (ok) return renderBoardMarkdown({ ...doc, __name: name });
   const title = typeof doc?.title === "string" && doc.title.trim() ? doc.title : name;
   return [
     `# ${title}`,
