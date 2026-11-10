@@ -81,7 +81,7 @@ dead one (see Run state).
 
 Every new invocation of `/review` passes `--new` right after `--pending`
 (`init --pending --new pr=...`). When `<run>` holds a run that ended, this
-starts the next review and packs the old log, `evidence/`, `work/` and
+starts the next review and archives the old log, `evidence/`, `work/` and
 `review.md` into `raw/runs/<stamp>.tar.gz`, with one line in
 `raw/runs/history.jsonl` that `render.mjs` turns into the note's History
 section. Without it, the same arguments read as a replay
@@ -304,7 +304,7 @@ refute, triage; fast: refute, triage, teach) or the zero-candidate rule
 skips, and is recorded as `skipped`. A backward or unknown phase exits 1,
 names the allowed next phases, and writes nothing. `abandon` and `fail`
 end a run from any open phase. A second review of the same PR in the same
-`prs/PR-N/raw/` packs the ended run into `runs/`; a run still open there is
+`prs/PR-N/raw/` archives the ended run into `runs/`; a run still open there is
 refused until it finishes or is abandoned.
 
 A run whose session dies would otherwise read "running" forever. Install
