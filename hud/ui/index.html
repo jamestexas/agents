@@ -404,6 +404,11 @@
       #docbody > div > .mermaid-block[data-mermaid="rendered"] {
         max-width: none;
       }
+      /* A board's group section holds a diagram and a wide table, so it takes
+         the column too; the prose inside it is only its summary line. */
+      #docbody > div > details.board-group {
+        max-width: none;
+      }
       #docbody .mermaid-block {
         margin: 0 0 12px;
         overflow: auto;

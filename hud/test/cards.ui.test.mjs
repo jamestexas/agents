@@ -222,3 +222,9 @@ test("a hidden tab holds no connection: it closes its stream and stops polling",
   assert.match(html, /secs > 0 && !document\.hidden \? setTimeout/, "a hidden tab schedules no poll");
   assert.match(html, /if \(!document\.hidden\) openStream\(\);/, "a tab opened in the background waits to be seen");
 });
+
+test("a board's group section takes the whole column, like a diagram", () => {
+  // The prose measure caps every direct child of the body; a section holds a
+  // graph and a wide table, which would otherwise stop at the measure.
+  assert.match(html, /#docbody > div > details\.board-group \{\s*max-width: none;/);
+});
