@@ -208,3 +208,17 @@ test("a run whose session went quiet or died is struck through, and its phase sa
   assert.match(css, /color:\s*var\(--muted\)/);
   assert.match(css, /text-decoration:\s*line-through/);
 });
+
+test("a hidden tab holds no connection: it closes its stream and stops polling", () => {
+  // A browser allows six connections to one host over HTTP/1.1 and each open
+  // stream keeps one for good, so streams in background tabs starved the
+  // tab in front of them.
+  assert.match(html, /document\.addEventListener\("visibilitychange", onVisibility\)/);
+  const vis = between("function onVisibility()", "/** ⟳ :");
+  assert.match(vis, /if \(document\.hidden\) \{\s*closeStream\(\);/);
+  assert.match(vis, /clearTimeout\(state\.timer\);/);
+  assert.match(vis, /openStream\(\);\s*for \(const name of CARD_LIVE\.keys\(\)\) loadCard\(name\);/, "shown again: reconnect and refetch every card");
+  assert.match(html, /STREAM\.source\.close\(\);/);
+  assert.match(html, /secs > 0 && !document\.hidden \? setTimeout/, "a hidden tab schedules no poll");
+  assert.match(html, /if \(!document\.hidden\) openStream\(\);/, "a tab opened in the background waits to be seen");
+});
