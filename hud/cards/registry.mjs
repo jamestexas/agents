@@ -12,8 +12,10 @@
 // synthesised into the same cards, so a tree configured before cards existed
 // renders exactly what it rendered then, through the one code path.
 
+import * as cmdKind from "./kinds/cmd.mjs";
 import * as fsKind from "./kinds/fs.mjs";
 import * as httpKind from "./kinds/http.mjs";
+import * as ghReviews from "./normalize/gh-reviews.mjs";
 import * as pages from "./normalize/pages.mjs";
 import * as reviewState from "./normalize/review-state.mjs";
 import * as workBoard from "./normalize/work-board.mjs";
@@ -59,11 +61,12 @@ export const KINDS = Object.freeze({
     degraded: "non-2xx, timeout, bad JSON → last snapshot with `stale`, else 503 with the reason",
   }),
   cmd: Object.freeze({
-    status: "next",
+    status: "now",
     required: ["cmd"],
-    reads: "argv, no shell",
-    rows: "one JSON object per line, or one JSON array",
-    degraded: "non-zero exit, bad JSON → 503 with the first stderr line",
+    module: cmdKind,
+    reads: "one local command, `cmd` as a command string or an argv list, run with no shell from the tree's root; a snapshot younger than the card's `refresh` is served instead of running it again",
+    rows: "one JSON array, or one JSON value per line",
+    degraded: "non-zero exit, timeout, bad JSON → last snapshot with `stale`, else 503 with the first stderr line",
   }),
   prometheus: Object.freeze({
     status: "next",
@@ -86,7 +89,12 @@ export const KINDS = Object.freeze({
  * place that knows a source's field names; it also declares the card's
  * default columns and, when the shape has one, its scope vocabulary.
  */
-export const SHAPES = Object.freeze({ "review-state": reviewState, "work-board": workBoard, pages });
+export const SHAPES = Object.freeze({
+  "gh-reviews": ghReviews,
+  "review-state": reviewState,
+  "work-board": workBoard,
+  pages,
+});
 
 /** Seconds between a page's polls of a card that declares no `refresh`. */
 export const DEFAULT_REFRESH_S = 60;
@@ -157,7 +165,7 @@ export function loadCards(cfg, env = {}) {
     }
   }
 
-  return { cards, layout: loadLayout(conf.layout, errors), errors, warnings };
+  return { cards, layout: loadLayout(conf.layout, cards, errors), errors, warnings };
 }
 
 /** The card by name, or null: a route asks this, and null is "404". */
@@ -226,8 +234,11 @@ function buildCard(name, raw, ctx) {
   if (nonEmpty(kind) === undefined) return fail("kind is required");
   const spec = KINDS[kind];
   if (!spec) return fail(`unknown kind "${kind}"`);
+  // A required field is present when it is a non-empty string or, for a kind
+  // whose field is an argv, a non-empty list; the kind's validate says which.
   for (const field of spec.required) {
-    if (nonEmpty(raw[field]) === undefined) return fail(`${kind} needs ${field}`);
+    const v = raw[field];
+    if (nonEmpty(v) === undefined && !(Array.isArray(v) && v.length)) return fail(`${kind} needs ${field}`);
   }
   if (spec.status !== "now") return fail(`kind "${kind}" is not served yet`);
 
@@ -310,12 +321,67 @@ function checkJoins(card, cards, where) {
   return null;
 }
 
-function loadLayout(raw, errors) {
-  const order = isObject(raw) ? raw.order : undefined;
-  if (order === undefined) return { order: [...DEFAULT_LAYOUT_ORDER] };
+function loadLayout(raw, cards, errors) {
+  const layout = { order: loadOrder(isObject(raw) ? raw.order : undefined, errors) };
+  if (isObject(raw) && raw.tabs !== undefined) layout.tabs = loadTabs(raw.tabs, cards, errors);
+  return layout;
+}
+
+function loadOrder(order, errors) {
+  if (order === undefined) return [...DEFAULT_LAYOUT_ORDER];
   if (!isStringList(order)) {
     errors.push("layout.order: must be a list of card names");
-    return { order: [...DEFAULT_LAYOUT_ORDER] };
+    return [...DEFAULT_LAYOUT_ORDER];
   }
-  return { order: [...order] };
+  return [...order];
+}
+
+/**
+ * `[layout.tabs]`: groups of cards that share one panel, one tab per card,
+ * `<group> = ["first", "second", ...]` with the first the default tab. Each
+ * group is checked on its own, like a card: one that cannot be honoured is
+ * `{error}` — the page shows the reason and leaves its cards as separate
+ * panels, so a typo costs the grouping and never the rows.
+ *
+ * @returns {Record<string, {cards: string[]}|{error: string}>}
+ */
+function loadTabs(raw, cards, errors) {
+  const out = {};
+  if (!isObject(raw)) {
+    errors.push("layout.tabs: must be a table of groups");
+    return out;
+  }
+  const claimed = new Map();
+  for (const [group, list] of Object.entries(raw)) {
+    const fail = (reason) => {
+      const error = `layout.tabs.${group}: ${reason}`;
+      errors.push(error);
+      out[group] = { error };
+    };
+    if (!NAME_RE.test(group)) {
+      fail("name must be letters, digits, '_' or '-'");
+      continue;
+    }
+    if (!isStringList(list) || list.length < 2) {
+      fail("must be a list of at least two card names");
+      continue;
+    }
+    const unknown = list.find((name) => !cards.has(name));
+    if (unknown !== undefined) {
+      fail(`no card named "${unknown}"`);
+      continue;
+    }
+    if (new Set(list).size !== list.length) {
+      fail("names a card twice");
+      continue;
+    }
+    const taken = list.find((name) => claimed.has(name));
+    if (taken !== undefined) {
+      fail(`card "${taken}" is already a tab of ${claimed.get(taken)}`);
+      continue;
+    }
+    for (const name of list) claimed.set(name, group);
+    out[group] = { cards: [...list] };
+  }
+  return out;
 }

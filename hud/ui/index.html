@@ -455,6 +455,60 @@
       .panel .misconfigured {
         color: var(--accent);
       }
+      /* Cards that share one panel as tabs ([layout.tabs]). The group draws
+         the panel; its cards sit inside it without their own frame, and the
+         tab strip stands in for their titles, so each keeps only its stamp. */
+      .tabs-group:not(.panel) {
+        border: 1px solid var(--card);
+        border-radius: 8px;
+        background: var(--card);
+        margin-bottom: 12px;
+        overflow: hidden;
+      }
+      .tabs-group > .panel {
+        border: 0;
+        border-radius: 0;
+        margin: 0;
+      }
+      .tabs-group > .panel.tab-off {
+        display: none;
+      }
+      .tabs-group > .panel > h2 .title {
+        display: none;
+      }
+      .tabstrip {
+        display: flex;
+        gap: 2px;
+        padding: 6px 6px 0;
+        border-bottom: 1px solid var(--card);
+      }
+      .tabstrip .tab {
+        font: 600 11px/1 var(--mono);
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted);
+        background: none;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        padding: 6px 8px;
+        cursor: pointer;
+        display: flex;
+        gap: 6px;
+        align-items: baseline;
+      }
+      .tabstrip .tab[aria-selected="true"] {
+        color: var(--magenta);
+        text-shadow: 0 0 6px currentColor;
+        border-bottom-color: currentColor;
+      }
+      .tabstrip .tab-count {
+        letter-spacing: 0;
+        font-weight: 400;
+      }
+      .tabstrip .tab.hot .tab-count,
+      .tabstrip .tab.bad .tab-count {
+        color: var(--accent);
+      }
       /* One line across the top when the page is NOT showing live data.
          Per-panel staleness is deliberately quiet — dashed and dimmed — which
          is right for one panel and wrong for the whole page: a reader who
@@ -2386,7 +2440,11 @@
         }],
         phases: ["phases", "minutes per phase: ev q se re tr te; … marks the phase still running", (tr, r) => phasesCell(tr, r)],
         verdict: ["verdict", "APPROVE, REQUEST_CHANGES, or COMMENT once settled; PRELIMINARY for a fast run", (tr, r, j) => verdictCell(tr, j ? j.verdict : undefined)],
-        mine: ["mine", "my own review of this PR; † marks one that predates the current head", (tr, r, j) => mineCell(tr, j ? j.review_state : null)],
+        // mine and posted prefer the row's own block: a GitHub-sourced row is
+        // the record of what was posted, and the run joined onto it is only
+        // what /review was told. A run row is its own joined block, and a
+        // board row carries neither, so both still read the run there.
+        mine: ["mine", "my own review of this PR; † marks one that predates the current head", (tr, r, j) => mineCell(tr, r.review_state ?? (j ? j.review_state : null))],
         humans: ["humans", "human reviews: approved / commented / changes requested", (tr, r, j) => humansCell(tr, j ? j.review_state : null)],
         bots: ["bots", "bot reviews, and the findings they reported", (tr, r, j) => botsCell(tr, j ? j.review_state : null)],
         threads: ["threads", "unresolved review threads · awaiting me · awaiting the author", (tr, r, j) => {
@@ -2416,7 +2474,7 @@
           );
         }],
         note: ["note", "the run's note, in the tree", (tr, r, j) => noteCell(tr, j ? j.note_url : undefined, j ? j.note : undefined)],
-        posted: ["posted", "the review as posted, linked", (tr, r, j) => postedCell(tr, j ? j.posted : undefined)],
+        posted: ["posted", "the review as posted, linked", (tr, r, j) => postedCell(tr, r.posted ?? (j ? j.posted : undefined))],
       };
 
       /** The text an empty card shows; a card not named here says "nothing to show". */
@@ -2751,17 +2809,21 @@
       async function loadCards() {
         let names = [];
         let order = [];
+        let tabs = {};
         try {
           const res = await fetch("/api/cards", { cache: "no-store" });
           const body = await res.json().catch(() => null);
           if (res.ok && body && Array.isArray(body.cards)) {
             names = body.cards.filter((n) => typeof n === "string");
             order = body.layout && Array.isArray(body.layout.order) ? body.layout.order : [];
+            const t = body.layout && body.layout.tabs;
+            tabs = t && typeof t === "object" && !Array.isArray(t) ? t : {};
           }
         } catch {
           /* the HUD server itself is gone; hide rather than shout */
         }
         for (const name of names) ensurePanel(name);
+        applyTabs(tabs);
         orderPanels(order);
         // A shell panel whose card is gone — its stanza removed — is hidden,
         // not left showing its last rows.
@@ -2793,12 +2855,117 @@
         return wrap;
       }
 
-      /** Panels the layout names move to the top in that order; the rest keep today's order after them. */
+      /**
+       * Panels the layout names move to the top in that order; the rest keep
+       * today's order after them. A card that is a tab stands for its group,
+       * so naming either the group or any of its cards places the whole panel.
+       */
       function orderPanels(order) {
         const aside = document.querySelector("aside");
-        const named = order.map((name) => el("wrap-" + name)).filter((wrap) => wrap && wrap.parentElement === aside);
+        const named = order
+          .map((name) => el("wrap-" + name))
+          .map((wrap) => (wrap && wrap.parentElement && wrap.parentElement !== aside ? wrap.parentElement : wrap))
+          .concat(order.map((name) => el("group-" + name)))
+          .filter((wrap, i, all) => wrap && wrap.parentElement === aside && all.indexOf(wrap) === i);
         const rest = [...aside.children].filter((child) => !named.includes(child));
         for (const wrap of [...named, ...rest]) aside.appendChild(wrap);
+      }
+
+      // ------------------------------------------------------------ tabs
+      //
+      // `[layout.tabs]` puts several cards in one panel, one tab each. A tab
+      // is a view switch and nothing more: every card keeps its own panel,
+      // poll, refresh and renderCard, and the inactive ones are only hidden.
+      // The tab shows the card's count, and is marked when a row needs you or
+      // a run is in flight, so a hidden tab never goes quiet. The last tab
+      // chosen is remembered per group in localStorage, like the folds; a
+      // group the server refused shows its reason and leaves its cards as
+      // separate panels.
+
+      /** Which card a group shows: the one chosen last, while it is still in the group; else the first. */
+      function readTab(group, cards) {
+        try {
+          const v = window.localStorage.getItem("hud.tab." + group);
+          if (cards.includes(v)) return v;
+        } catch {
+          /* storage unavailable: the first tab stands */
+        }
+        return cards[0];
+      }
+
+      function selectTab(group, name) {
+        const box = el("group-" + group);
+        if (!box) return;
+        for (const wrap of box.querySelectorAll(":scope > .panel[data-card]")) {
+          wrap.classList.toggle("tab-off", wrap.dataset.card !== name);
+        }
+        for (const tab of box.querySelectorAll(".tabstrip .tab")) {
+          tab.setAttribute("aria-selected", tab.dataset.tab === name ? "true" : "false");
+        }
+        try {
+          window.localStorage.setItem("hud.tab." + group, name);
+        } catch {
+          /* storage unavailable or full: the choice lasts until reload */
+        }
+      }
+
+      function applyTabs(tabs) {
+        const aside = document.querySelector("aside");
+        for (const [group, spec] of Object.entries(tabs)) {
+          let box = el("group-" + group);
+          if (spec && typeof spec.error === "string") {
+            if (!box) {
+              box = node("div", "panel tabs-group");
+              box.id = "group-" + group;
+              const h2 = node("h2");
+              h2.appendChild(node("span", "title", group));
+              box.appendChild(h2);
+              const body = node("div", "body");
+              body.appendChild(node("div", "empty misconfigured", spec.error));
+              box.appendChild(body);
+              aside.appendChild(box);
+            }
+            continue;
+          }
+          const cards = spec && Array.isArray(spec.cards) ? spec.cards.filter((n) => typeof n === "string") : [];
+          if (!cards.length) continue;
+          if (!box) {
+            box = node("div", "tabs-group");
+            box.id = "group-" + group;
+            const strip = node("div", "tabstrip");
+            strip.setAttribute("role", "tablist");
+            box.appendChild(strip);
+            aside.insertBefore(box, el("wrap-" + cards[0]));
+          }
+          const strip = box.querySelector(".tabstrip");
+          for (const name of cards) {
+            const wrap = ensurePanel(name);
+            if (wrap.parentElement !== box) box.appendChild(wrap);
+            if (!strip.querySelector('[data-tab="' + name + '"]')) {
+              const tab = node("button", "tab");
+              tab.type = "button";
+              tab.dataset.tab = name;
+              tab.setAttribute("role", "tab");
+              tab.appendChild(node("span", "tab-title", name));
+              tab.appendChild(node("span", "tab-count"));
+              tab.addEventListener("click", () => selectTab(group, name));
+              strip.appendChild(tab);
+            }
+          }
+          selectTab(group, readTab(group, cards));
+        }
+      }
+
+      /** A tab's label: the card's title, its row count, and a mark when a row needs you or a run is in flight. */
+      function paintTab(name, resp) {
+        const tab = document.querySelector('.tabstrip .tab[data-tab="' + name + '"]');
+        if (!tab) return;
+        const items = resp && Array.isArray(resp.items) ? resp.items : [];
+        if (resp && typeof resp.title === "string" && resp.title) tab.querySelector(".tab-title").textContent = resp.title;
+        tab.querySelector(".tab-count").textContent = !resp ? "" : resp.error ? "!" : String(items.length);
+        tab.classList.toggle("bad", !!(resp && resp.error));
+        tab.classList.toggle("hot", items.some((i) => i && (i.state === "needs_you" || i.running === true)));
+        tab.hidden = !resp;
       }
 
       /**
@@ -2908,6 +3075,7 @@
         }
         if (name === "board") setDial(resp && !resp.error ? resp : null);
         renderCard(resp, wrap);
+        paintTab(name, resp);
         paintLiveStamp(name);
         schedule(name, Number.isInteger(next) ? next : DEFAULT_REFRESH_S);
       }

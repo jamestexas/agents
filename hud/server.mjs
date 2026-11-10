@@ -64,6 +64,9 @@ import {
 import { forJoin } from "./cards/normalize/review-state.mjs";
 import { rowKey as boardRowKey } from "./cards/normalize/work-board.mjs";
 import { collectRows, joinPayload, serveCard } from "./cards/serve.mjs";
+import { tokenizeCommand } from "./cmdline.mjs";
+
+export { tokenizeCommand };
 
 // The reviews layer's pieces now live under cards/; the names stay exported
 // from here so the tests and the CLI that import them keep working.
@@ -957,39 +960,6 @@ export function writeSnapshot(root, name, data) {
   return writeSnapshotFile(legacySnapshotFile(root, name), data);
 }
 
-/**
- * Split a config command string into argv. Handles quoted segments; there is
- * deliberately no shell, no globbing and no substitution, so a command string
- * cannot grow into a shell injection.
- */
-export function tokenizeCommand(cmd) {
-  const argv = [];
-  let cur = "";
-  let quote = null;
-  let quoted = false;
-  for (const ch of String(cmd)) {
-    if (quote) {
-      if (ch === quote) quote = null;
-      else cur += ch;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      quoted = true;
-      continue;
-    }
-    if (/\s/.test(ch)) {
-      if (cur !== "" || quoted) argv.push(cur);
-      cur = "";
-      quoted = false;
-      continue;
-    }
-    cur += ch;
-  }
-  if (cur !== "" || quoted) argv.push(cur);
-  return argv;
-}
-
 /** execFile as a promise. Rejects with the error; stdout is capped. */
 function run(file, args, opts) {
   return new Promise((resolve, reject) => {
@@ -1688,7 +1658,7 @@ function cardsOf(root) {
 }
 
 function cardCtx(root, dyn, cards) {
-  return { hudRoot: root, configFile: CONFIG_TOML, now: dyn.now, httpTimeoutMs: dyn.httpTimeoutMs, cards, sendJson };
+  return { hudRoot: root, configFile: CONFIG_TOML, now: dyn.now, httpTimeoutMs: dyn.httpTimeoutMs, env: dyn.env, cards, sendJson };
 }
 
 /** `/api/cards`: every card the config declares, by name, and the panel order. */

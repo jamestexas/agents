@@ -57,8 +57,10 @@ booleans — which is what `columns` and `order` need and all they need.
 | `root` | string, `~` expanded | `fs` only, no | Where the glob is applied. Defaults to `HUD_ROOT`. |
 | `glob` | string, `*` within one segment | `fs` only, yes | The files that are rows, relative to `root`. The same walk and refusals as `[sources.reviews] glob`. |
 | `url` | string | `http` only, yes | An absolute http(s) URL to GET — loopback by intent, not enforced, because a HUD in a container reaches its board through the host's name. |
+| `cmd` | string, or list of strings | `cmd` only, yes | The command whose stdout is the rows, run with no shell from the tree's root. A string is split the way `[sources.digest] cmd` is (quotes group); a list is the argv as written, the form for an argument that is awkward to quote. |
 | `[cards.A.join.B]` | table | no | Attach B's row with the same key to each row of A, under the field `B`. `latest` names the field that picks between several B rows (newest wins); `columns` lists the column ids the joined row contributes. B must be a declared card other than A, and both must declare the same `key`. |
-| `[layout] order` | list of strings | no | Panel order, top to bottom. Defaults to today's aside: `reviews, board, digest, sessions, loadout, peers`. |
+| `[layout] order` | list of strings | no | Panel order, top to bottom. Defaults to today's aside: `reviews, board, digest, sessions, loadout, peers`. A card that is a tab may be named for its whole group, as may the group itself. |
+| `[layout.tabs]` | table of `group = ["card", ...]` | no | Cards that share one panel, one tab each; the first is the default tab. Each card keeps its own poll, refresh and scope, and its tab shows its row count, marked when a row needs you or a run is in flight. The page remembers the last tab per group. A group needs at least two declared cards, none named twice or in another group; a group that breaks a rule is reported under `errors`, shown as a misconfigured panel with the reason, and its cards stay separate panels. |
 
 A card's name is its route segment: letters, digits, `_` and `-`.
 
@@ -74,16 +76,23 @@ and its required field is still checked. The table is generated from
 | --- | --- | --- | --- | --- |
 | `fs` | **now** | files under a root matched by a segment glob (`*` within one segment); `format = "text"` hands over each file's head instead of parsing it as JSON | one row per file; a file that is not a JSON object is one `unreadable` row | bad glob → misconfigured; absent root → an empty card |
 | `http` | **now** | one GET of a loopback URL, JSON | the array the response carries (`items`, `prs`, or the top-level array) | non-2xx, timeout, bad JSON → last snapshot with `stale`, else 503 with the reason |
-| `cmd` | next | argv, no shell | one JSON object per line, or one JSON array | non-zero exit, bad JSON → 503 with the first stderr line |
+| `cmd` | **now** | one local command, `cmd` as a command string or an argv list, run with no shell from the tree's root; a snapshot younger than the card's `refresh` is served instead of running it again | one JSON array, or one JSON value per line | non-zero exit, timeout, bad JSON → last snapshot with `stale`, else 503 with the first stderr line |
 | `prometheus` | next | one PromQL instant or range query, bearer token from a `token_cmd` | one row per series (labels + value) | token command non-zero or 401 → 503 with the reason; query parse error → 503 with the API's text |
 | `mcp` | next | one read-only tool call on an MCP server already configured for this machine | the array in the tool's structured result, or one row per text item | server absent from config → card off; connect failure or tool error → 503 with the first error line |
 <!-- @generated-end: cards-kinds-table -->
 
 **The single pane rule.** A card never owns a credential. `fs` reads the
-tree, `http` talks to loopback, and the later kinds borrow a credential the
-machine already holds — a token command, a local CLI, a configured MCP server
-— by path or command, never by value. Adding a data source is a config
-stanza, never a new secret store.
+tree, `http` talks to loopback, `cmd` runs a local CLI that holds its own
+login, and the later kinds borrow a credential the machine already holds — a
+token command, a configured MCP server — by path or command, never by value.
+Adding a data source is a config stanza, never a new secret store.
+
+**A command spends a budget.** A `gh` call spends GitHub's rate limit and
+takes seconds, so a `cmd` card's snapshot answers as live — `stale: false`,
+no run — while it is younger than the card's `refresh` (60 seconds when the
+card declares none), and requests that arrive while a run is in flight wait
+on that run rather than starting their own. However many pages poll the card,
+the command runs at most once per `refresh`.
 
 ## Shapes
 
@@ -97,6 +106,7 @@ dropped and counted in the response's `rejected`.
 | --- | --- | --- | --- | --- |
 | `review-state` | a review run's `state.json` | `project`, `liveness`, `running`, `elapsed_s`, `phase_seconds`, `pr_url`, `note_url`; `phases`, `early` and `review_state` rebuilt field by field | `open` (running or not yet posted), `all` | the sixteen the REVIEW RUNS panel shows |
 | `work-board` | a row of the local work-board service | `pr_url` from `repo` + `number` or the row's `url` (null for a row whose `kind` is not `pr`); keeps `number`, `url`, `title`, `state`, `reason`, `kind`, `repo` | — | `pr`, `title`, `why`, `verdict`, `gates`, `note`, `posted`, `threads` |
+| `gh-reviews` | a PR the operator reviewed, with their latest review on it, as the command below prints it | `pr_url`; `posted` and `review_state.mine` (`head_matches` from the review's commit against the head) in a run's field names; `state` + `reason`: `needs_you` when the head moved past the review, `waiting` when a comment or change request stands at the head, `done` when approved at the head, merged or closed | `open` (the PR is open), `all` | `pr`, `title`, `why`, `mine`, `posted`, `verdict`, `note` |
 
 The field-by-field contract of `review-state` — what each key means, what is
 nulled, what is dropped — is written up under *reviews* in
@@ -122,6 +132,42 @@ also reads the payload's **self-report** — `tick_status` and `degradations`,
 whitelisted to `{source, error}` — which the response carries as `health` so
 the page's banner can say "github: graphql 401" rather than "degraded".
 A shape without a self-report has no `health` key at all.
+
+### `gh-reviews`: what was posted, from GitHub
+
+A run's `posted` is what `/review` was told; a review posted from the web UI,
+or by a plain `gh pr review`, never reaches it. GitHub is the record, so this
+shape reads it there. The card is a `cmd` stanza — one GraphQL search, shaped
+by `--jq` into the rows the shape reads — with the run joined on for its
+verdict and note:
+
+```toml
+[cards.my-reviews]
+kind    = "cmd"
+shape   = "gh-reviews"
+key     = "pr_url"
+title   = "Reviewed by me"
+scope   = "open"
+refresh = "5m"
+cmd = ["gh", "api", "graphql", "-f", 'query=query { viewer { login } search(query: "is:pr reviewed-by:@me -author:@me sort:updated-desc", type: ISSUE, first: 50) { nodes { ... on PullRequest { url number title state updatedAt headRefOid repository { nameWithOwner } reviews(last: 100) { nodes { author { login } state commit { oid } url submittedAt } } } } } }', "--jq", '.data.viewer.login as $me | [.data.search.nodes[] | select(.url) | {repo: .repository.nameWithOwner, number, title, url, state, head: .headRefOid, updated_at: .updatedAt, review: ([.reviews.nodes[] | select(.author.login == $me and .state != "PENDING")] | last | if . then {state, commit: .commit.oid, url, at: .submittedAt} else null end)}]']
+
+[cards.my-reviews.join.reviews]
+latest = "started"
+```
+
+`cmd` is one line: the config's TOML subset has no multi-line arrays or
+strings, and single-quoted literals keep the query's and the filter's double
+quotes as they are. The window is the 50 PRs most recently updated that the operator reviewed,
+merged ones included — a date window would need the date written into the
+query. A PR reviewed only on GitHub still gets a row, with no run joined; the
+`mine` and `posted` cells read the row's own block before the run's, so they
+show GitHub's answer wherever a row carries one.
+
+The operator is named in two places, both plain config: the search
+(`reviewed-by:@me -author:@me`, which leaves out PRs of your own) and the
+filter that picks a row's review (`.author.login == $me`). For someone else,
+or a list of people, write their logins into both — `reviewed-by:alice` in the
+search, and `select(.author.login | IN("alice","bob"))` in the filter.
 
 ## Keys and joins
 
@@ -199,8 +245,9 @@ the new path and never written again.
 
 `GET /api/cards` answers `{cards: [names], layout}` — every card the config
 declares, misconfigured ones included (the page renders them red rather than
-losing them), and `[layout].order` or the default — so the UI can draw the
-aside without knowing any card's name in advance.
+losing them), and `[layout].order` or the default, plus `tabs` when `[layout.tabs]` is
+present (each group `{cards}` or `{error}`) — so the UI can draw the aside
+without knowing any card's name in advance.
 
 ## Live updates
 
