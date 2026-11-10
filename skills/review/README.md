@@ -20,11 +20,22 @@ find the row it turned on; the row names the file that settled it. *Evidence
 manifest* lists UNAVAILABLE probes first: those are the things the review
 could not check.
 
-**Adding a site pack.** Copy `packs.site.example.yaml` to
-`$HUD_ROOT/review-packs.yaml` (yours) or `<repo>/.claude/review-packs.yaml`
-(the repo's). Each pack states the question it answers, the globs that
-select it, the binaries it needs, and its probes. Set the env vars the
-example names in your shell profile.
+**Probe packs.** A probe pack is a named group of shell commands (probes)
+that the evidence script runs when the PR touches files matching the pack's
+globs, such as `go build`/`go vet` for Go changes. Each pack states the
+question its output answers, so the review can tell an answer exists. Their
+output lands in `raw/evidence/`, and a probe whose tool is missing is
+recorded UNAVAILABLE rather than skipped. The generic packs ship in
+`packs.yaml`.
+
+**Adding your own packs.** A check that needs knowledge of your
+organization (a deploy workflow, a metric name, an internal CLI) does not go
+in `packs.yaml`, because this repo is public. Copy
+`packs.site.example.yaml` to `$HUD_ROOT/review-packs.yaml` (just for you)
+or `<repo>/.claude/review-packs.yaml` (for everyone reviewing that repo),
+and set the env vars the example names in your shell profile. A repo's file
+is read from your trusted checkout at the base commit, never from the PR,
+since probes run with your credentials.
 
 **`--fast`, and the early signal.** `/review <pr> --fast` is a first look
 in about a quarter of an hour: evidence, questions and settle run, then the

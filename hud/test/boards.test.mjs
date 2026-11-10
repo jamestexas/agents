@@ -14,6 +14,11 @@ import {
   mermaidText,
   renderBoardMarkdown,
   renderGraph,
+  renderLegend,
+  renderOverview,
+  renderGroupGraph,
+  groupsOf,
+  SHAPES,
   statusClass,
   validateBoard,
   writeBoard,
@@ -105,6 +110,40 @@ test("renderGraph draws dep edges solid, inferred edges dotted with a reason, ex
   assert.doesNotMatch(g, /classDef blocked/, "unused classes are not emitted");
 });
 
+test("a row's shape picks its node brackets; no shape keeps the plain rectangle; an unknown shape is refused", () => {
+  const doc = board();
+  doc.rows[0].shape = "group";
+  doc.rows[1].shape = "gap";
+  const g = renderGraph(doc);
+  assert.match(g, /n0\(\["w-one<br\/>Widget one<br\/>In Progress"\]\):::started/);
+  assert.match(g, /n1\{\{"w-two<br\/>Widget two<br\/>Done"\}\}:::done/);
+  assert.match(g, /n2\["EXT-1<br\/>Outside ticket<br\/>Todo"\]:::external/, "no shape, the rectangle as before");
+  assert.deepEqual(Object.keys(SHAPES), ["group", "box", "item", "gap"]);
+  for (const bad of ["circle", "constructor", 3]) {
+    const d = board();
+    d.rows[0].shape = bad;
+    assert.match(validateBoard(d).errors.join("\n"), /rows\[0\]\.shape must be one of group, box, item, gap/, String(bad));
+  }
+});
+
+test("the legend samples only the shapes and classes the board uses, in its own block", () => {
+  const doc = board();
+  doc.rows[0].shape = "item";
+  const legend = renderLegend(doc);
+  assert.match(legend, /^flowchart LR/);
+  assert.match(legend, /s0\("item"\)/);
+  assert.ok(!/group|gap/.test(legend), "unused shapes are not sampled");
+  for (const c of ["started", "done", "external"]) assert.match(legend, new RegExp(`:::${c}`));
+  assert.ok(!/:::(open|blocked)/.test(legend), "unused classes are not sampled");
+  assert.match(legend, /^  c0 ~~~ c1 ~~~ c2$/m, "invisible links keep statuses on one line");
+  assert.ok(!/s0 ~~~/.test(legend), "a single shape needs no link");
+  const md = renderBoardMarkdown(doc);
+  assert.equal((md.match(/```mermaid/g) || []).length, 2, "legend and graph are separate blocks");
+  assert.ok(md.indexOf(legend) < md.indexOf("flowchart LR\n  n0"), "the legend comes first");
+  const plain = board({ rows: [{ id: "a", label: "A" }, { id: "b", label: "B" }], edges: [] });
+  assert.equal(renderLegend(plain), "", "one class and no shapes: nothing to explain");
+});
+
 test("renderGraph is empty for a single row with no edges", () => {
   assert.equal(renderGraph({ rows: [{ id: "a", label: "A" }], edges: [] }), "");
 });
@@ -115,14 +154,67 @@ test("renderBoardMarkdown produces frontmatter, graph, table, notes and provenan
   assert.match(md, /^---\ntitle: "Widgets vs the bar"\ndate: 2026-01-02\ntype: board\nstatus: active\n---\n/);
   const tagged = renderBoardMarkdown({ ...board(), tags: ["m1"], __name: "widgets" });
   assert.match(tagged, /\nstatus: active\ntags: \["m1"\]\n---\n/, "a board's own topic tags pass through, with no board tag added");
-  assert.match(md, /Generated 2026-01-02 03:04:05 UTC from git: example\/main@abc1234/);
+  assert.match(md, /^Generated 2026-01-02 03:04 UTC$/m, "the time is its own line");
+  assert.match(md, /^\| Source \| Ref \| As of \|$/m, "the sources are a table");
+  assert.match(md, /^\| git \| example\/main@abc1234 \| 2026-01-02 03:00 UTC \|$/m);
+  assert.match(md, /^<small>Rendered from `boards\/.+\.json`; edit the producer, not the page\.<\/small>$/m);
+  // Only the label links; the status under it stays plain text.
+  assert.match(md, /\| \[\*\*Widget two\*\*\]\(https:\/\/example\.invalid\/w2\)<br>`Done` \|/);
   assert.match(md, /boards\/widgets\.json/);
   assert.match(md, /```mermaid\nflowchart LR/);
   assert.match(md, /\| \| Stage \| Prod \|\n\| --- \| --- \| --- \|/);
   assert.match(md, /\| \*\*Widget one\*\*<br>`In Progress` \| `shadow` shadow \| legacy \|/);
-  assert.match(md, /\[\*\*Widget two\*\*<br>`Done`\]\(https:\/\/example\.invalid\/w2\) \| \[ces\]\(https:\/\/example\.invalid\/pr\/1\) \|  \|/);
+  assert.match(md, /\[\*\*Widget two\*\*\]\(https:\/\/example\.invalid\/w2\)<br>`Done` \| \[ces\]\(https:\/\/example\.invalid\/pr\/1\) \|  \|/);
   assert.match(md, /## Risks\n\n- one\n- two/);
   assert.match(md, /## Provenance\n\n- \*\*Widget one\*\* · stage: env\/a\.tf:12/);
+});
+
+test("group_by must name a declared column", () => {
+  assert.deepEqual(validateBoard(board({ group_by: "stage" })).errors, []);
+  for (const bad of ["nope", "", 3]) {
+    assert.match(validateBoard(board({ group_by: bad })).errors.join("\n"), /group_by must name a declared column/, JSON.stringify(bad));
+  }
+});
+
+test("group_by draws an overview of the groups and one section per group, the first open", () => {
+  const doc = board({ group_by: "stage" });
+  doc.rows[1].cells.stage.value = "shadow";
+  doc.rows.push({ id: "w-three", label: "Widget three", cells: { stage: { value: "ces" } } });
+  doc.edges.push({ from: "w-three", to: "w-one", kind: "dep" }, { from: "w-three", to: "w-two", kind: "dep" });
+  const groups = groupsOf(doc);
+  assert.deepEqual(groups.map((g) => [g.value, g.rows.map((r) => r.id)]), [["shadow", ["w-one", "w-two"]], ["(none)", ["EXT-1"]], ["ces", ["w-three"]]]);
+  assert.deepEqual(groups.map((g) => g.id), ["group-1-shadow", "group-2-none", "group-3-ces"]);
+
+  const overview = renderOverview(doc, groups);
+  assert.match(overview, /g0\(\["shadow<br\/>2 rows · 1 done · 1 started"\]\):::started/);
+  assert.match(overview, /g2 -->\|"2"\| g0/, "two edges from ces into shadow fold into one, counted");
+  assert.match(overview, /g1 -\.->\|"1"\| g0/, "an inferred-only crossing stays dotted");
+  assert.match(overview, /click g0 "#group-1-shadow"/);
+
+  const md = renderBoardMarkdown(doc);
+  const sections = [...md.matchAll(/^<details class="board-group" id="([^"]+)"( open)?>$/gm)].map((m) => [m[1], !!m[2]]);
+  assert.deepEqual(sections, [["group-1-shadow", true], ["group-2-none", false], ["group-3-ces", false]], "the first section starts open");
+  assert.match(md, /^<summary>shadow · 2 rows<\/summary>$/m);
+  assert.equal((md.match(/^\| \| Stage \| Prod \|$/gm) || []).length, 3, "each section carries its own table");
+  assert.equal(/^## Table$/m.test(md), false, "the sections replace the one table");
+  assert.equal(/<details/.test(renderBoardMarkdown(board())), false, "no group_by, the page as before");
+});
+
+test("a group's graph stubs the far end of an edge that leaves it, linked to that group", () => {
+  const doc = board({ group_by: "stage" });
+  doc.rows[1].cells.stage.value = "shadow";
+  doc.rows.push({ id: "w-three", label: "Widget three", cells: { stage: { value: "ces" } } });
+  doc.edges.push({ from: "w-three", to: "w-one", kind: "dep" });
+  const groups = groupsOf(doc);
+  const shadow = renderGroupGraph(doc, groups, 0);
+  assert.match(shadow, /n1 --> n0/, "the edge inside the group is drawn as before");
+  assert.match(shadow, /x\d\["w-three<br\/>in ces"\]:::external/);
+  assert.match(shadow, /click x\d "#group-3-ces"/);
+  assert.match(shadow, /classDef external/);
+  const ces = renderGroupGraph(doc, groups, 2);
+  assert.match(ces, /n0\["w-three<br\/>Widget three"\]:::open/, "a one-row group still draws its row");
+  assert.match(ces, /n0 --> x0/);
+  assert.ok(ces.indexOf("n0[") < ces.indexOf("n0 -->"), "the row is drawn before an edge names it");
 });
 
 test("renderBoardMarkdown escapes pipes in cells", () => {

@@ -112,15 +112,16 @@ test("a kind the design names but this release does not serve is told apart from
   // The plan marks these "next": declaring one is not a typo, so the error
   // says "not served yet" rather than "unknown", and a required field is
   // still checked so the stanza is right when the kind lands.
-  for (const kind of ["cmd", "prometheus", "mcp"]) {
+  for (const kind of ["prometheus", "mcp"]) {
     assert.equal(KINDS[kind].status, "next", kind);
   }
-  assert.equal(KINDS.fs.status, "now");
-  assert.equal(KINDS.http.status, "now");
-  const { cards } = fromToml('[cards.digest]\nkind = "cmd"\ncmd = "example-digest --since 24h"\n');
-  assert.match(cards.get("digest").error, /kind "cmd" is not served yet/);
-  const noCmd = fromToml('[cards.digest]\nkind = "cmd"\n');
-  assert.match(noCmd.cards.get("digest").error, /cmd/, "the missing field is named first");
+  for (const kind of ["fs", "http", "cmd"]) {
+    assert.equal(KINDS[kind].status, "now", kind);
+  }
+  const { cards } = fromToml('[cards.cpu]\nkind = "prometheus"\nquery = "up"\n');
+  assert.match(cards.get("cpu").error, /kind "prometheus" is not served yet/);
+  const noQuery = fromToml('[cards.cpu]\nkind = "prometheus"\n');
+  assert.match(noQuery.cards.get("cpu").error, /query/, "the missing field is named first");
 });
 
 test("a card name that cannot be a route segment is refused", () => {
@@ -216,6 +217,47 @@ test("[layout].order is parsed, and the default order stands in when it is absen
   assert.deepEqual(odd.layout, { order: DEFAULT_LAYOUT_ORDER });
   assert.equal(odd.errors.length, 1);
   assert.match(odd.errors[0], /layout\.order/);
+});
+
+test("[layout.tabs] groups declared cards; a group that cannot stand is its own error, not the layout's", () => {
+  const two = `${REVIEWS_TOML}\n[cards.other]\nkind = "fs"\nglob = "x/*"\nshape = "pages"\n`;
+  const { layout, errors } = fromToml(`${two}\n[layout]\norder = ["reviews"]\n\n[layout.tabs]\nreviews = ["reviews", "other"]\n`);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(layout, { order: ["reviews"], tabs: { reviews: { cards: ["reviews", "other"] } } });
+  assert.equal("tabs" in fromToml(two).layout, false, "no table, no key: the layout reads as it always did");
+
+  const bad = loadCards(
+    {
+      cards: {
+        a: { kind: "fs", glob: "a/*", shape: "pages" },
+        b: { kind: "fs", glob: "b/*", shape: "pages" },
+        c: { kind: "fs", glob: "c/*", shape: "pages" },
+      },
+      layout: {
+        tabs: {
+          ok: ["a", "b"],
+          lonely: ["c"],
+          ghost: ["c", "nope"],
+          twice: ["c", "c"],
+          stolen: ["b", "c"],
+          "bad name": ["a", "c"],
+        },
+      },
+    },
+    ENV,
+  );
+  assert.deepEqual(bad.layout.tabs.ok, { cards: ["a", "b"] });
+  assert.match(bad.layout.tabs.lonely.error, /at least two/);
+  assert.match(bad.layout.tabs.ghost.error, /no card named "nope"/);
+  assert.match(bad.layout.tabs.twice.error, /names a card twice/);
+  assert.match(bad.layout.tabs.stolen.error, /card "b" is already a tab of ok/);
+  assert.match(bad.layout.tabs["bad name"].error, /letters, digits/);
+  assert.equal(bad.errors.length, 5, "each refused group is reported once");
+  assert.deepEqual(bad.layout.order, DEFAULT_LAYOUT_ORDER, "a bad group leaves the order alone");
+
+  const notTable = loadCards({ layout: { tabs: ["a", "b"] } }, ENV);
+  assert.deepEqual(notTable.layout.tabs, {});
+  assert.match(notTable.errors[0], /layout\.tabs: must be a table/);
 });
 
 // ------------------------------------------------------------- (f) JSON

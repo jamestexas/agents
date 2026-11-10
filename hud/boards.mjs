@@ -26,11 +26,19 @@ import { fileURLToPath } from "node:url";
 export const BOARD_SCHEMA = "hud.board/1";
 export const EDGE_KINDS = Object.freeze(["dep", "inferred"]);
 
-const TOP_KEYS = new Set(["schema", "title", "generated", "sources", "columns", "rows", "edges", "notes", "tags", "layout"]);
+const TOP_KEYS = new Set(["schema", "title", "generated", "sources", "columns", "rows", "edges", "notes", "tags", "layout", "group_by"]);
 // Graph directions mermaid accepts for a flowchart. LR suits a short chain; a
 // graph with many parallel branches reads better top-down.
 export const LAYOUTS = Object.freeze(["LR", "TD"]);
-const ROW_KEYS = new Set(["id", "label", "sub", "status", "external", "url", "cells"]);
+const ROW_KEYS = new Set(["id", "label", "sub", "status", "external", "url", "cells", "shape"]);
+// A row's node shape in the graph, and its mermaid brackets. No shape keeps
+// the plain rectangle every board drew before shapes existed.
+export const SHAPES = Object.freeze({
+  group: ["([", "])"],
+  box: ["[", "]"],
+  item: ["(", ")"],
+  gap: ["{{", "}}"],
+});
 const CELL_KEYS = new Set(["value", "chip", "source", "url"]);
 const EDGE_KEYS = new Set(["from", "to", "kind", "why"]);
 const NOTE_KEYS = new Set(["title", "items"]);
@@ -81,6 +89,12 @@ export function validateBoard(doc) {
     if (!isNonEmptyString(c.label)) err(`columns[${i}].label must be a non-empty string`);
   });
 
+  // group_by names a column; the table is split wherever that column's value
+  // changes between consecutive rows, so the producer decides the order.
+  if (doc.group_by !== undefined && !(isNonEmptyString(doc.group_by) && colIds.has(doc.group_by))) {
+    err(`group_by must name a declared column, got ${JSON.stringify(doc.group_by)}`);
+  }
+
   const rows = doc.rows;
   const rowIds = new Set();
   if (!Array.isArray(rows) || rows.length === 0) err("rows must be a non-empty list");
@@ -93,6 +107,7 @@ export function validateBoard(doc) {
     if (!isNonEmptyString(r.label)) err(`rows[${i}].label must be a non-empty string`);
     for (const k of ["sub", "status"]) if (r[k] !== undefined && typeof r[k] !== "string") err(`rows[${i}].${k} must be a string`);
     if (r.external !== undefined && typeof r.external !== "boolean") err(`rows[${i}].external must be a boolean`);
+    if (r.shape !== undefined && !Object.hasOwn(SHAPES, r.shape)) err(`rows[${i}].shape must be one of ${Object.keys(SHAPES).join(", ")}`);
     if (r.url !== undefined && !isHttpUrl(r.url)) err(`rows[${i}].url must be an http(s) URL`);
     const cells = r.cells ?? {};
     if (!cells || typeof cells !== "object" || Array.isArray(cells)) err(`rows[${i}].cells must be an object keyed by column id`);
@@ -181,6 +196,34 @@ function tableText(s) {
  * the label, and a `click` link for a row that has a URL. Returns "" when
  * there is nothing to draw: a board with one row and no edges is a table.
  */
+const SHAPE_LABELS = Object.freeze({ group: "group", box: "box", item: "item", gap: "gap (no ticket)" });
+
+/**
+ * A key for the graph: one sample node per shape the board uses, then one per
+ * status class it uses, in a block of its own so it cannot change the main
+ * graph's layout. Empty when the board uses neither a shape nor more than the
+ * one default class.
+ */
+export function renderLegend(doc) {
+  const rows = doc.rows ?? [];
+  const shapes = Object.keys(SHAPES).filter((k) => rows.some((r) => r.shape === k));
+  const classes = Object.keys(MERMAID_CLASSES).filter((c) => rows.some((r) => statusClass(r.status, r.external) === c));
+  if (shapes.length === 0 && classes.length < 2) return "";
+  const lines = ["flowchart LR"];
+  shapes.forEach((k, i) => {
+    const [open, close] = SHAPES[k];
+    lines.push(`  s${i}${open}"${SHAPE_LABELS[k]}"${close}`);
+  });
+  classes.forEach((c, i) => lines.push(`  c${i}["${c === "external" ? "outside this board" : c}"]:::${c}`));
+  // Unlinked nodes stack in a column even under LR; invisible links keep
+  // shapes on one line and statuses on another, short enough to read fitted.
+  for (const ids of [shapes.map((_, i) => `s${i}`), classes.map((_, i) => `c${i}`)]) {
+    if (ids.length > 1) lines.push(`  ${ids.join(" ~~~ ")}`);
+  }
+  for (const c of classes) lines.push(`  ${MERMAID_CLASSES[c]}`);
+  return lines.join("\n");
+}
+
 export function renderGraph(doc) {
   const rows = doc.rows ?? [];
   const edges = doc.edges ?? [];
@@ -192,7 +235,8 @@ export function renderGraph(doc) {
     const cls = statusClass(r.status, r.external);
     used.add(cls);
     const label = [mermaidText(r.label, 60), r.status ? mermaidText(r.status, 30) : null].filter(Boolean).join("<br/>");
-    lines.push(`  ${idOf.get(r.id)}["${mermaidText(r.id, 40)}<br/>${label}"]:::${cls}`);
+    const [open, close] = SHAPES[r.shape] ?? SHAPES.box;
+    lines.push(`  ${idOf.get(r.id)}${open}"${mermaidText(r.id, 40)}<br/>${label}"${close}:::${cls}`);
   }
   for (const e of edges) {
     const a = idOf.get(e.from);
@@ -204,6 +248,168 @@ export function renderGraph(doc) {
   for (const r of rows) if (r.url) lines.push(`  click ${idOf.get(r.id)} "${r.url}" _blank`);
   for (const cls of used) lines.push(`  ${MERMAID_CLASSES[cls]}`);
   return lines.join("\n");
+}
+
+const GRAPH_KEY = "Solid edges are declared dependencies; dotted edges are inferred, with the reason on the edge. Dashed nodes are outside this board.";
+
+/** A table's header and rows, for the given rows. Only a row's label links. */
+function tableLines(doc, rows, out) {
+  const columns = doc.columns ?? [];
+  if (!columns.length) return;
+  out.push(`| | ${columns.map((c) => tableText(c.label)).join(" | ")} |`);
+  out.push(`| --- | ${columns.map(() => "---").join(" | ")} |`);
+  for (const r of rows) {
+    const label = `**${tableText(r.label)}**`;
+    const head = `${r.url ? `[${label}](${r.url})` : label}${r.sub ? `<br><small>${tableText(r.sub)}</small>` : ""}${r.status ? `<br>\`${tableText(r.status)}\`` : ""}`;
+    const cells = columns.map((c) => {
+      const cell = (r.cells ?? {})[c.id];
+      if (!cell) return "";
+      const v = cell.value === null || cell.value === undefined ? "" : tableText(cell.value);
+      const shown = cell.chip ? `\`${tableText(cell.chip)}\` ${v}`.trim() : v;
+      return cell.url ? `[${shown || cell.url}](${cell.url})` : shown;
+    });
+    out.push(`| ${head} | ${cells.join(" | ")} |`);
+  }
+}
+
+/**
+ * A board's rows split into groups by `group_by`: one group per run of equal
+ * values, in row order. A row with no value for the column is `(none)`. Each
+ * group gets an anchor id that is stable for its position and value.
+ */
+export function groupsOf(doc) {
+  const valueOf = (r) => {
+    const v = ((r.cells ?? {})[doc.group_by] ?? {}).value;
+    return v === null || v === undefined || v === "" ? "(none)" : String(v);
+  };
+  const groups = [];
+  for (const r of doc.rows ?? []) {
+    const v = valueOf(r);
+    if (!groups.length || groups[groups.length - 1].value !== v) {
+      const slug = v.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "group";
+      groups.push({ value: v, id: `group-${groups.length + 1}-${slug}`, rows: [] });
+    }
+    groups[groups.length - 1].rows.push(r);
+  }
+  return groups;
+}
+
+/** The status class a group is drawn with: blocked wins, then open work, then done. */
+function groupClass(rows) {
+  const cls = rows.map((r) => statusClass(r.status, r.external));
+  if (cls.includes("blocked")) return "blocked";
+  if (cls.every((c) => c === "done" || c === "external")) return "done";
+  if (cls.includes("started")) return "started";
+  return "open";
+}
+
+/**
+ * The overview: one node per group, labelled with its size and status mix,
+ * and the edges between groups folded into one per pair, labelled with how
+ * many there are. Clicking a group opens its section on the page.
+ */
+export function renderOverview(doc, groups) {
+  const edges = doc.edges ?? [];
+  const groupOfRow = new Map();
+  groups.forEach((g, i) => g.rows.forEach((r) => groupOfRow.set(r.id, i)));
+  const lines = [`flowchart ${doc.layout ?? "LR"}`];
+  const used = new Set();
+  groups.forEach((g, i) => {
+    const counts = {};
+    for (const r of g.rows) counts[statusClass(r.status, r.external)] = (counts[statusClass(r.status, r.external)] ?? 0) + 1;
+    const mix = ["done", "started", "blocked", "open"].filter((c) => counts[c]).map((c) => `${counts[c]} ${c}`).join(" · ");
+    const cls = groupClass(g.rows);
+    used.add(cls);
+    lines.push(`  g${i}(["${mermaidText(g.value, 60)}<br/>${g.rows.length} rows${mix ? ` · ${mix}` : ""}"]):::${cls}`);
+  });
+  const pairs = new Map();
+  for (const e of edges) {
+    const a = groupOfRow.get(e.from);
+    const b = groupOfRow.get(e.to);
+    if (a === undefined || b === undefined || a === b) continue;
+    const key = `${a}>${b}`;
+    const p = pairs.get(key) ?? { a, b, n: 0, dep: false };
+    p.n += 1;
+    p.dep ||= e.kind === "dep";
+    pairs.set(key, p);
+  }
+  for (const { a, b, n, dep } of pairs.values()) lines.push(dep ? `  g${a} -->|"${n}"| g${b}` : `  g${a} -.->|"${n}"| g${b}`);
+  groups.forEach((g, i) => lines.push(`  click g${i} "#${g.id}"`));
+  for (const cls of used) lines.push(`  ${MERMAID_CLASSES[cls]}`);
+  return lines.join("\n");
+}
+
+/**
+ * One group's graph: its rows, the edges among them, and for an edge that
+ * leaves the group a dashed stub naming the row at the other end, which opens
+ * that row's group when clicked.
+ */
+export function renderGroupGraph(doc, groups, index) {
+  const g = groups[index];
+  const groupOfRow = new Map();
+  groups.forEach((gg, i) => gg.rows.forEach((r) => groupOfRow.set(r.id, i)));
+  const sub = { ...doc, rows: g.rows, edges: (doc.edges ?? []).filter((e) => groupOfRow.get(e.from) === index && groupOfRow.get(e.to) === index) };
+  const body = renderGraph(sub);
+  const lines = body ? body.split("\n") : [`flowchart ${doc.layout ?? "LR"}`];
+  // renderGraph draws nothing for one row with no edges; a section still
+  // shows its row, so it is drawn here, before any stub links to it.
+  if (!body && g.rows.length === 1) {
+    const r = g.rows[0];
+    const cls = statusClass(r.status, r.external);
+    const [open, close] = SHAPES[r.shape] ?? SHAPES.box;
+    lines.push(`  n0${open}"${mermaidText(r.id, 40)}<br/>${mermaidText(r.label, 60)}"${close}:::${cls}`, `  ${MERMAID_CLASSES[cls]}`);
+    if (r.url) lines.push(`  click n0 "${r.url}" _blank`);
+  }
+  const idOf = new Map(g.rows.map((r, i) => [r.id, `n${i}`]));
+  const stubs = new Map();
+  const stubOf = (rowId) => {
+    if (!stubs.has(rowId)) {
+      const other = groups[groupOfRow.get(rowId)];
+      const sid = `x${stubs.size}`;
+      stubs.set(rowId, sid);
+      lines.push(`  ${sid}["${mermaidText(rowId, 40)}<br/>in ${mermaidText(other.value, 40)}"]:::external`);
+      lines.push(`  click ${sid} "#${other.id}"`);
+    }
+    return stubs.get(rowId);
+  };
+  for (const e of doc.edges ?? []) {
+    const fa = groupOfRow.get(e.from) === index;
+    const ta = groupOfRow.get(e.to) === index;
+    if (fa === ta) continue;
+    if (groupOfRow.get(e.from) === undefined || groupOfRow.get(e.to) === undefined) continue;
+    const a = fa ? idOf.get(e.from) : stubOf(e.from);
+    const b = ta ? idOf.get(e.to) : stubOf(e.to);
+    lines.push(e.kind === "inferred" ? `  ${a} -.-> ${b}` : `  ${a} --> ${b}`);
+  }
+  if (stubs.size && !lines.some((l) => l.startsWith("  classDef external"))) lines.push(`  ${MERMAID_CLASSES.external}`);
+  return lines.join("\n");
+}
+
+/**
+ * The grouped page: an overview of the groups, then one section per group
+ * holding its graph and its rows of the table. The first section starts open
+ * and the rest collapsed; the page draws a section's graph when it is first
+ * opened, since a closed section has no size to lay a graph out in.
+ */
+function renderGrouped(doc, out) {
+  const groups = groupsOf(doc);
+  const label = ((doc.columns ?? []).find((c) => c.id === doc.group_by) ?? {}).label ?? doc.group_by;
+  out.push("## Graph", "", `One node per ${tableText(label).toLowerCase()}; a number on an edge is how many dependencies cross between them. Click a node to open its section below. ${GRAPH_KEY}`, "");
+  const legend = renderLegend(doc);
+  if (legend) out.push("```mermaid", legend, "```", "");
+  out.push("```mermaid", renderOverview(doc, groups), "```", "");
+  out.push(`## By ${tableText(label)}`, "");
+  groups.forEach((g, i) => {
+    out.push(`<details class="board-group" id="${g.id}"${i === 0 ? " open" : ""}>`);
+    out.push(`<summary>${escapeHtml(g.value)} · ${g.rows.length} ${g.rows.length === 1 ? "row" : "rows"}</summary>`, "");
+    out.push("```mermaid", renderGroupGraph(doc, groups, i), "```", "");
+    tableLines(doc, g.rows, out);
+    out.push("", "</details>", "");
+  });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 /**
@@ -228,33 +434,31 @@ export function renderBoardMarkdown(doc) {
   out.push("");
   out.push(`# ${doc.title}`);
   out.push("");
-  const gen = `${new Date(doc.generated).toISOString().replace("T", " ").slice(0, 19)} UTC`;
-  const srcs = (doc.sources ?? []).map((s) => `${s.kind}: ${s.ref}${s.at ? ` (${s.at.slice(0, 16).replace("T", " ")})` : ""}`);
-  out.push(`Generated ${gen}${srcs.length ? ` from ${srcs.join("; ")}` : ""}. This page is rendered from \`boards/${slugOf(doc)}.json\`; edit the producer, not the page.`);
-  out.push("");
-
-  const graph = renderGraph(doc);
-  if (graph) {
-    out.push("## Graph", "", "Solid edges are declared dependencies; dotted edges are inferred, with the reason on the edge. Dashed nodes are outside this board.", "", "```mermaid", graph, "```", "");
-  }
-
-  const columns = doc.columns ?? [];
-  if (columns.length) {
-    out.push("## Table", "");
-    out.push(`| | ${columns.map((c) => tableText(c.label)).join(" | ")} |`);
-    out.push(`| --- | ${columns.map(() => "---").join(" | ")} |`);
-    for (const r of doc.rows) {
-      const head = `**${tableText(r.label)}**${r.sub ? `<br><small>${tableText(r.sub)}</small>` : ""}${r.status ? `<br>\`${tableText(r.status)}\`` : ""}`;
-      const cells = columns.map((c) => {
-        const cell = (r.cells ?? {})[c.id];
-        if (!cell) return "";
-        const v = cell.value === null || cell.value === undefined ? "" : tableText(cell.value);
-        const shown = cell.chip ? `\`${tableText(cell.chip)}\` ${v}`.trim() : v;
-        return cell.url ? `[${shown || cell.url}](${cell.url})` : shown;
-      });
-      out.push(`| ${r.url ? `[${head}](${r.url})` : head} | ${cells.join(" | ")} |`);
-    }
+  const stamp = (t) => `${new Date(t).toISOString().replace("T", " ").slice(0, 16)} UTC`;
+  out.push(`Generated ${stamp(doc.generated)}`, "");
+  const sources = doc.sources ?? [];
+  if (sources.length) {
+    out.push("| Source | Ref | As of |", "| --- | --- | --- |");
+    for (const s of sources) out.push(`| ${tableText(s.kind)} | ${tableText(s.ref)} | ${s.at ? stamp(s.at) : ""} |`);
     out.push("");
+  }
+  out.push(`<small>Rendered from \`boards/${slugOf(doc)}.json\`; edit the producer, not the page.</small>`, "");
+
+  if (doc.group_by) renderGrouped(doc, out);
+  else {
+    const graph = renderGraph(doc);
+    if (graph) {
+      out.push("## Graph", "", GRAPH_KEY, "");
+      const legend = renderLegend(doc);
+      if (legend) out.push("```mermaid", legend, "```", "");
+      out.push("```mermaid", graph, "```", "");
+    }
+    const columns = doc.columns ?? [];
+    if (columns.length) {
+      out.push("## Table", "");
+      tableLines(doc, doc.rows, out);
+      out.push("");
+    }
   }
 
   for (const n of doc.notes ?? []) {

@@ -64,6 +64,10 @@ import {
 import { forJoin } from "./cards/normalize/review-state.mjs";
 import { rowKey as boardRowKey } from "./cards/normalize/work-board.mjs";
 import { collectRows, joinPayload, serveCard } from "./cards/serve.mjs";
+import { tokenizeCommand } from "./cmdline.mjs";
+import { renderBoardMarkdown, validateBoard } from "./boards.mjs";
+
+export { tokenizeCommand };
 
 // The reviews layer's pieces now live under cards/; the names stay exported
 // from here so the tests and the CLI that import them keep working.
@@ -515,8 +519,64 @@ function walkFiles(root, rel, out) {
  * immutable layer) and non-markdown files are *listed* — name, path, size —
  * and never opened.
  */
+// ---------------------------------------------------------------- boards
+//
+// A board is its JSON: `projects/<p>/boards/<name>.json` (hud.board/1) is what
+// agents read and write, and the page a person reads at
+// `projects/<p>/boards/<name>.md` is rendered from it whenever it is opened,
+// so dropping a valid file in the folder is enough to see it. A stored .md
+// (what `hud board render` writes) is ignored while the JSON is there; a JSON
+// that does not validate is shown as its errors, not as a stale page.
+
+const BOARD_PAGE_RE = /^(projects\/[^/]+\/boards\/[^/.][^/]*)\.(md|json)$/;
+
+/** The page and source paths of a board, given either one; null for anything else. */
+export function boardPaths(rel) {
+  const m = BOARD_PAGE_RE.exec(String(rel ?? ""));
+  return m ? { md: `${m[1]}.md`, json: `${m[1]}.json` } : null;
+}
+
+/** The page for a board's JSON file: rendered, or the reason it cannot be. */
+export function boardPage(jsonAbs) {
+  const name = path.basename(jsonAbs, ".json");
+  let doc;
+  try {
+    doc = JSON.parse(fs.readFileSync(jsonAbs, "utf8"));
+  } catch (err) {
+    return `# ${name}\n\nThis board's JSON (\`${name}.json\`) could not be read: ${errText(err)}\n`;
+  }
+  const { ok, errors } = validateBoard(doc);
+  if (ok) return renderBoardMarkdown({ ...doc, __name: name });
+  const title = typeof doc?.title === "string" && doc.title.trim() ? doc.title : name;
+  return [
+    `# ${title}`,
+    "",
+    `This board's JSON (\`${name}.json\`) is not valid hud.board/1, so it is not drawn. Fix the producer; see docs/BOARDS.md.`,
+    "",
+    ...errors.map((e) => `- ${e}`),
+    "",
+  ].join("\n");
+}
+
+function isFile(abs) {
+  try {
+    return fs.statSync(abs).isFile();
+  } catch {
+    return false;
+  }
+}
+
 function buildEntry(root, rel) {
-  const abs = path.join(root, rel);
+  // A board's JSON stands for its page: one entry, at the page's path, read
+  // from the JSON. The .md, when there is one, is that same entry.
+  let boardText = null;
+  const board = boardPaths(rel);
+  if (board && isFile(path.join(root, board.json))) {
+    if (rel === board.json && isFile(path.join(root, board.md))) return null;
+    boardText = boardPage(path.join(root, board.json));
+    rel = board.md;
+  }
+  const abs = path.join(root, boardText === null ? rel : board.json);
   const parts = rel.split("/");
   const name = parts[parts.length - 1];
   const inRaw = parts.slice(0, -1).includes("raw");
@@ -533,9 +593,9 @@ function buildEntry(root, rel) {
     return listed;
   }
 
-  let text = "";
+  let text = boardText ?? "";
   try {
-    text = fs.readFileSync(abs, "utf8");
+    if (boardText === null) text = fs.readFileSync(abs, "utf8");
   } catch {
     // Unreadable markdown still gets an entry; lint can chase it.
     return {
@@ -955,39 +1015,6 @@ export function readSnapshot(root, name) {
 
 export function writeSnapshot(root, name, data) {
   return writeSnapshotFile(legacySnapshotFile(root, name), data);
-}
-
-/**
- * Split a config command string into argv. Handles quoted segments; there is
- * deliberately no shell, no globbing and no substitution, so a command string
- * cannot grow into a shell injection.
- */
-export function tokenizeCommand(cmd) {
-  const argv = [];
-  let cur = "";
-  let quote = null;
-  let quoted = false;
-  for (const ch of String(cmd)) {
-    if (quote) {
-      if (ch === quote) quote = null;
-      else cur += ch;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      quoted = true;
-      continue;
-    }
-    if (/\s/.test(ch)) {
-      if (cur !== "" || quoted) argv.push(cur);
-      cur = "";
-      quoted = false;
-      continue;
-    }
-    cur += ch;
-  }
-  if (cur !== "" || quoted) argv.push(cur);
-  return argv;
 }
 
 /** execFile as a promise. Rejects with the error; stdout is capped. */
@@ -1688,7 +1715,7 @@ function cardsOf(root) {
 }
 
 function cardCtx(root, dyn, cards) {
-  return { hudRoot: root, configFile: CONFIG_TOML, now: dyn.now, httpTimeoutMs: dyn.httpTimeoutMs, cards, sendJson };
+  return { hudRoot: root, configFile: CONFIG_TOML, now: dyn.now, httpTimeoutMs: dyn.httpTimeoutMs, env: dyn.env, cards, sendJson };
 }
 
 /** `/api/cards`: every card the config declares, by name, and the panel order. */
@@ -2254,6 +2281,16 @@ function serveMarkdown(res, root, rel) {
   // would corrupt a filename containing a literal `%`.
   if (rel === null || rel === "") return sendText(res, 400, "missing ?path\n");
   if (rel.includes("\0")) return sendText(res, 400, "bad path\n");
+
+  // A board's page is rendered from its JSON on every read, writable store
+  // first, the same order /api/tree uses.
+  const board = boardPaths(rel);
+  if (board && rel === board.md) {
+    for (const store of storeChain(root)) {
+      const json = resolveWithin(store.path, board.json);
+      if (json !== null && isFile(json)) return sendText(res, 200, boardPage(json));
+    }
+  }
 
   // Resolved per store, writable first, so the bytes served match the entry
   // /api/tree advertised. Containment is re-checked against each root rather

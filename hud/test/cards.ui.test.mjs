@@ -108,16 +108,31 @@ test("panel order comes from the layout, falling back to today's order", () => {
   assert.match(LOADERS, /fetch\("\/api\/cards"/, "the list of cards and the layout come from one route");
   assert.match(LOADERS, /body\.layout && Array\.isArray\(body\.layout\.order\) \? body\.layout\.order : \[\]/);
   const order = between("function orderPanels(order)", "/**\n       * One card.");
-  assert.match(order, /order\.map\(\(name\) => el\("wrap-" \+ name\)\)/, "named panels first, in the layout's order");
+  assert.match(order, /order\s*\.map\(\(name\) => el\("wrap-" \+ name\)\)/, "named panels first, in the layout's order");
   assert.match(order, /\[\.\.\.named, \.\.\.rest\]/, "the rest keep their place after them");
   // A card the shell has no panel for gets one: config plus a normaliser,
   // no UI change.
-  const ensure = between("function ensurePanel(name)", "/** Panels the layout names");
+  const ensure = between("function ensurePanel(name)", "function orderPanels(order)");
   assert.match(ensure, /wrap\.id = "wrap-" \+ name/);
   assert.match(ensure, /node\("span", "title", name\)/);
   assert.match(ensure, /node\("span", "stamp"\)/);
   assert.match(ensure, /node\("div", "body"\)/);
   assert.match(ensure, /document\.querySelector\("aside"\)\.appendChild\(wrap\)/);
+});
+
+test("tabs: a group is a view switch over the cards' own panels, never a second loader", () => {
+  assert.match(LOADERS, /applyTabs\(tabs\);\n\s*orderPanels\(order\);/, "groups are built before the order is applied");
+  const tabsBlock = between("// ------------------------------------------------------------ tabs", "const CARD_LIVE = new Map();");
+  assert.ok(!/fetch\s*\(/.test(tabsBlock), "a tab makes no request: each card keeps its own poll");
+  assert.match(tabsBlock, /classList\.toggle\("tab-off", wrap\.dataset\.card !== name\)/, "inactive tabs are hidden, not unloaded");
+  assert.match(tabsBlock, /"hud\.tab\." \+ group/, "the last tab is remembered per group");
+  assert.match(tabsBlock, /try \{\n\s*window\.localStorage/, "storage is optional");
+  assert.match(tabsBlock, /node\("div", "empty misconfigured", spec\.error\)/, "a refused group says why");
+  assert.match(tabsBlock, /i\.state === "needs_you" \|\| i\.running === true/, "a hidden tab still signals");
+  const load = between("async function loadCard(name)", "/** ⟳ :");
+  assert.match(load, /renderCard\(resp, wrap\);\n\s*paintTab\(name, resp\);/, "the tab is painted from the same answer as the panel");
+  const order = between("function orderPanels(order)", "// ------------------------------------------------------------ tabs");
+  assert.match(order, /el\("group-" \+ name\)/, "the layout may name a group");
 });
 
 test("the loader treats 404 as panel-off and anything else as a fault worth the banner", () => {

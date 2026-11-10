@@ -2,10 +2,13 @@
 
 A **board** is a JSON file that says where a set of things stands and where
 each statement came from. It lives in the content tree at
-`projects/<project>/boards/<name>.json`, and `hud board render` writes the
-page beside it, `<name>.md`, which the HUD shows like any other entry: a
-mermaid graph of the rows and their edges, a table of the columns, the notes,
-and the provenance of every cell that named a source.
+`projects/<project>/boards/<name>.json`, and the HUD shows it as a page at
+`projects/<project>/boards/<name>`, rendered from the JSON each time the page
+is opened: a mermaid graph of the rows and their edges, a table of the
+columns, the notes, and the provenance of every cell that named a source.
+Writing a valid file into the folder is all it takes to see it; nothing has to
+be rendered first. A JSON that does not validate is shown as its list of
+errors, so a broken producer reads as broken rather than as an old page.
 
 The JSON is the **agent projection**: a session answers "where is X?" by
 reading it, with the source attached, and never by scraping a page. The
@@ -50,9 +53,11 @@ writer, a ticket, a bead, a service, a person's queue; the shape is the same.
 | `generated` | yes | ISO-8601. When the producer ran; the page prints it and the history snapshot is named by it. |
 | `tags` | no | Extra tags for the page's frontmatter; `board` is always added. |
 | `layout` | no | `LR` (default) or `TD`: the direction of the rendered graph. Use `TD` when the graph fans out into many parallel branches. |
-| `sources` | no | Where the producer looked: `kind` (git, gh, linear, beads, tf, …), `ref`, optional `at`. Printed under the title. |
+| `group_by` | no | A declared column id. Rows are grouped by runs of equal values in that column, in row order (sort the rows to group them; a row with no value groups under `(none)`). The graph becomes an overview, one node per group with its size and status mix, edges between groups folded into one per pair and labelled with their count. Below it, each group is a collapsible section with its own graph and its rows of the table; an edge leaving the group ends at a dashed stub naming the other row. Clicking a group in the overview, or a stub, opens that section. The first section starts open, and a section's graph is drawn when it first opens. |
+| `sources` | no | Where the producer looked: `kind` (git, gh, linear, beads, tf, …), `ref`, optional `at`. Listed as a table under the title. |
 | `columns` | no | The table's columns, in order: `id` (used by cells) and `label`. No columns, no table. |
 | `rows` | yes | The things. `id` is unique and is what edges name; `label`, optional `sub`, free-text `status`, `external` (outside this board, drawn dashed), `url`, and `cells` keyed by column id. |
+| `rows[].shape` | no | The node's shape in the graph: `group` (stadium, e.g. an initiative), `box` (rectangle, e.g. a project), `item` (rounded, e.g. an issue) or `gap` (hexagon, known work with no ticket). Anything else is refused; no shape draws the plain rectangle. When a board uses a shape or more than one status class, a legend sampling exactly those is drawn above the graph, in its own block. |
 | `rows[].cells.<col>` | no | `value` (string, number, boolean or null), optional `chip` (a short class word shown in a code span), `source` (where the value came from), `url`. |
 | `edges` | no | `from`/`to` are row ids. `kind` is `dep` (declared, solid) or `inferred` (dotted, with `why` on the edge). |
 | `notes` | no | Sections after the table: `title` plus `items`, one bullet each. |
@@ -81,7 +86,7 @@ problem, not the first.
 
 ## History
 
-`render` also writes `projects/<project>/boards/.history/<name>/<generated>.json` (a dot-directory, so the tree reader lists the board once rather than once per snapshot).
+The page needs no `render`, but the history does: `render` writes `projects/<project>/boards/.history/<name>/<generated>.json` (a dot-directory, so the tree reader lists the board once rather than once per snapshot).
 Two generations whose content differs only in `generated` are the same
 generation, and the second is not kept, so a producer run on unchanged inputs
 adds nothing. The history is committed with the tree; it is the durable record
@@ -97,13 +102,16 @@ hud board list [--root <HUD_ROOT>]
 
 `render` reads `projects/<project>/boards/<name>.json` unless `--from` names
 another file, in which case that file is copied into place first. It refuses
-an invalid document before writing anything.
+an invalid document before writing anything, then writes the history snapshot
+and a `<name>.md` copy of the page for readers outside the HUD (the HUD itself
+ignores that copy while the JSON is there and renders from the JSON).
 
 ## Writing a producer
 
 A producer is whatever gathers the facts: a script in the project directory
 that reads Terraform, asks `gh`, lists beads, pulls a tracker. It writes the
-JSON and calls `hud board render`. Three rules keep boards honest:
+JSON, which is enough for the HUD, and calls `hud board render` when it wants
+a history snapshot. Three rules keep boards honest:
 
 1. **Every cell that is a fact carries a `source`.** A mode read from a file
    names the file and line. A state read from an API names the API and the

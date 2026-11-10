@@ -419,6 +419,75 @@
         max-width: 100%;
         height: auto;
       }
+      /* A rendered diagram is a pan/zoom viewport (attachDiagramZoom): the
+         SVG keeps its natural size and is scaled by a transform, so text
+         stays readable when zoomed in. The block stops scrolling itself, and
+         the viewport clips. */
+      #docbody .mermaid-block[data-zoom="on"] {
+        overflow: hidden;
+        padding: 0;
+        text-align: left;
+      }
+      .diagram-viewport {
+        position: relative;
+        overflow: hidden;
+        height: 60vh;
+        cursor: grab;
+        touch-action: none;
+      }
+      .diagram-viewport.panning {
+        cursor: grabbing;
+      }
+      .diagram-viewport > svg {
+        position: absolute;
+        left: 0;
+        top: 0;
+      }
+      .diagram-tools {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        padding: 6px 8px;
+        border-bottom: 1px solid var(--card);
+        font: 12px/1 var(--mono);
+      }
+      .diagram-tools button {
+        font: inherit;
+        color: var(--fg, inherit);
+        background: var(--card);
+        border: 1px solid var(--card);
+        border-radius: 4px;
+        padding: 4px 8px;
+        cursor: pointer;
+      }
+      .diagram-tools .hint {
+        margin-left: auto;
+        color: var(--muted);
+      }
+      .diagram-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        display: flex;
+        flex-direction: column;
+        background: var(--panel);
+      }
+      .diagram-overlay .diagram-viewport {
+        flex: 1;
+        height: auto;
+      }
+      /* A board's group sections: the summary reads as a subheading. */
+      #docbody details.board-group {
+        margin: 0 0 12px;
+        border: 1px solid var(--card);
+        border-radius: 8px;
+        padding: 0 12px;
+      }
+      #docbody details.board-group > summary {
+        cursor: pointer;
+        padding: 10px 0;
+        font-weight: 600;
+      }
       /* Mermaid marks a node carrying a click directive `clickable`; say so
          with the cursor, since the link is drawn inside the SVG and gets none
          of the page's own anchor styling. */
@@ -453,6 +522,60 @@
          colour, where the rows would be. The panel stays, so a typo in
          hud.toml reads as a fault and never as "nothing to show". */
       .panel .misconfigured {
+        color: var(--accent);
+      }
+      /* Cards that share one panel as tabs ([layout.tabs]). The group draws
+         the panel; its cards sit inside it without their own frame, and the
+         tab strip stands in for their titles, so each keeps only its stamp. */
+      .tabs-group:not(.panel) {
+        border: 1px solid var(--card);
+        border-radius: 8px;
+        background: var(--card);
+        margin-bottom: 12px;
+        overflow: hidden;
+      }
+      .tabs-group > .panel {
+        border: 0;
+        border-radius: 0;
+        margin: 0;
+      }
+      .tabs-group > .panel.tab-off {
+        display: none;
+      }
+      .tabs-group > .panel > h2 .title {
+        display: none;
+      }
+      .tabstrip {
+        display: flex;
+        gap: 2px;
+        padding: 6px 6px 0;
+        border-bottom: 1px solid var(--card);
+      }
+      .tabstrip .tab {
+        font: 600 11px/1 var(--mono);
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted);
+        background: none;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        padding: 6px 8px;
+        cursor: pointer;
+        display: flex;
+        gap: 6px;
+        align-items: baseline;
+      }
+      .tabstrip .tab[aria-selected="true"] {
+        color: var(--magenta);
+        text-shadow: 0 0 6px currentColor;
+        border-bottom-color: currentColor;
+      }
+      .tabstrip .tab-count {
+        letter-spacing: 0;
+        font-weight: 400;
+      }
+      .tabstrip .tab.hot .tab-count,
+      .tabstrip .tab.bad .tab-count {
         color: var(--accent);
       }
       /* One line across the top when the page is NOT showing live data.
@@ -1454,6 +1577,9 @@
         const blocks = Array.from(root.querySelectorAll('.mermaid-block[data-mermaid="pending"]'));
         for (let i = 0; i < blocks.length; i++) {
           const block = blocks[i];
+          // A diagram in a closed section has no size to be laid out in; it is
+          // drawn when the section first opens (wireSections).
+          if (typeof block.closest === "function" && block.closest("details:not([open])")) continue;
           const code = block.querySelector("code");
           const src = code && code.textContent;
           if (!src || !src.trim()) continue;
@@ -1472,6 +1598,209 @@
         }
       }
       // renderMermaidBlocks:end
+
+      /**
+       * Pan and zoom for a rendered diagram. A graph wider than the column
+       * has text too small to read when fitted, so the block becomes a
+       * viewport. It opens at the column's width (never above full size),
+       * from the top, so labels are readable at once; wheel and drag pan,
+       * ctrl/⌘ + wheel (and a trackpad pinch, which arrives as ctrl + wheel)
+       * zooms around the pointer, and the buttons zoom, reset to that first
+       * view, fit the whole graph, or open it full size over the page. A drag
+       * never fires the click it ends on, so a node's link only opens on a
+       * click that did not move. The SVG is mermaid's own output, moved, not
+       * re-rendered, so its click links keep working.
+       */
+      function zoomable(viewport, svg) {
+        const vb = svg.viewBox && svg.viewBox.baseVal;
+        const w = vb && vb.width ? vb.width : svg.getBoundingClientRect().width || 1;
+        const h = vb && vb.height ? vb.height : svg.getBoundingClientRect().height || 1;
+        svg.removeAttribute("width");
+        svg.removeAttribute("height");
+        svg.style.maxWidth = "none";
+        svg.style.width = w + "px";
+        svg.style.height = h + "px";
+        svg.style.transformOrigin = "0 0";
+        const view = { s: 1, x: 0, y: 0 };
+        const apply = () => {
+          svg.style.transform = "translate(" + view.x + "px," + view.y + "px) scale(" + view.s + ")";
+        };
+        const clamp = (s) => Math.min(8, Math.max(0.05, s));
+        const zoomAt = (factor, cx, cy) => {
+          const s = clamp(view.s * factor);
+          view.x = cx - ((cx - view.x) * s) / view.s;
+          view.y = cy - ((cy - view.y) * s) / view.s;
+          view.s = s;
+          apply();
+        };
+        const fit = () => {
+          const box = viewport.getBoundingClientRect();
+          view.s = clamp(Math.min(box.width / w, box.height / h));
+          view.x = (box.width - w * view.s) / 2;
+          view.y = (box.height - h * view.s) / 2;
+          apply();
+        };
+        const reset = () => {
+          const box = viewport.getBoundingClientRect();
+          view.s = clamp(Math.min(1, box.width / w));
+          view.x = Math.max(0, (box.width - w * view.s) / 2);
+          view.y = 0;
+          apply();
+        };
+        viewport.addEventListener(
+          "wheel",
+          (ev) => {
+            ev.preventDefault();
+            if (ev.ctrlKey || ev.metaKey) {
+              const box = viewport.getBoundingClientRect();
+              zoomAt(Math.exp(-ev.deltaY * 0.01), ev.clientX - box.left, ev.clientY - box.top);
+              return;
+            }
+            view.x -= ev.deltaX;
+            view.y -= ev.deltaY;
+            apply();
+          },
+          { passive: false },
+        );
+        let drag = null;
+        let moved = false;
+        viewport.addEventListener("pointerdown", (ev) => {
+          if (ev.button !== 0) return;
+          drag = { px: ev.clientX, py: ev.clientY, x: view.x, y: view.y };
+          moved = false;
+        });
+        viewport.addEventListener("pointermove", (ev) => {
+          if (!drag) return;
+          const dx = ev.clientX - drag.px;
+          const dy = ev.clientY - drag.py;
+          if (!moved && Math.hypot(dx, dy) < 4) return;
+          if (!moved) {
+            moved = true;
+            viewport.setPointerCapture(ev.pointerId);
+            viewport.classList.add("panning");
+          }
+          view.x = drag.x + dx;
+          view.y = drag.y + dy;
+          apply();
+        });
+        const end = () => {
+          drag = null;
+          viewport.classList.remove("panning");
+        };
+        viewport.addEventListener("pointerup", end);
+        viewport.addEventListener("pointercancel", end);
+        // Capture phase, so the click a drag ends on never reaches a node link.
+        viewport.addEventListener(
+          "click",
+          (ev) => {
+            if (!moved) return;
+            moved = false;
+            ev.preventDefault();
+            ev.stopPropagation();
+          },
+          true,
+        );
+        const center = (factor) => {
+          const box = viewport.getBoundingClientRect();
+          zoomAt(factor, box.width / 2, box.height / 2);
+        };
+        return { fit, reset, zoomIn: () => center(1.25), zoomOut: () => center(0.8) };
+      }
+
+      function diagramTools(ctl, extra) {
+        const bar = node("div", "diagram-tools");
+        const btn = (label, title, fn) => {
+          const b = node("button", null, label);
+          b.type = "button";
+          b.title = title;
+          b.addEventListener("click", fn);
+          bar.appendChild(b);
+        };
+        btn("−", "zoom out", ctl.zoomOut);
+        btn("+", "zoom in", ctl.zoomIn);
+        btn("reset", "back to the first view: the column's width, from the top", ctl.reset);
+        btn("fit", "fit the whole diagram", ctl.fit);
+        for (const [label, title, fn] of extra) btn(label, title, fn);
+        bar.appendChild(node("span", "hint", "scroll or drag to pan · ctrl/⌘ + scroll to zoom"));
+        return bar;
+      }
+
+      /**
+       * Collapsible sections in an entry (a board's groups): a section's
+       * diagrams are drawn the first time it opens, and a link to `#<id>` of a
+       * section on the page, such as a node in a board's overview, opens that
+       * section and scrolls to it instead of changing the page's address.
+       */
+      function wireSections(root, drawDiagrams) {
+        for (const d of root.querySelectorAll("details")) {
+          d.addEventListener("toggle", () => {
+            if (d.open) drawDiagrams(d);
+          });
+        }
+        root.addEventListener("click", (ev) => {
+          const a = ev.target && ev.target.closest ? ev.target.closest("a") : null;
+          if (!a) return;
+          const href = a.getAttribute("href") || a.getAttribute("xlink:href") || "";
+          if (!href.startsWith("#")) return;
+          const target = root.querySelector('details[id="' + href.slice(1).replace(/"/g, "") + '"]');
+          if (!target) return;
+          ev.preventDefault();
+          target.open = true;
+          target.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      }
+
+      /**
+       * Wrap a rendered block's SVG in a viewport with tools, idempotent per
+       * block. Only a diagram that would not read well fitted to the column
+       * gets one: fitting would shrink it below three quarters of its size,
+       * or leave it taller than the viewport. One that reads fine, such as a
+       * board's legend, is left as drawn, since a viewport would only cost it
+       * space. The viewport is no taller than the diagram at its first view.
+       */
+      function attachDiagramZoom(block) {
+        const svg = block.querySelector(":scope > svg");
+        if (!svg || block.dataset.zoom === "on") return;
+        const vb = svg.viewBox && svg.viewBox.baseVal;
+        if (!vb || !vb.width || !vb.height) return;
+        const maxH = window.innerHeight * 0.6;
+        const scale = Math.min(1, block.clientWidth / vb.width);
+        if (scale >= 0.75 && vb.height * scale <= maxH) return;
+        block.dataset.zoom = "on";
+        const viewport = node("div", "diagram-viewport");
+        block.appendChild(viewport);
+        viewport.appendChild(svg);
+        const ctl = zoomable(viewport, svg);
+        block.insertBefore(diagramTools(ctl, [["open full size", "open the diagram over the whole page", () => openDiagramOverlay(svg)]]), viewport);
+        viewport.style.height = Math.min(maxH, vb.height * scale) + "px";
+        ctl.reset();
+      }
+
+      /**
+       * The diagram over the whole page, with the same controls; Esc or the
+       * close button removes it. A copy of the SVG, so closing it leaves the
+       * block on the page exactly as it was.
+       */
+      function openDiagramOverlay(svg) {
+        const overlay = node("div", "diagram-overlay");
+        const viewport = node("div", "diagram-viewport");
+        const copy = svg.cloneNode(true);
+        copy.style.transform = "";
+        viewport.appendChild(copy);
+        const close = () => {
+          overlay.remove();
+          document.removeEventListener("keydown", onKey);
+        };
+        const onKey = (ev) => {
+          if (ev.key === "Escape") close();
+        };
+        const ctl = zoomable(viewport, copy);
+        overlay.appendChild(diagramTools(ctl, [["close", "close (Esc)", close]]));
+        overlay.appendChild(viewport);
+        document.body.appendChild(overlay);
+        document.addEventListener("keydown", onKey);
+        ctl.reset();
+      }
 
       /**
        * Mermaid's theme, expressed in this page's own palette, so a diagram
@@ -1554,7 +1883,14 @@
             // laid-out labels, and no part of reading the entry should wait on
             // it. Unawaited on purpose — a throw in here must not turn the
             // entry into the "could not load" message below.
-            renderMermaidBlocks(rendered, window.mermaid).catch(() => {});
+            const drawDiagrams = (root) =>
+              renderMermaidBlocks(root, window.mermaid)
+                .then(() => {
+                  for (const block of root.querySelectorAll('.mermaid-block[data-mermaid="rendered"]')) attachDiagramZoom(block);
+                })
+                .catch(() => {});
+            drawDiagrams(rendered);
+            wireSections(rendered, drawDiagrams);
           } else {
             // Raw drops and non-markdown are shown verbatim, never interpreted.
             const pre = document.createElement("pre");
@@ -2386,7 +2722,11 @@
         }],
         phases: ["phases", "minutes per phase: ev q se re tr te; … marks the phase still running", (tr, r) => phasesCell(tr, r)],
         verdict: ["verdict", "APPROVE, REQUEST_CHANGES, or COMMENT once settled; PRELIMINARY for a fast run", (tr, r, j) => verdictCell(tr, j ? j.verdict : undefined)],
-        mine: ["mine", "my own review of this PR; † marks one that predates the current head", (tr, r, j) => mineCell(tr, j ? j.review_state : null)],
+        // mine and posted prefer the row's own block: a GitHub-sourced row is
+        // the record of what was posted, and the run joined onto it is only
+        // what /review was told. A run row is its own joined block, and a
+        // board row carries neither, so both still read the run there.
+        mine: ["mine", "my own review of this PR; † marks one that predates the current head", (tr, r, j) => mineCell(tr, r.review_state ?? (j ? j.review_state : null))],
         humans: ["humans", "human reviews: approved / commented / changes requested", (tr, r, j) => humansCell(tr, j ? j.review_state : null)],
         bots: ["bots", "bot reviews, and the findings they reported", (tr, r, j) => botsCell(tr, j ? j.review_state : null)],
         threads: ["threads", "unresolved review threads · awaiting me · awaiting the author", (tr, r, j) => {
@@ -2416,7 +2756,7 @@
           );
         }],
         note: ["note", "the run's note, in the tree", (tr, r, j) => noteCell(tr, j ? j.note_url : undefined, j ? j.note : undefined)],
-        posted: ["posted", "the review as posted, linked", (tr, r, j) => postedCell(tr, j ? j.posted : undefined)],
+        posted: ["posted", "the review as posted, linked", (tr, r, j) => postedCell(tr, r.posted ?? (j ? j.posted : undefined))],
       };
 
       /** The text an empty card shows; a card not named here says "nothing to show". */
@@ -2751,17 +3091,21 @@
       async function loadCards() {
         let names = [];
         let order = [];
+        let tabs = {};
         try {
           const res = await fetch("/api/cards", { cache: "no-store" });
           const body = await res.json().catch(() => null);
           if (res.ok && body && Array.isArray(body.cards)) {
             names = body.cards.filter((n) => typeof n === "string");
             order = body.layout && Array.isArray(body.layout.order) ? body.layout.order : [];
+            const t = body.layout && body.layout.tabs;
+            tabs = t && typeof t === "object" && !Array.isArray(t) ? t : {};
           }
         } catch {
           /* the HUD server itself is gone; hide rather than shout */
         }
         for (const name of names) ensurePanel(name);
+        applyTabs(tabs);
         orderPanels(order);
         // A shell panel whose card is gone — its stanza removed — is hidden,
         // not left showing its last rows.
@@ -2793,12 +3137,117 @@
         return wrap;
       }
 
-      /** Panels the layout names move to the top in that order; the rest keep today's order after them. */
+      /**
+       * Panels the layout names move to the top in that order; the rest keep
+       * today's order after them. A card that is a tab stands for its group,
+       * so naming either the group or any of its cards places the whole panel.
+       */
       function orderPanels(order) {
         const aside = document.querySelector("aside");
-        const named = order.map((name) => el("wrap-" + name)).filter((wrap) => wrap && wrap.parentElement === aside);
+        const named = order
+          .map((name) => el("wrap-" + name))
+          .map((wrap) => (wrap && wrap.parentElement && wrap.parentElement !== aside ? wrap.parentElement : wrap))
+          .concat(order.map((name) => el("group-" + name)))
+          .filter((wrap, i, all) => wrap && wrap.parentElement === aside && all.indexOf(wrap) === i);
         const rest = [...aside.children].filter((child) => !named.includes(child));
         for (const wrap of [...named, ...rest]) aside.appendChild(wrap);
+      }
+
+      // ------------------------------------------------------------ tabs
+      //
+      // `[layout.tabs]` puts several cards in one panel, one tab each. A tab
+      // is a view switch and nothing more: every card keeps its own panel,
+      // poll, refresh and renderCard, and the inactive ones are only hidden.
+      // The tab shows the card's count, and is marked when a row needs you or
+      // a run is in flight, so a hidden tab never goes quiet. The last tab
+      // chosen is remembered per group in localStorage, like the folds; a
+      // group the server refused shows its reason and leaves its cards as
+      // separate panels.
+
+      /** Which card a group shows: the one chosen last, while it is still in the group; else the first. */
+      function readTab(group, cards) {
+        try {
+          const v = window.localStorage.getItem("hud.tab." + group);
+          if (cards.includes(v)) return v;
+        } catch {
+          /* storage unavailable: the first tab stands */
+        }
+        return cards[0];
+      }
+
+      function selectTab(group, name) {
+        const box = el("group-" + group);
+        if (!box) return;
+        for (const wrap of box.querySelectorAll(":scope > .panel[data-card]")) {
+          wrap.classList.toggle("tab-off", wrap.dataset.card !== name);
+        }
+        for (const tab of box.querySelectorAll(".tabstrip .tab")) {
+          tab.setAttribute("aria-selected", tab.dataset.tab === name ? "true" : "false");
+        }
+        try {
+          window.localStorage.setItem("hud.tab." + group, name);
+        } catch {
+          /* storage unavailable or full: the choice lasts until reload */
+        }
+      }
+
+      function applyTabs(tabs) {
+        const aside = document.querySelector("aside");
+        for (const [group, spec] of Object.entries(tabs)) {
+          let box = el("group-" + group);
+          if (spec && typeof spec.error === "string") {
+            if (!box) {
+              box = node("div", "panel tabs-group");
+              box.id = "group-" + group;
+              const h2 = node("h2");
+              h2.appendChild(node("span", "title", group));
+              box.appendChild(h2);
+              const body = node("div", "body");
+              body.appendChild(node("div", "empty misconfigured", spec.error));
+              box.appendChild(body);
+              aside.appendChild(box);
+            }
+            continue;
+          }
+          const cards = spec && Array.isArray(spec.cards) ? spec.cards.filter((n) => typeof n === "string") : [];
+          if (!cards.length) continue;
+          if (!box) {
+            box = node("div", "tabs-group");
+            box.id = "group-" + group;
+            const strip = node("div", "tabstrip");
+            strip.setAttribute("role", "tablist");
+            box.appendChild(strip);
+            aside.insertBefore(box, el("wrap-" + cards[0]));
+          }
+          const strip = box.querySelector(".tabstrip");
+          for (const name of cards) {
+            const wrap = ensurePanel(name);
+            if (wrap.parentElement !== box) box.appendChild(wrap);
+            if (!strip.querySelector('[data-tab="' + name + '"]')) {
+              const tab = node("button", "tab");
+              tab.type = "button";
+              tab.dataset.tab = name;
+              tab.setAttribute("role", "tab");
+              tab.appendChild(node("span", "tab-title", name));
+              tab.appendChild(node("span", "tab-count"));
+              tab.addEventListener("click", () => selectTab(group, name));
+              strip.appendChild(tab);
+            }
+          }
+          selectTab(group, readTab(group, cards));
+        }
+      }
+
+      /** A tab's label: the card's title, its row count, and a mark when a row needs you or a run is in flight. */
+      function paintTab(name, resp) {
+        const tab = document.querySelector('.tabstrip .tab[data-tab="' + name + '"]');
+        if (!tab) return;
+        const items = resp && Array.isArray(resp.items) ? resp.items : [];
+        if (resp && typeof resp.title === "string" && resp.title) tab.querySelector(".tab-title").textContent = resp.title;
+        tab.querySelector(".tab-count").textContent = !resp ? "" : resp.error ? "!" : String(items.length);
+        tab.classList.toggle("bad", !!(resp && resp.error));
+        tab.classList.toggle("hot", items.some((i) => i && (i.state === "needs_you" || i.running === true)));
+        tab.hidden = !resp;
       }
 
       /**
@@ -2908,6 +3357,7 @@
         }
         if (name === "board") setDial(resp && !resp.error ? resp : null);
         renderCard(resp, wrap);
+        paintTab(name, resp);
         paintLiveStamp(name);
         schedule(name, Number.isInteger(next) ? next : DEFAULT_REFRESH_S);
       }
