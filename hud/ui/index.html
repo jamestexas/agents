@@ -3264,7 +3264,7 @@
        * and every card is polled on its served `refresh` either way, so a
        * stream that drops costs latency, never data.
        */
-      const STREAM = { open: false, cards: new Set() };
+      const STREAM = { open: false, cards: new Set(), source: null };
 
       /**
        * A kept body, advanced to now: the clock-derived fields of a run in
@@ -3308,7 +3308,8 @@
         const state = CARD_LIVE.get(name);
         if (!state) return;
         clearTimeout(state.timer);
-        state.timer = secs > 0 ? setTimeout(() => loadCard(name), secs * 1000) : null;
+        // A hidden tab polls nothing: showing it again refetches every card.
+        state.timer = secs > 0 && !document.hidden ? setTimeout(() => loadCard(name), secs * 1000) : null;
       }
 
       /**
@@ -3373,8 +3374,9 @@
        * "polling" and its timer carries it.
        */
       function openStream() {
-        if (!window.EventSource) return;
+        if (!window.EventSource || STREAM.source) return;
         const stream = new EventSource("/api/events");
+        STREAM.source = stream;
         stream.addEventListener("hello", (ev) => {
           let data = null;
           try {
@@ -3400,6 +3402,36 @@
           STREAM.open = false;
           for (const name of CARD_LIVE.keys()) paintLiveStamp(name);
         });
+      }
+
+      function closeStream() {
+        if (!STREAM.source) return;
+        STREAM.source.close();
+        STREAM.source = null;
+        STREAM.open = false;
+        for (const name of CARD_LIVE.keys()) paintLiveStamp(name);
+      }
+
+      /**
+       * A tab nobody is looking at holds no connection. A browser allows six
+       * to one host over HTTP/1.1, and each open stream keeps one busy for
+       * good, so six HUD tabs used to leave a seventh nothing to load with: its
+       * requests waited forever. Hidden, a tab closes its stream and stops
+       * polling; shown again, it reopens the stream and refetches every card
+       * (a 304 for any that has not changed), which is the reconnect the
+       * stream already does after a drop.
+       */
+      function onVisibility() {
+        if (document.hidden) {
+          closeStream();
+          for (const state of CARD_LIVE.values()) {
+            clearTimeout(state.timer);
+            state.timer = null;
+          }
+          return;
+        }
+        openStream();
+        for (const name of CARD_LIVE.keys()) loadCard(name);
       }
 
       /** ⟳ : the tree, the cards, the two remaining proxied sources, and a real peers re-poll. */
@@ -3475,7 +3507,8 @@
       loadDigest();
       loadPeers();
       loadLoadout();
-      openStream();
+      if (!document.hidden) openStream();
+      document.addEventListener("visibilitychange", onVisibility);
       // The stamps' "Ns ago" is the only thing that moves every second.
       setInterval(() => {
         for (const name of CARD_LIVE.keys()) paintLiveStamp(name);
