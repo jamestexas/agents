@@ -63,7 +63,7 @@ Each agent file has two parts:
 1. **YAML Frontmatter**: Metadata and configuration
 2. **System Prompt**: Defines persona, expertise, and behavior
 
-By default an agent inherits the parent session's tools. That default is not a guarantee: `disallowedTools` and `tools` narrow it, and several agents here rely on that — the six adversarial reviewers carry `disallowedTools: Write, Edit` so their read-only posture is enforced rather than merely stated. Check the frontmatter before assuming an agent can reach something.
+By default an agent inherits the parent session's tools. That default is not a guarantee: `disallowedTools` and `tools` narrow it, and several agents here rely on that — the six adversarial reviewers carry `disallowedTools: Write, Edit` so their read-only posture is enforced rather than merely stated. Check the frontmatter before assuming an agent can reach something. A `tools:` allowlist must name `Skill` for the agent to run a skill such as `/review`: without it the agent can only follow skill text pasted into its prompt. `Skill` grants no write tool of its own, so it is safe on a read-only reviewer.
 
 ## Common Tasks
 
