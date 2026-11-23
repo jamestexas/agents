@@ -181,7 +181,10 @@ pr_json="$(jq --arg repo "$REPO" '{
     additions, deletions,
     changed_files: .changedFiles,
     labels: [.labels[]?.name],
-    files: [.files[]? | {path, additions, deletions, change: .changeType}]
+    files: [.files[]? | {path, additions, deletions, change: .changeType}],
+    # the body as written, so a reader can settle release-note and
+    # design-intent questions from this file; `claims` is mined from it
+    body: (.body // "")
 }' <<<"$meta")"
 
 TITLE="$(jq -r '.title // ""' <<<"$meta")"
