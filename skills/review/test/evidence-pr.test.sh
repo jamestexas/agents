@@ -73,3 +73,36 @@ cp "$tmp/run1b/evidence/target.json" "$run1/recheck/evidence/target.json"
 cp "$tmp/run1b/evidence/git/worktree-path" "$tmp/run1b/evidence/git/repo-dir" "$run1/recheck/evidence/git/"
 bash "$EV" --cleanup "$run1" 2>/dev/null
 [ ! -d "$wt1" ] || { echo "cleanup must also remove a worktree a recheck run left"; exit 1; }
+
+# 4. re-run after a force-push: refs/review/1 from the earlier run is not a
+# fast-forward of the new head, and the fetch must still take it
+git -C "$src" checkout -q pr1; git -C "$src" commit -q --amend -m "pr1 rewritten"
+git -C "$remote" fetch -q "$src" "+pr1:refs/pull/1/head"
+git -C "$clone" show-ref --quiet refs/review/1 || { echo "refs/review/1 should survive cleanup"; exit 1; }
+run2="$tmp/run2"
+bash "$EV" --pr acme/widget#1 --repo-dir "$clone" --out "$run2" 2>/dev/null || { echo "re-run after force-push failed: $(cat "$run2/evidence/probes/core/fetch.err")"; exit 1; }
+[ "$(jq -r .head "$run2/evidence/target.json")" = "$(git -C "$src" rev-parse pr1)" ] || { echo "re-run must review the rewritten head"; exit 1; }
+[ "$(git -C "$clone" rev-parse refs/review/1)" = "$(git -C "$src" rev-parse pr1)" ] || { echo "refs/review/1 must move to the rewritten head"; exit 1; }
+
+# 5. a worktree dir whose registration was lost (dead .git file) is replaced
+bash "$EV" --cleanup "$run2" 2>/dev/null
+mkdir -p "$wt1"; echo "gitdir: $clone/.git/worktrees/gone" > "$wt1/.git"
+bash "$EV" --pr acme/widget#1 --repo-dir "$clone" --out "$tmp/run3" 2>/dev/null || { echo "a dead worktree dir must not stop the run"; exit 1; }
+registered "$wt1" || { echo "the replaced worktree must be registered"; exit 1; }
+
+# 6. a registered worktree whose dir was deleted by hand is pruned and re-added
+rm -rf "$wt1"
+bash "$EV" --pr acme/widget#1 --repo-dir "$clone" --out "$tmp/run4" 2>/dev/null || { echo "a registered-but-missing worktree must not stop the run"; exit 1; }
+[ -d "$wt1" ] || { echo "worktree must be re-added"; exit 1; }
+
+# 7. a reused worktree that a probe dirtied is re-pointed anyway
+echo scribble > "$wt1/a.txt"
+bash "$EV" --pr acme/widget#1 --repo-dir "$clone" --out "$tmp/run5" 2>/dev/null || { echo "a dirty reused worktree must not stop the run"; exit 1; }
+[ "$(cat "$wt1/a.txt")" = one ] || { echo "reused worktree must be reset to the PR head"; exit 1; }
+
+# 8. a directory at the worktree path that is not a worktree is left alone
+bash "$EV" --cleanup "$tmp/run5" 2>/dev/null
+mkdir -p "$wt1"; echo mine > "$wt1/keep.txt"
+if bash "$EV" --pr acme/widget#1 --repo-dir "$clone" --out "$tmp/run6" 2>/dev/null; then echo "a foreign dir at the worktree path must stop the run"; exit 1; fi
+[ -f "$wt1/keep.txt" ] || { echo "a foreign dir must not be removed"; exit 1; }
+rm -rf "$wt1"

@@ -47,11 +47,19 @@ usage() {
     exit "${1:-0}"
 }
 
+# is_worktree_of <repo> <dir>: <dir> is registered as one of <repo>'s worktrees
+is_worktree_of() {
+    local want; want="$(cd -P "$2" && pwd -P)"
+    git -C "$1" worktree list --porcelain | while read -r k p; do
+        [ "$k" = worktree ] && [ -d "$p" ] && [ "$(cd -P "$p" && pwd -P)" = "$want" ] && { echo yes; break; }
+    done | grep -q yes
+}
+
 status_of()   { jq -r --arg n "$1" '.probes[]|select(.name==$n)|.status' "$MANIFEST"; }
 require_ran() { [ "$(status_of "$1")" = RAN ] || die "probe $1 is $(status_of "$1"), cannot continue; see $MANIFEST"; }
 
 remove_worktree() {  # <run>: remove the worktree that run created, if it owns one
-    local run="$1" ev="$1/evidence" kind prn wt="" rd=""
+    local run="$1" ev="$1/evidence" kind wt="" rd=""
     # Only a PR run owns its worktree. In path mode the "worktree" is the
     # user's own repo dir, which must never be removed.
     kind="$(jq -r '.kind // ""' "$ev/target.json" 2>/dev/null || true)"
@@ -63,11 +71,9 @@ remove_worktree() {  # <run>: remove the worktree that run created, if it owns o
     else
         note "no worktree to remove for $run (kind=${kind:-?}, worktree=${wt:-none})"
     fi
-    # the fetch refspec parked the PR head under refs/review/<N>; drop it too
-    prn="$(jq -r '.pr // ""' "$ev/target.json" 2>/dev/null || true)"
-    if [ "$kind" = pr ] && [ -n "$prn" ] && [ -n "$rd" ] && git -C "$rd" show-ref --quiet "refs/review/$prn"; then
-        git -C "$rd" update-ref -d "refs/review/$prn" && note "deleted refs/review/$prn in $rd"
-    fi
+    # refs/review/<N> is left in place: the next run's fetch force-updates it,
+    # so keeping it costs nothing, and deleting it only made the ref's
+    # existence depend on which run cleaned up last.
 }
 
 cleanup() {
@@ -128,22 +134,40 @@ if [ "$MODE" = pr ]; then
             u=$2; sub(/\.git$/, "", u); n=length(r)
             if (length(u) > n && substr(u, length(u)-n+1) == r && substr(u, length(u)-n, 1) ~ /[:\/]/) { print $1; exit } }')"
         [ -n "$REMOTE" ] || die "no remote in $REPO_DIR points at $REPO"
-        # Retried only on a busy ref lock: reviews running at once against one
+        # `+`: a force-pushed PR head is not a fast-forward of the one an
+        # earlier run parked under refs/review/<N>, and without it the re-run
+        # is refused. Retried only on a busy ref lock: reviews running at once against one
         # clone race on it. The helper's path travels by --env, so the recorded
         # command (and the manifest hash) does not depend on the install path.
         # shellcheck disable=SC2016  # $FETCH_RETRY expands inside the probe's bash, by design
         probe core fetch --env "FETCH_RETRY=$HERE/git-fetch-retry.sh" -- bash -c '"$FETCH_RETRY" "$@"' _ \
-            "$REPO_DIR" "$REMOTE" "refs/pull/$PR/head:refs/review/$PR" "$BASE_BRANCH"
+            "$REPO_DIR" "$REMOTE" "+refs/pull/$PR/head:refs/review/$PR" "$BASE_BRANCH"
         require_ran core/fetch
         BASE="$REMOTE/$BASE_BRANCH"
         TMP="${TMPDIR:-/tmp}"; WT="${REVIEW_WORKTREE_ROOT:-${TMP%/}/review-worktrees}/${REPO//\//-}-$PR"
         if [ -n "$CORE_ONLY" ]; then
             WT=""
-        elif [ ! -d "$WT" ]; then
-            probe core worktree -- git -C "$REPO_DIR" worktree add -q --detach "$WT" "$HEAD"
         else
-            # a worktree left by an earlier run may sit on an older push; re-point it
-            probe core worktree -- git -C "$WT" checkout -q --detach "$HEAD"
+            # Re-runs must work whatever an earlier run left: prune forgets a
+            # registered worktree whose directory is gone (`add` would refuse
+            # the path), and a directory that is a dead worktree (its .git file
+            # points at metadata that no longer exists) is removed. Anything
+            # else at that path is not ours and stops the run.
+            git -C "$REPO_DIR" worktree prune
+            if [ -d "$WT" ] && ! is_worktree_of "$REPO_DIR" "$WT"; then
+                if [ -f "$WT/.git" ] || [ -z "$(ls -A "$WT")" ]; then
+                    rm -rf "$WT"; note "removed dead worktree dir $WT"
+                else
+                    die "$WT exists and is not a worktree of $REPO_DIR; refusing to touch it"
+                fi
+            fi
+            if [ ! -d "$WT" ]; then
+                probe core worktree -- git -C "$REPO_DIR" worktree add -q --detach "$WT" "$HEAD"
+            else
+                # a worktree left by an earlier run may sit on an older push;
+                # re-point it, discarding anything a probe wrote into it
+                probe core worktree -- git -C "$WT" checkout -q -f --detach "$HEAD"
+            fi
         fi
         if [ -z "$CORE_ONLY" ]; then
             require_ran core/worktree
