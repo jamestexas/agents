@@ -239,8 +239,8 @@ test("the boards card has its cells, and a board row links only to a board page"
   const re = boardCell.match(/const local = typeof r\.url === "string" && (\/.+\/)\.test\(r\.url\);/);
   assert.ok(re, "the board cell gates its link on a pattern");
   const local = new Function(`return ${re[1]}`)();
-  assert.ok(local.test("/n/projects/ces/boards/ces-in-depth"));
-  for (const bad of ["/api/page?path=x", "https://example.invalid/x", "/n/projects/ces/notes/x", "/n/projects/ces/boards/a/b", "javascript:alert(1)"]) {
+  assert.ok(local.test("/n/projects/demo/boards/widgets"));
+  for (const bad of ["/api/page?path=x", "https://example.invalid/x", "/n/projects/demo/notes/x", "/n/projects/demo/boards/a/b", "javascript:alert(1)"]) {
     assert.ok(!local.test(bad), `${bad} must not become a link`);
   }
   assert.match(boardCell, /history\.pushState/, "a board opens in the app, like a note link");

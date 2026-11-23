@@ -49,7 +49,7 @@ test("the fs glob lists each project's boards and nothing in history or below", 
 });
 
 test("boardUrl is the board's page, the JSON path without its extension", () => {
-  assert.equal(boardUrl("projects/ces/boards/ces-in-depth.json"), "/n/projects/ces/boards/ces-in-depth");
+  assert.equal(boardUrl("projects/demo/boards/widgets.json"), "/n/projects/demo/boards/widgets");
 });
 
 test("normalize carries the title, generated time and row count, and links the page", () => {
