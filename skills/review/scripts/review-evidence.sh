@@ -3,7 +3,7 @@
 # evidence directory every later phase reads, and nothing else.
 #
 # Usage:
-#   review-evidence.sh --pr <owner/repo#N | N> [--repo-dir DIR] [--core-only] --out RUN
+#   review-evidence.sh --pr <owner/repo#N | N> [--repo-dir DIR] [--core-only] [--since SHA] --out RUN
 #   review-evidence.sh --path REPO_DIR --base REF --head REF --out RUN
 #   review-evidence.sh --cleanup RUN
 #
@@ -12,6 +12,11 @@
 # head, checks and activity and has no use for a checkout or a second round of
 # builds and tests. (It used to check the PR out again, after phase 6's
 # cleanup had removed the worktree, and nothing removed it a second time.)
+#
+# --since SHA is the head an earlier review of this PR saw (a re-review under
+# --engage). core/since-last-review then lists the commits from SHA to the
+# head and the files they changed, which is what says whether a prior
+# finding was fixed in code or only answered in a thread.
 #
 # --cleanup RUN removes RUN's worktree and that of RUN/recheck, if any.
 #
@@ -84,12 +89,13 @@ cleanup() {
     exit 0
 }
 
-MODE="" PR="" REPO="" REPO_DIR="" BASE="" BASE_LABEL="" HEAD="" RUN="" CORE_ONLY=""
+MODE="" PR="" REPO="" REPO_DIR="" BASE="" BASE_LABEL="" HEAD="" RUN="" CORE_ONLY="" SINCE=""
 ARGS=("$@")
 while [ $# -gt 0 ]; do
     case "$1" in
         --pr)       MODE="pr";   PR="$2"; shift 2 ;;
         --core-only) CORE_ONLY=1; shift ;;
+        --since)    SINCE="$2"; shift 2 ;;
         --repo-dir) REPO_DIR="$2"; shift 2 ;;
         --path)     MODE="path"; REPO_DIR="$2"; shift 2 ;;
         --base)     BASE="$2"; shift 2 ;;
@@ -223,6 +229,17 @@ cp "$OUTDIR/probes/core/files.out" "$OUTDIR/git/files"
 probe core staleness   -- git -C "$REPO_DIR" rev-list --count "$MB..$BASE"
 cp "$OUTDIR/probes/core/staleness.out" "$OUTDIR/git/behind-base"
 probe core commits     -- git -C "$REPO_DIR" log --format='%H %cI %s' "$MB..$HEAD"
+if [ -n "$SINCE" ]; then
+    # A force-push can leave the earlier head unreachable; it is still in the
+    # clone until gc prunes it, and when it is gone the probe says so.
+    # shellcheck disable=SC2016  # the variables expand inside the probe's bash, by design
+    probe core since-last-review --env "REPO_DIR=$REPO_DIR" --env "SINCE=$SINCE" --env "HEAD=$HEAD" -- bash -c '
+        git -C "$REPO_DIR" cat-file -e "$SINCE^{commit}" 2>/dev/null || { echo "earlier head $SINCE is not in the clone (force-pushed and pruned?)" >&2; exit 127; }
+        if [ "$(git -C "$REPO_DIR" rev-parse "$SINCE^{commit}")" = "$(git -C "$REPO_DIR" rev-parse "$HEAD^{commit}")" ]; then echo "none: the head has not moved since the last review"; exit 0; fi
+        if git -C "$REPO_DIR" merge-base --is-ancestor "$SINCE" "$HEAD"; then echo "## commits since the last review ($SINCE..$HEAD)"; git -C "$REPO_DIR" log --format="%h %cI %s" "$SINCE..$HEAD"
+        else echo "## history rewritten: $SINCE is not an ancestor of $HEAD (force-push); diff below is head against the earlier head"; fi
+        echo; echo "## files changed since the last review"; git -C "$REPO_DIR" diff --stat "$SINCE" "$HEAD"'
+fi
 # Base commits since the merge-base that touch a file this change touches. The
 # staleness count says how far the base moved; this says whether it moved under
 # the change, which is what a merge-ref CI run or a rebase will meet.

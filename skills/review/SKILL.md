@@ -13,7 +13,7 @@ description: >
   PR review, own or peer's; replaces the hand-composed explain-work +
   structural-pr-review chain.
 allowed-tools: "Bash,Read,Glob,Grep,Agent,Skill,mcp__modmap__*,mcp__mache__*"
-argument-hint: "<PR number | owner/repo#N | path> [--fast|--light|--deep] [--engage] [--post] [--beads]"
+argument-hint: "<PR number | owner/repo#N | path> [more PRs ...] [--fast|--light|--deep] [--engage] [--post] [--beads]"
 ---
 
 # /review
@@ -198,9 +198,12 @@ whose `state` is `unresolved` (`- thread <path>:<line> — <first line of the
 first comment body>`), then one per `.reviews.items[]` with `kind` `review`
 and a non-empty body (`- review by <author> (<state>) — <first line of
 body>`). An empty body is the review GitHub creates around a thread reply,
-and the thread line already carries it. `(none)` if both
-lists are empty or the file is absent. Thread rows do not count toward
-`{{MAX_QUESTIONS}}`.
+and the thread line already carries it. On a re-review (the PR folder's
+`raw/runs/history.jsonl` has an earlier run), add one line per finding of
+the last run, read from its archive with `tar -xzOf raw/<archive>
+work/findings.json`: `- prior finding [<tag>] <file_line> — <title>`.
+`(none)` if all three lists are empty or the file is absent. Thread and
+prior-finding rows do not count toward `{{MAX_QUESTIONS}}`.
 
 Beyond the threads, the prompt draws questions from the evidence alone:
 UNAVAILABLE and FAILED probes, base drift, failing checks, and
@@ -414,9 +417,23 @@ artifact and record it:
 `state.mjs <run> posted url=<review url> state=<APPROVED|CHANGES_REQUESTED|COMMENTED>`.
 
 `--engage`: phase 1 already has threads in `pr/context.json`; phase 2 seeds
-one row per unresolved thread and one per prior review through
-`{{THREADS}}` in the questions prompt (so the ledger, not this conversation,
-carries them); Post writes replies with `gh api`, never a new review.
+one row per unresolved thread, one per prior review, and on a re-review one
+per finding of the last run, through `{{THREADS}}` in the questions prompt
+(so the ledger, not this conversation, carries them); Post writes replies
+with `gh api`, never a new review.
+
+**Re-review: walk the commits forward.** Thread state is not code state: a
+resolved thread may be unfixed, and an open one may have been fixed two
+commits later. When `raw/runs/history.jsonl` has an earlier run, take the
+`head` of its last line and pass it to phase 1 as `--since <head>`; the
+evidence then carries `probes/core/since-last-review.out`, the commits from
+that head to this one and the files they changed (or UNAVAILABLE when a
+force-push left the old head pruned). Each prior-finding and thread row is
+settled against it plus the code at the head, as **fixed** (a commit since
+changed the cited code and the code no longer does the thing), **answered**
+(the author replied with a reason and the code is unchanged), or **open**.
+`teach.md` and `summary.md` open with a "Since the last review" table, one
+row per prior finding: finding, status, the commit or reply that settled it.
 
 `--beads`: for each confirmed Blocking/Non-blocking finding, `rsry_bead_create`
 with `files` = its `file_line`, body = the ledger row + settling evidence path,

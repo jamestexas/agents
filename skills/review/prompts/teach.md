@@ -24,6 +24,11 @@ Write three files:
   the approval hasn't been posted yet, so capping on it would block the very
   approval it waits for. Name it in the verdict line instead. Phase 7
   re-checks this against the live PR before posting.
+  When the ledger has `prior finding` rows (a re-review), `summary.md`
+  carries a `**Since the last review**` table right after the verdict, one
+  row per prior finding: `| Finding | Status | Settled by |`, status one of
+  fixed, answered, open, from that row's Decision. `teach.md` opens with the
+  same table.
 - `{{WORK}}/impact.md`: one bullet per job-level axis (deploy, metrics,
   callers, on-call), each naming the probe that produced it or saying
   `UNAVAILABLE`.

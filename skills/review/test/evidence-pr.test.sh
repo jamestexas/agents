@@ -142,3 +142,15 @@ for n in 1 2; do
 done
 [ "$(git -C "$clone" rev-parse refs/remotes/upstream/main)" = "$before" ] || { echo "the shared remote-tracking ref must not be written"; exit 1; }
 bash "$EV" --cleanup "$tmp/par1" 2>/dev/null; bash "$EV" --cleanup "$tmp/par2" 2>/dev/null
+
+# 10. --since: a re-review lists what moved since the head the last review saw
+prior="$(jq -r .head "$run2/evidence/target.json")"
+git -C "$src" checkout -q pr1; echo four > "$src/a.txt"; git -C "$src" commit -qam "pr1 follow-up"
+git -C "$remote" fetch -q "$src" "+pr1:refs/pull/1/head"
+bash "$EV" --pr acme/widget#1 --repo-dir "$clone" --since "$prior" --out "$tmp/since" 2>/dev/null
+so="$tmp/since/evidence/probes/core/since-last-review.out"
+[ "$(st "$tmp/since" core/since-last-review)" = RAN ] || { echo "since-last-review: $(st "$tmp/since" core/since-last-review)"; exit 1; }
+grep -q 'pr1 follow-up' "$so" && grep -q 'a.txt' "$so" || { echo "since-last-review must list the new commit and its file: $(cat "$so")"; exit 1; }
+bash "$EV" --pr acme/widget#1 --repo-dir "$clone" --since 0123456789abcdef0123456789abcdef01234567 --out "$tmp/since2" 2>/dev/null
+[ "$(st "$tmp/since2" core/since-last-review)" = UNAVAILABLE ] || { echo "an unknown earlier head must be UNAVAILABLE"; exit 1; }
+bash "$EV" --cleanup "$tmp/since" 2>/dev/null; bash "$EV" --cleanup "$tmp/since2" 2>/dev/null
