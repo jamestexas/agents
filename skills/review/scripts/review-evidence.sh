@@ -8,8 +8,12 @@
 #   review-evidence.sh --cleanup RUN
 #
 # --core-only stops after the target, PR context, checks and git facts: no
-# owners, no packs. It is the phase-7 recheck, which compares head, checks and
-# activity and has no use for a second round of builds and tests.
+# worktree, no owners, no packs. It is the phase-7 recheck, which compares
+# head, checks and activity and has no use for a checkout or a second round of
+# builds and tests. (It used to check the PR out again, after phase 6's
+# cleanup had removed the worktree, and nothing removed it a second time.)
+#
+# --cleanup RUN removes RUN's worktree and that of RUN/recheck, if any.
 #
 # Layout under RUN/evidence (see SKILL.md): manifest.json target.json
 # pr/ git/ owners.json packs.json probes/ replay.txt
@@ -46,12 +50,11 @@ usage() {
 status_of()   { jq -r --arg n "$1" '.probes[]|select(.name==$n)|.status' "$MANIFEST"; }
 require_ran() { [ "$(status_of "$1")" = RAN ] || die "probe $1 is $(status_of "$1"), cannot continue; see $MANIFEST"; }
 
-cleanup() {
+remove_worktree() {  # <run>: remove the worktree that run created, if it owns one
     local run="$1" ev="$1/evidence" kind prn wt="" rd=""
     # Only a PR run owns its worktree. In path mode the "worktree" is the
     # user's own repo dir, which must never be removed.
     kind="$(jq -r '.kind // ""' "$ev/target.json" 2>/dev/null || true)"
-    prn="$(jq -r '.pr // ""' "$ev/target.json" 2>/dev/null || true)"
     [ -f "$ev/git/worktree-path" ] && wt="$(cat "$ev/git/worktree-path")"
     [ -f "$ev/git/repo-dir" ] && rd="$(cat "$ev/git/repo-dir")"
     if [ "$kind" = pr ] && [ -n "$wt" ] && [ "$wt" != "$rd" ] && [ -d "$wt" ]; then
@@ -61,9 +64,17 @@ cleanup() {
         note "no worktree to remove for $run (kind=${kind:-?}, worktree=${wt:-none})"
     fi
     # the fetch refspec parked the PR head under refs/review/<N>; drop it too
+    prn="$(jq -r '.pr // ""' "$ev/target.json" 2>/dev/null || true)"
     if [ "$kind" = pr ] && [ -n "$prn" ] && [ -n "$rd" ] && git -C "$rd" show-ref --quiet "refs/review/$prn"; then
         git -C "$rd" update-ref -d "refs/review/$prn" && note "deleted refs/review/$prn in $rd"
     fi
+}
+
+cleanup() {
+    remove_worktree "$1"
+    # a recheck run from before --core-only stopped checking the PR out
+    # recreated the worktree after the main run's cleanup
+    [ -d "$1/recheck/evidence" ] && remove_worktree "$1/recheck"
     exit 0
 }
 
@@ -126,14 +137,18 @@ if [ "$MODE" = pr ]; then
         require_ran core/fetch
         BASE="$REMOTE/$BASE_BRANCH"
         TMP="${TMPDIR:-/tmp}"; WT="${REVIEW_WORKTREE_ROOT:-${TMP%/}/review-worktrees}/${REPO//\//-}-$PR"
-        if [ ! -d "$WT" ]; then
+        if [ -n "$CORE_ONLY" ]; then
+            WT=""
+        elif [ ! -d "$WT" ]; then
             probe core worktree -- git -C "$REPO_DIR" worktree add -q --detach "$WT" "$HEAD"
         else
             # a worktree left by an earlier run may sit on an older push; re-point it
             probe core worktree -- git -C "$WT" checkout -q --detach "$HEAD"
         fi
-        require_ran core/worktree
-        echo "$WT" > "$OUTDIR/git/worktree-path"
+        if [ -z "$CORE_ONLY" ]; then
+            require_ran core/worktree
+            echo "$WT" > "$OUTDIR/git/worktree-path"
+        fi
     else
         die "cannot resolve PR $REPO#$PR without gh; see manifest"
     fi
@@ -175,6 +190,12 @@ probe core commits     -- git -C "$REPO_DIR" log --format='%H %cI %s' "$MB..$HEA
 # shellcheck disable=SC2016  # the variables expand inside the probe's bash, by design
 probe core base-drift --env "REPO_DIR=$REPO_DIR" --env "MB=$MB" --env "BASE=$BASE" --env "FILES=$OUTDIR/git/files" -- bash -c \
     'n="$(git -C "$REPO_DIR" rev-list --count "$MB..$BASE")"; out="$(xargs git -C "$REPO_DIR" log --format="%h %cI %s" "$MB..$BASE" -- < "$FILES")"; if [ -n "$out" ]; then echo "$out"; else echo "none: $n base commit(s) since the merge-base, none touch a changed file"; fi'
+if [ -n "$CORE_ONLY" ]; then
+    jq -S 'del(.probes[].started, .probes[].ended)' "$MANIFEST" | shasum -a 256 | cut -d' ' -f1 > "$OUTDIR/manifest.sha256"
+    note "core evidence written to $OUTDIR ($(jq '.probes|length' "$MANIFEST") probes; worktree, modules, owners and packs skipped)"
+    exit 0
+fi
+
 # Nearest go.mod above each changed file, deduped: the unit `go build` works
 # in. git/go-packages pairs each module with the package dirs (relative to it)
 # holding a changed .go file that still exists, so a test or lint probe can
@@ -195,12 +216,6 @@ while read -r f; do
     fi
 done < "$OUTDIR/git/files" | sort -u > "$OUTDIR/git/modules"
 sort -u "$gp.unsorted" > "$gp"; rm -f "$gp.unsorted"
-
-if [ -n "$CORE_ONLY" ]; then
-    jq -S 'del(.probes[].started, .probes[].ended)' "$MANIFEST" | shasum -a 256 | cut -d' ' -f1 > "$OUTDIR/manifest.sha256"
-    note "core evidence written to $OUTDIR ($(jq '.probes|length' "$MANIFEST") probes; owners and packs skipped)"
-    exit 0
-fi
 
 # ---- owners ---------------------------------------------------------------
 # CODEOWNERS is read at the BASE ref of the reviewer's checkout, never from the
