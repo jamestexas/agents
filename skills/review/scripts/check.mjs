@@ -185,18 +185,25 @@ if (fs.existsSync(eventsPath)) {
 // for a run whose claims use observations, so a run that predates them reads
 // the same as before.
 const allClaims = (read('claims.jsonl') ?? '').split('\n').filter((l) => l.trim()).map(tryJSON).filter(Boolean);
-const observes = (c) => typeof c.source === 'string' && c.source.startsWith('work/observe/');
+// A claim may rest on several recordings: `source` is a path, a JSON array
+// of paths, or one string listing several (comma-, semicolon- or
+// space-separated). Every work/observe/ path named in it is checked.
+const sourceText = (c) => (Array.isArray(c.source) ? c.source : [c.source]).filter((x) => typeof x === 'string').join(' ');
+const recordings = (c) => [...new Set(sourceText(c).match(/work\/observe\/[A-Za-z0-9._-]+\.json/g) ?? [])];
+const observes = (c) => recordings(c).length > 0;
 if (allClaims.some((c) => observes(c) || c.kind)) {
   gate('observe', (fail, pass) => {
     let bad = false; let recorded = 0;
     for (const c of allClaims) {
       if (c.class !== 'RAN') continue;
       if (observes(c)) {
-        const rec = tryJSON(fs.existsSync(path.join(run, c.source)) ? fs.readFileSync(path.join(run, c.source), 'utf8') : 'null');
-        if (!rec || typeof rec.exit !== 'number') { bad = true; fail(`claim ${c.id} cites ${c.source}, which is not an observe.sh recording`); }
-        else recorded++;
-      } else if (c.kind === 'behavior' && !(typeof c.source === 'string' && c.source.includes('probes/'))) {
-        bad = true; fail(`claim ${c.id} is a RAN behavior claim with no recording or probe behind it (source: ${c.source ?? 'none'})`);
+        for (const src of recordings(c)) {
+          const rec = tryJSON(fs.existsSync(path.join(run, src)) ? fs.readFileSync(path.join(run, src), 'utf8') : 'null');
+          if (!rec || typeof rec.exit !== 'number') { bad = true; fail(`claim ${c.id} cites ${src}, which is not an observe.sh recording`); }
+          else recorded++;
+        }
+      } else if (c.kind === 'behavior' && !sourceText(c).includes('probes/')) {
+        bad = true; fail(`claim ${c.id} is a RAN behavior claim with no recording or probe behind it (source: ${sourceText(c) || 'none'})`);
       }
     }
     if (!bad) pass(`${recorded} recording(s) behind RAN claims`);

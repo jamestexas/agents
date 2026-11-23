@@ -51,7 +51,9 @@ two ways, but a recorded run settles it.
   This compiles it into that package via `go test -overlay`, so the
   worktree is never edited and other readers are not affected.
 - Cite the recording as the claim's `source` (`work/observe/<id>.json`),
-  with `class` `RAN`. Ids are `{{READER}}-<short name>` and are write-once.
+  with `class` `RAN`. A claim resting on several recordings lists them as a
+  JSON array (`"source":["work/observe/a.json","work/observe/b.json"]`);
+  the gate checks each. Ids are `{{READER}}-<short name>` and are write-once.
 - When a behavior claim cannot be observed here (it needs prod, a service
   this machine can't reach, or data that isn't in the repo), keep it `READ`
   and add `"unobservable": "<why>"`. A behavior claim that is read without

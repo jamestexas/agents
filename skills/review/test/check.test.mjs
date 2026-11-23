@@ -217,3 +217,22 @@ test('a triage row whose # cell holds no number is named, not silently dropped f
   assert.equal(r.status, 1);
   assert.match(r.stdout, /triage: table row\(s\) "candidate two" have no number in the # cell/);
 });
+
+test('a RAN claim may cite several recordings in one source, as an array or a list; each is checked', () => {
+  const rec = (dir, id) => {
+    fs.mkdirSync(path.join(dir, 'work', 'observe'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'work', 'observe', `${id}.json`), JSON.stringify({ id, exit: 0, cmd: ['true'] }));
+  };
+  const arr = withClaim({ kind: 'behavior', class: 'RAN', source: ['work/observe/a.json', 'work/observe/b.json'] });
+  rec(arr, 'a'); rec(arr, 'b');
+  const okArr = runDir(arr);
+  assert.equal(okArr.status, 0, okArr.stdout);
+  assert.match(okArr.stdout, /observe: 2 recording\(s\) behind RAN claims — ok/);
+
+  const list = withClaim({ kind: 'behavior', class: 'RAN', source: 'work/observe/a.json, work/observe/b.json' });
+  rec(list, 'a');
+  const missing = runDir(list);
+  assert.equal(missing.status, 1);
+  assert.match(missing.stdout, /observe: claim c1 cites work\/observe\/b\.json, which is not an observe\.sh recording/);
+  assert.doesNotMatch(missing.stdout, /cites work\/observe\/a\.json/);
+});
