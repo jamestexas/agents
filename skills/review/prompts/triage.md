@@ -26,6 +26,10 @@ the caller.
 
 Write `{{WORK}}/triage.md` in the skill's table format with the header
 `## Triage — N candidates in, N dispositions out` and the counted footer.
+The `#` cell is a bare integer: the candidate's position in the list above
+(1, 2, 3, ...), not `row N` and not the ledger row number. The gate counts
+rows by that cell. A candidate's ledger row goes in the Evidence / reason
+cell.
 Then write `{{WORK}}/findings.json`: the confirmed set in blast-radius order,
 `[{"tag":"Blocking|Non-blocking|Question|Observation","title":"","file_line":"","blast":"","rows":[..],"claims":[..]}]`
 where `claims` are ids from `{{WORK}}/claims.jsonl` (readers' ids and

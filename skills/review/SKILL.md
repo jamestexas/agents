@@ -133,8 +133,9 @@ itself, as pass-throughs, and the gates run unchanged:
 - `work/triage.md`: header `## Triage — N candidates in, N dispositions
   out` where N is the line count of `work/candidates.md`; the skill's table
   (`| # | Candidate (one line) | Disposition | Evidence / reason |`), one
-  row per candidate in order, disposition `question (light)`, the last cell
-  the candidate's citing ledger row (`row N`); then the counted footer
+  row per candidate in order, `#` the bare position (`1`, `2`, ...),
+  disposition `question (light)`, the last cell the candidate's citing
+  ledger row (`row N`); then the counted footer
   (`**Confirmed: N. Dropped: 0. Already raised: 0. Already addressed: 0.
   Revised: 0.**`).
 - `work/findings.json`: every candidate as `{"tag":"Question", "title":

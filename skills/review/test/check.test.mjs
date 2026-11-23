@@ -190,3 +190,30 @@ test('outputs gate: printed only with events.jsonl; fails when a run phase left 
   assert.equal(ok.status, 0, ok.stdout);
   assert.match(ok.stdout, /^outputs: 3 phase\(s\) with output, 2 skipped — ok$/m);
 });
+
+// A copy of fixtures/good whose triage.md table body is replaced by `rows`.
+const withTriage = (rows) => {
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rv-tri-')), 'run');
+  fs.cpSync(path.join(here, 'fixtures', 'good'), dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'work', 'triage.md'), [
+    `## Triage — ${rows.length} candidates in, ${rows.length} dispositions out`, '',
+    '| # | Candidate (one line) | Disposition | Evidence / reason |', '|---|---|---|---|',
+    ...rows, '', '**Confirmed: 0. Dropped: 0. Already raised: 0. Already addressed: 0. Revised: 0.**', ''].join('\n'));
+  return dir;
+};
+
+test('a triage # cell written as "row N", "#N" or bold still counts as row N', () => {
+  const r = runDir(withTriage([
+    '| row 1 | a | question (light) | row 4 |',
+    '| #2 | b | question (light) | row 5 |',
+    '| **3** | c | question (light) | row 6 |']));
+  assert.match(r.stdout, /triage: 3 in, 3 out — ok/);
+});
+
+test('a triage row whose # cell holds no number is named, not silently dropped from the count', () => {
+  const r = runDir(withTriage([
+    '| 1 | a | confirmed | x |',
+    '| candidate two | b | dropped | y |']));
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /triage: table row\(s\) "candidate two" have no number in the # cell/);
+});
