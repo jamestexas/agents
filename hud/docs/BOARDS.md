@@ -8,7 +8,9 @@ is opened: a mermaid graph of the rows and their edges, a table of the
 columns, the notes, and the provenance of every cell that named a source.
 Writing a valid file into the folder is all it takes to see it; nothing has to
 be rendered first. A JSON that does not validate is shown as its list of
-errors, so a broken producer reads as broken rather than as an old page.
+errors, so a broken producer reads as broken rather than as an old page. A `boards` card (shape `boards`, see
+[CARDS.md](CARDS.md)) lists every board in the tree and links each to its
+page, so no copy of a board needs writing anywhere else.
 
 The JSON is the **agent projection**: a session answers "where is X?" by
 reading it, with the source attached, and never by scraping a page. The

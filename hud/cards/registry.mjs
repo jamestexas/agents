@@ -15,6 +15,7 @@
 import * as cmdKind from "./kinds/cmd.mjs";
 import * as fsKind from "./kinds/fs.mjs";
 import * as httpKind from "./kinds/http.mjs";
+import * as boards from "./normalize/boards.mjs";
 import * as ghReviews from "./normalize/gh-reviews.mjs";
 import * as pages from "./normalize/pages.mjs";
 import * as reviewState from "./normalize/review-state.mjs";
@@ -90,6 +91,7 @@ export const KINDS = Object.freeze({
  * default columns and, when the shape has one, its scope vocabulary.
  */
 export const SHAPES = Object.freeze({
+  boards,
   "gh-reviews": ghReviews,
   "review-state": reviewState,
   "work-board": workBoard,

@@ -2706,6 +2706,26 @@
           }
           cell(tr, content, "page", r.path);
         }],
+        board: ["board", "a board, opened as its page in the HUD", (tr, r) => {
+          // Only a board page is linked, and in-app like a note link: a row's
+          // url that is anything else is shown as text.
+          const local = typeof r.url === "string" && /^\/n\/projects\/[^/]+\/boards\/[^/]+$/.test(r.url);
+          const label = r.title || r.path || DASH;
+          let content = label;
+          if (local) {
+            content = node("a", "text", label);
+            content.href = r.url;
+            content.addEventListener("click", (ev) => {
+              ev.preventDefault();
+              history.pushState({ kind: "entry", path: parseRoute(r.url).path }, "", r.url);
+              applyLocation();
+            });
+          }
+          const wrap = node("span", null);
+          wrap.append(content);
+          if (r.invalid) wrap.append(" ", node("span", "needs-you", `invalid (${r.errors} error${r.errors === 1 ? "" : "s"})`));
+          cell(tr, wrap, "board", [r.path, typeof r.rows === "number" ? `${r.rows} rows` : ""].filter(Boolean).join(" · "));
+        }],
         updated: ["updated", "when the file was last written", (tr, r) => {
           cell(tr, r.updated ? ago(r.updated) : undefined, "updated", r.updated ? fmtTime(r.updated) : "");
         }],

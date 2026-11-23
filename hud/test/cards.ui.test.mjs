@@ -13,6 +13,7 @@ import path from "node:path";
 
 import { COLUMNS as REVIEW_COLUMNS } from "../cards/normalize/review-state.mjs";
 import { COLUMNS as BOARD_COLUMNS } from "../cards/normalize/work-board.mjs";
+import { COLUMNS as BOARDS_COLUMNS } from "../cards/normalize/boards.mjs";
 
 const html = fs.readFileSync(path.join(import.meta.dirname, "..", "ui", "index.html"), "utf8");
 
@@ -227,4 +228,20 @@ test("a board's group section takes the whole column, like a diagram", () => {
   // The prose measure caps every direct child of the body; a section holds a
   // graph and a wide table, which would otherwise stop at the measure.
   assert.match(html, /#docbody > div > details\.board-group \{\s*max-width: none;/);
+});
+
+test("the boards card has its cells, and a board row links only to a board page", () => {
+  const registry = between("const CELLS = {", "/** The text an empty card shows");
+  for (const id of BOARDS_COLUMNS) {
+    assert.match(registry, new RegExp(`^\\s{8}${id}: \\["`, "m"), `no cell for column ${id}`);
+  }
+  const boardCell = between("        board: [\"board\"", "        updated: [");
+  const re = boardCell.match(/const local = typeof r\.url === "string" && (\/.+\/)\.test\(r\.url\);/);
+  assert.ok(re, "the board cell gates its link on a pattern");
+  const local = new Function(`return ${re[1]}`)();
+  assert.ok(local.test("/n/projects/ces/boards/ces-in-depth"));
+  for (const bad of ["/api/page?path=x", "https://example.invalid/x", "/n/projects/ces/notes/x", "/n/projects/ces/boards/a/b", "javascript:alert(1)"]) {
+    assert.ok(!local.test(bad), `${bad} must not become a link`);
+  }
+  assert.match(boardCell, /history\.pushState/, "a board opens in the app, like a note link");
 });
