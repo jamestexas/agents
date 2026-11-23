@@ -162,8 +162,12 @@ gql() {
 
 note "reading $REPO#$N"
 PR_FIELDS='number,title,author,state,isDraft,baseRefName,headRefName,createdAt,updatedAt,url,additions,deletions,changedFiles,files,labels,body,closingIssuesReferences,reviews,comments'
-rc=0; meta="$(gh pr view "$N" --repo "$REPO" --json "$PR_FIELDS" 2>&1)" || rc=$?
-[ "$rc" -eq 0 ] || die "cannot read $REPO#$N: $(brief "$meta")"
+# stderr is kept apart: gh >= 2.105 prints an advisory "hint: ... gh event
+# listen" on stderr for `pr view`, which would corrupt the JSON on stdout.
+meta_err="$(mktemp)"
+rc=0; meta="$(gh pr view "$N" --repo "$REPO" --json "$PR_FIELDS" 2>"$meta_err")" || rc=$?
+[ "$rc" -eq 0 ] || die "cannot read $REPO#$N: $(brief "$(cat "$meta_err")")"
+rm -f "$meta_err"
 
 pr_json="$(jq --arg repo "$REPO" '{
     repo: $repo,
@@ -177,7 +181,10 @@ pr_json="$(jq --arg repo "$REPO" '{
     additions, deletions,
     changed_files: .changedFiles,
     labels: [.labels[]?.name],
-    files: [.files[]? | {path, additions, deletions, change: .changeType}]
+    files: [.files[]? | {path, additions, deletions, change: .changeType}],
+    # the body as written, so a reader can settle release-note and
+    # design-intent questions from this file; `claims` is mined from it
+    body: (.body // "")
 }' <<<"$meta")"
 
 TITLE="$(jq -r '.title // ""' <<<"$meta")"

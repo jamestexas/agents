@@ -190,3 +190,49 @@ test('outputs gate: printed only with events.jsonl; fails when a run phase left 
   assert.equal(ok.status, 0, ok.stdout);
   assert.match(ok.stdout, /^outputs: 3 phase\(s\) with output, 2 skipped — ok$/m);
 });
+
+// A copy of fixtures/good whose triage.md table body is replaced by `rows`.
+const withTriage = (rows) => {
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rv-tri-')), 'run');
+  fs.cpSync(path.join(here, 'fixtures', 'good'), dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'work', 'triage.md'), [
+    `## Triage — ${rows.length} candidates in, ${rows.length} dispositions out`, '',
+    '| # | Candidate (one line) | Disposition | Evidence / reason |', '|---|---|---|---|',
+    ...rows, '', '**Confirmed: 0. Dropped: 0. Already raised: 0. Already addressed: 0. Revised: 0.**', ''].join('\n'));
+  return dir;
+};
+
+test('a triage # cell written as "row N", "#N" or bold still counts as row N', () => {
+  const r = runDir(withTriage([
+    '| row 1 | a | question (light) | row 4 |',
+    '| #2 | b | question (light) | row 5 |',
+    '| **3** | c | question (light) | row 6 |']));
+  assert.match(r.stdout, /triage: 3 in, 3 out — ok/);
+});
+
+test('a triage row whose # cell holds no number is named, not silently dropped from the count', () => {
+  const r = runDir(withTriage([
+    '| 1 | a | confirmed | x |',
+    '| candidate two | b | dropped | y |']));
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /triage: table row\(s\) "candidate two" have no number in the # cell/);
+});
+
+test('a RAN claim may cite several recordings in one source, as an array or a list; each is checked', () => {
+  const rec = (dir, id) => {
+    fs.mkdirSync(path.join(dir, 'work', 'observe'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'work', 'observe', `${id}.json`), JSON.stringify({ id, exit: 0, cmd: ['true'] }));
+  };
+  const arr = withClaim({ kind: 'behavior', class: 'RAN', source: ['work/observe/a.json', 'work/observe/b.json'] });
+  rec(arr, 'a'); rec(arr, 'b');
+  const okArr = runDir(arr);
+  assert.equal(okArr.status, 0, okArr.stdout);
+  assert.match(okArr.stdout, /observe: 2 recording\(s\) behind RAN claims — ok/);
+
+  const list = withClaim({ kind: 'behavior', class: 'RAN', source: 'work/observe/a.json, work/observe/b.json' });
+  rec(list, 'a');
+  const missing = runDir(list);
+  assert.equal(missing.status, 1);
+  assert.match(missing.stdout, /observe: claim c1 cites work\/observe\/b\.json, which is not an observe\.sh recording/);
+  assert.doesNotMatch(missing.stdout, /cites work\/observe\/a\.json/);
+});

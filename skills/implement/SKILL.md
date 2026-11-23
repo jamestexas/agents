@@ -6,14 +6,14 @@ description: >-
   research → TDD loop → self-review gate → structural review. Thin: it
   SEQUENCES existing skills (problem-decomposer/work-scope, feature-impl,
   superpowers/test-driven-development, self-audit,
-  test-fidelity, taskfile-ci-parity, structural-pr-review) in a fixed order
+  test-fidelity, taskfile-ci-parity, review) in a fixed order
   with rigid gates; it does not re-derive them. Mirror of
-  structural-pr-review for the build side.
+  /review for the build side.
 ---
 
 # implement — implementation orchestrator
 
-A fixed-sequence chain for implementing one unit of work (a feature or a fix) with the same determinism `structural-pr-review` brings to the review side. Ad-hoc implementation anchors on whatever the author noticed first; this chain guarantees the same evidence shape every time: decompose (P0) → research (P1) → TDD loop (P2) → self-review gate (P3) → structural review (P4) → close (P5).
+A fixed-sequence chain for implementing one unit of work (a feature or a fix) with the same determinism `/review` brings to the review side. Ad-hoc implementation anchors on whatever the author noticed first; this chain guarantees the same evidence shape every time: decompose (P0) → research (P1) → TDD loop (P2) → self-review gate (P3) → structural review (P4) → close (P5).
 
 **Two non-negotiables:**
 1. **The human does the human-facing actions.** This skill STOPS before `git push`, before opening a PR, before posting any review/reply. It prepares and verifies; the human pushes and posts. (gitsign keyless enforces this — the final signature is the author's.)
@@ -85,7 +85,7 @@ The pre-review gate the process does informally but never as a skill. Run BEFORE
 
 ## P4 — REVIEW  (in-session · depth adapts to PR shape)
 
-Invoke `structural-pr-review` on the branch (local, posts nothing). Its own classifier decides depth: mechanical/derived → run the falsifier; feature/behavioral → the adversarial lens dispatch (type-driven-correctness, security-auditor, dataflow-driven-troubleshooting, and a contract-conformance pass — verify every emitted value + doc/contract promise against the code). Produce the falsifiable matrix + verdict. Verify every agent claim against the code yourself before trusting it.
+Invoke `/review` on the branch (path mode: the repo path, base and head; local, posts nothing; `--deep` for a feature). Depth adapts to the shape: mechanical/derived → run the falsifier; feature/behavioral → the adversarial lens dispatch (type-driven-correctness, security-auditor, dataflow-driven-troubleshooting, and a contract-conformance pass — verify every emitted value + doc/contract promise against the code). Produce the falsifiable matrix + verdict. Verify every agent claim against the code yourself before trusting it.
 
 ## P5 — CLOSE  (rigid · then STOP)
 
@@ -108,7 +108,7 @@ Invoke `structural-pr-review` on the branch (local, posts nothing). Its own clas
 | P5 close | RIGID | beads closed; human hand-off prepared; STOP |
 
 ## Why a fixed sequence?
-Same rationale as `structural-pr-review`: a deterministic chain guarantees the same evidence shape every run — decomposition (P0) → pattern-grounding (P1) → mutation-proven code (P2) → the self-review gate that catches what a compiler won't (P3) → structure-aware review (P4). The skills it calls each carry their own discipline; this skill's only job is the sequence and the gates, not re-deriving them.
+Same rationale as `/review`: a deterministic chain guarantees the same evidence shape every run — decomposition (P0) → pattern-grounding (P1) → mutation-proven code (P2) → the self-review gate that catches what a compiler won't (P3) → structure-aware review (P4). The skills it calls each carry their own discipline; this skill's only job is the sequence and the gates, not re-deriving them.
 
 ## Cross-references
-`structural-pr-review` (the review-side mirror), `problem-decomposer` / `work-scope` (P0 inputs), `feature-impl` (P1 research), `superpowers/test-driven-development` (P2), `taskfile-ci-parity` (P2/P3), `self-audit` / `test-fidelity` (P3). Process invariants (foreground commits + explicit staging, no-deferred-work, interactive-not-autonomous, walk-commits-forward) are enforced inside the flexible phases per the author's standing preferences.
+`/review` (the review-side mirror), `problem-decomposer` / `work-scope` (P0 inputs), `feature-impl` (P1 research), `superpowers/test-driven-development` (P2), `taskfile-ci-parity` (P2/P3), `self-audit` / `test-fidelity` (P3). Process invariants (foreground commits + explicit staging, no-deferred-work, interactive-not-autonomous, walk-commits-forward) are enforced inside the flexible phases per the author's standing preferences.

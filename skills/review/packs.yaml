@@ -12,6 +12,9 @@
 # changed .go file, so a probe can scope to what changed.
 # `needs` lists binaries; a missing one makes every probe UNAVAILABLE. A
 # probe that exits 127 is recorded UNAVAILABLE with its stderr as the reason.
+# `timeout` (seconds) sets each of the pack's probes' time limit; the default
+# is REVIEW_PROBE_TIMEOUT, else 300. A probe still running at its limit is
+# killed and recorded UNAVAILABLE with reason "timeout: ...".
 #
 # Every pack states the question it answers. Phase 2 reads that line to know
 # an answer exists; a pack without one is a lint failure.
@@ -31,6 +34,9 @@ packs:
     question: "Which modules and callers does this change reach; do the touched modules still build and vet; do the changed packages' tests pass and lint clean against the merge-base?"
     match: ["**/*.go", "**/go.mod", "**/go.sum"]
     needs: [go]
+    # above `go test -timeout 10m` below, so go's own timeout, which names
+    # the stuck test, fires before the probe runner's kill
+    timeout: 900
     probes:
       # test and lint run on the changed packages only, not whole modules: a
       # module-wide run in a large repo costs minutes and mostly re-proves the

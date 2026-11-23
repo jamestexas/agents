@@ -7,18 +7,27 @@ description: >
   writes a decision ledger with "settled by" before any answer; isolated
   readers settle rows from the evidence directory alone; a fresh-context
   refute pass attacks every candidate; finding-triage gates significance;
-  explain-work teaches; three arithmetic checks decide whether the one HUD
-  artifact is postable. Posts only with --post and a policy file. Use for any
+  an independent explain-work pass runs beside it and a script joins the two
+  into a focus map (what is load-bearing x what held); three arithmetic
+  checks decide whether the HUD artifact is postable. Posts only with --post and a policy file. Use for any
   PR review, own or peer's; replaces the hand-composed explain-work +
   structural-pr-review chain.
 allowed-tools: "Bash,Read,Glob,Grep,Agent,Skill,mcp__modmap__*,mcp__mache__*"
-argument-hint: "<PR number | owner/repo#N | path> [--fast|--light|--deep] [--engage] [--post] [--beads]"
+argument-hint: "<PR number | owner/repo#N | path> [more PRs ...] [--fast|--light|--deep] [--engage] [--post] [--beads]"
 ---
 
 # /review
 
-Seven phases. Each reads files and writes files under one run directory.
-No phase reads another phase's chat reply. Spec:
+Seven phases, plus an explain pass that runs beside them and a join that
+reads both. Each reads files and writes files under one run directory.
+No phase reads another phase's chat reply.
+
+Two lenses look at the same evidence and never read each other. The review
+phases falsify: for each question, what would make this true, and did it
+hold? The explain pass constructs: what does this change do, and which parts
+of it are load-bearing? `scripts/focus-map.mjs` joins them with no model.
+The review produces the peer-facing artifact (`review.md`, and the post
+body); the explanation and the focus map are for the operator. Spec:
 `docs/superpowers/specs/2026-10-28-review-chain-design.md`.
 
 ## Run directory
@@ -69,6 +78,14 @@ bash $SKILL/scripts/review-evidence.sh --pr <owner/repo#N> --repo-dir <local clo
 jq -r '.probes[] | "\(.status)\t\(.name)"' <run>/evidence/manifest.json
 ```
 
+Run the evidence script in the background (the Bash tool's
+`run_in_background`), not as a foreground call: a foreground call is killed
+at its 10-minute ceiling, and on a large change the builds and tests alone
+can pass that. Each probe carries its own time limit (pack `timeout:`, else
+`REVIEW_PROBE_TIMEOUT`, else 300s); a probe killed at its limit is recorded
+UNAVAILABLE with reason `timeout: ...`, so it becomes a ledger question
+instead of taking every later probe with it.
+
 `--repo-dir` is the reviewer's trusted clone: the repo-local pack file and
 CODEOWNERS are both read at its BASE ref, never from the PR worktree, and
 the script writes `evidence/manifest.sha256` from a timestamp-free hash so a
@@ -95,6 +112,18 @@ ledger question in phase 2. Do not re-fetch what the script fetched.
 Authorship: compare `pr/context.json`'s author login to `gh api user --jq
 .login`. Record `own` or `peer` for phase 6; tell no reader.
 
+### Explain pass (independent, alongside phases 2–5)
+
+Right after the manifest is read, dispatch one background `general-purpose`
+agent with `prompts/explain.md`, substituting `{{EVIDENCE}}`, `{{RUN}}`,
+`{{AUTHORSHIP}}`, `{{CONTEXT}}` (as in phase 6), and `{{OUT}}` = `explain.md`
+beside the note (`$HUD_ROOT/projects/<project>/prs/PR-N/explain.md`). It
+reads the evidence and the worktree and never `work/`; no review phase reads
+its output. It ends `explain.md` with an `## Areas` table (load-bearing vs
+plumbing, file:line). Do not wait for it: phases 2–5 run while it does, and
+the join after phase 6 is the first thing that needs it. Skip it under
+`--fast`.
+
 Then record the evidence in the run's state file, which the HUD reviews panel reads:
 
 ```bash
@@ -112,6 +141,29 @@ written, ends with `node $SKILL/scripts/state.mjs <run> output <name>`
 Post with `posted`. `state.json` is a progress file, not evidence:
 no phase reads it.
 
+## Several PRs
+
+`/review 42088 42090 owner/repo#39311` reviews each PR on its own: one run
+directory, one worktree, one set of sub-agents per PR, and no phase of one
+review reads another's files. Start every PR's phase 1 together, each in
+the background; evidence runs against one clone are safe in parallel (each
+fetches into its own `refs/review/<N>` and `refs/review-base/<N>`). Then
+drive each run through its phases; the sub-agents of different PRs may run
+concurrently, but never share a prompt.
+
+With no PR argument and a request for "my queue", build the list first
+(`zen_inbox` when the zen MCP is connected, else `gh search prs
+--review-requested=@me --state=open --json number,title,repository`) and
+confirm it with the user, `repo#number — title` per line, before fanning out.
+
+When every run has finished, the hand-over adds one cross-PR summary: a
+line per PR (`repo#N — VERDICT — one line why`, Blocking and
+REQUEST_CHANGES first), the themes that recur across PRs (the same finding
+twice, a file two of them touch, a sibling-PR row that names another PR in
+the list), and the PRs that need a decision from the user. For a stack, list
+the PRs bottom up. Posting stays per PR: `--post` with several PRs asks for
+each one.
+
 ## Mode
 
 `--light`, default, `--deep`. **Auto-light**: after phase 1, if
@@ -125,8 +177,9 @@ itself, as pass-throughs, and the gates run unchanged:
 - `work/triage.md`: header `## Triage — N candidates in, N dispositions
   out` where N is the line count of `work/candidates.md`; the skill's table
   (`| # | Candidate (one line) | Disposition | Evidence / reason |`), one
-  row per candidate in order, disposition `question (light)`, the last cell
-  the candidate's citing ledger row (`row N`); then the counted footer
+  row per candidate in order, `#` the bare position (`1`, `2`, ...),
+  disposition `question (light)`, the last cell the candidate's citing
+  ledger row (`row N`); then the counted footer
   (`**Confirmed: N. Dropped: 0. Already raised: 0. Already addressed: 0.
   Revised: 0.**`).
 - `work/findings.json`: every candidate as `{"tag":"Question", "title":
@@ -157,7 +210,7 @@ early signal, and every other candidate on it is unrefuted.
 
 `state.mjs <run> phase questions`. Dispatch one `general-purpose` agent with
 `prompts/questions.md`, substituting `{{EVIDENCE}}`, `{{WORK}}`,
-`{{MAX_QUESTIONS}}` and `{{THREADS}}`. `{{MAX_QUESTIONS}}` is `8` under
+`{{MAX_QUESTIONS}}`, `{{THREADS}}` and `{{MODE}}` (the resolved mode). `{{MAX_QUESTIONS}}` is `8` under
 `--light`, `14` by default; under `--deep` delete the "Ask at most
 {{MAX_QUESTIONS}} questions;" clause instead, so the count is unbounded. The
 cap is a budget, not a target, and UNAVAILABLE rows count toward it.
@@ -168,9 +221,22 @@ whose `state` is `unresolved` (`- thread <path>:<line> — <first line of the
 first comment body>`), then one per `.reviews.items[]` with `kind` `review`
 and a non-empty body (`- review by <author> (<state>) — <first line of
 body>`). An empty body is the review GitHub creates around a thread reply,
-and the thread line already carries it. `(none)` if both
-lists are empty or the file is absent. Thread rows do not count toward
-`{{MAX_QUESTIONS}}`.
+and the thread line already carries it. On a re-review (the PR folder's
+`raw/runs/history.jsonl` has an earlier run), add one line per finding of
+the last run, read from its archive with `tar -xzOf raw/<archive>
+work/findings.json`: `- prior finding [<tag>] <file_line> — <title>`.
+`(none)` if all three lists are empty or the file is absent. Thread and
+prior-finding rows do not count toward `{{MAX_QUESTIONS}}`.
+
+Beyond the threads, the prompt draws questions from the evidence alone:
+UNAVAILABLE and FAILED probes, base drift, failing checks, and
+`probes/core/sibling-prs.out`, the author's other open PRs that touch a file
+this one touches, each cut to the shared files. A sibling becomes a row
+asking whether the two PRs edit the same lines consistently; neither PR's
+own review would see that. Outside `--deep`, one row always asks whether
+skipping the deep pass is safe (diff fully read, zero code reach, every
+load-bearing claim checked against an artifact); when it settles "no", say
+in the hand-over to rerun with `--deep`.
 
 Pass nothing else: not the PR title, not your hunches, not this
 conversation. When it returns, read `work/ledger.md` and confirm every
@@ -271,8 +337,24 @@ node $SKILL/scripts/state.mjs <run> output teach
 node $SKILL/scripts/render.mjs <run> --title "PR N — <title>" --out <notes path>
 node $SKILL/scripts/check.mjs <run>
 node $SKILL/scripts/state.mjs <run> finish note=<notes path relative to $HUD_ROOT>
+# wait for the explain pass, then join (no model)
+node $SKILL/scripts/focus-map.mjs <PR folder> --run <run>
 bash $SKILL/scripts/review-evidence.sh --cleanup <run>
 ```
+
+The join runs once the explain pass has written `explain.md`, and before
+cleanup, since the explain pass reads the worktree. `focus-map.mjs` reads
+the `## Areas` table and the run's `work/ledger.md`, `work/findings.json`
+and `work/claims.jsonl`, matches them by file and line overlap (resolving a
+reader's `git/diff.patch hunk N` through the patch, and a shared identifier
+when no lines match), and writes `focus.md` beside the note: a 2x3 grid of
+load-bearing/plumbing by held/open/fell, a "Look here first" list (findings
+in areas explain-work also flagged, load-bearing open rows, load-bearing
+areas no review question reached), the areas the two passes disagree on, and
+the review items no area claims. A finding replaces the ledger rows it cites.
+If the explain pass failed or wrote no `## Areas` table, the script says so
+and exits 1; the review artifact is unaffected, and the hand-over says the
+focus map is missing.
 
 `finish` re-runs the gates and records each as ok or fail, the verdict from
 `summary.md`, and the finding counts; the HUD row turns from running to done
@@ -288,7 +370,10 @@ run entered recorded an `output`, or was recorded as skipped. A `--fast`
 run gets a last line, `fast: PRELIMINARY — not postable`, and a non-zero
 exit regardless of the gates.
 
-Print the notes path and the check lines. `finish` has already added the
+Print the check lines and the two outputs: for the operator, `explain.md`
+and `focus.md` (lead with focus.md's "Look here first"); for peers, the
+notes path (`review.md`, whose summary and findings become the post body).
+`finish` has already added the
 note's `index.md` line (once per path); append one line to
 `$HUD_ROOT/log.md`. Stop here unless `--post`.
 
@@ -358,9 +443,23 @@ artifact and record it:
 `state.mjs <run> posted url=<review url> state=<APPROVED|CHANGES_REQUESTED|COMMENTED>`.
 
 `--engage`: phase 1 already has threads in `pr/context.json`; phase 2 seeds
-one row per unresolved thread and one per prior review through
-`{{THREADS}}` in the questions prompt (so the ledger, not this conversation,
-carries them); Post writes replies with `gh api`, never a new review.
+one row per unresolved thread, one per prior review, and on a re-review one
+per finding of the last run, through `{{THREADS}}` in the questions prompt
+(so the ledger, not this conversation, carries them); Post writes replies
+with `gh api`, never a new review.
+
+**Re-review: walk the commits forward.** Thread state is not code state: a
+resolved thread may be unfixed, and an open one may have been fixed two
+commits later. When `raw/runs/history.jsonl` has an earlier run, take the
+`head` of its last line and pass it to phase 1 as `--since <head>`; the
+evidence then carries `probes/core/since-last-review.out`, the commits from
+that head to this one and the files they changed (or UNAVAILABLE when a
+force-push left the old head pruned). Each prior-finding and thread row is
+settled against it plus the code at the head, as **fixed** (a commit since
+changed the cited code and the code no longer does the thing), **answered**
+(the author replied with a reason and the code is unchanged), or **open**.
+`teach.md` and `summary.md` open with a "Since the last review" table, one
+row per prior finding: finding, status, the commit or reply that settled it.
 
 `--beads`: for each confirmed Blocking/Non-blocking finding, `rsry_bead_create`
 with `files` = its `file_line`, body = the ledger row + settling evidence path,
@@ -378,7 +477,9 @@ probes before any model call; UNAVAILABLE rows become questions before readers
 run; *Settled by* before *Decision*; refute reads findings and evidence, never
 the settling reasoning; triage reads refutations before confirmations; cheap
 local probes before credentialed ones; the staleness recheck before the gates
-in Post; existing threads seed questions before new ones under `--engage`.
+in Post; existing threads seed questions before new ones under `--engage`;
+the explain pass and the review phases never read each other, and only the
+join, after both, sees the two together.
 
 ## Reader contract (what phases 3–5 are held to)
 

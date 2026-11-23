@@ -4,8 +4,8 @@ description: >
   Review a PR, ticket, or path and explain it so it sticks — mache/CODEOWNERS/
   ticket context synthesized into a taught explanation, not a bare findings
   list. Own work gets onboarding framing; a peer's gets findings-teaching. Not
-  for posting reviews (pr-review) or the reviewer-only pre-flight alone
-  (review-prep). Local only.
+  for posting reviews (/review does that, and runs this skill as its
+  independent explain pass). Local only.
 allowed-tools: "Bash,Read,Glob,Grep,Agent,mcp__mache__*"
 argument-hint: "<PR number, owner/repo#N, LINEAR-ID, or path> [--deep]"
 ---
@@ -31,9 +31,11 @@ PII-free.
 ## Step 0 — Check for prior session context
 
 Before fetching anything, check whether the current session already contains
-analysis of the same target. If a `pr-review-kit`, `pr-review`, or `review-prep`
-pass was just run in this session for the same PR/path, **reuse that context
-rather than re-fetching**. The layers that are already materialised (file reads,
+analysis of the same target. If a `pr-review-kit` or `/review` pass was just
+run in this session for the same PR/path, **reuse that context rather than
+re-fetching**. The exception is `/review`'s explain pass: its prompt forbids
+reading the review's work, because the join that follows is only worth
+anything when the two passes are independent. The layers that are already materialised (file reads,
 commit history, inline comment triage, matrix rows) should be treated as the
 `hard` layer from Step 2 — no need to repeat the gh calls or worktree setup.
 
@@ -56,8 +58,10 @@ Each layer is a seam: present it when the source is available, skip it silently
 when it is not. Never block on a missing layer. **Track each layer's outcome**
 (reached / partial / skipped + reason) for the degradation report in Step 6.
 
-- **Code / structural** — run `review-prep` (spec + emergent diagrams + impact)
-  for a PR/diff, or read the files directly for a path. This is the `hard` layer.
+- **Code / structural** — inside a `/review` run, read the evidence
+  directory's impact and structure probes; otherwise follow
+  `skills/review-prep/PROCEDURE.md` (spec + emergent diagrams + impact) for a
+  PR/diff, or read the files directly for a path. This is the `hard` layer.
 - **Boundaries / dependencies** — run `seam-discovery` on the touched
   project(s) to map what this work depends on and what depends on it.
 - **Team ownership** — read the repo `CODEOWNERS`; map the touched paths to
@@ -185,7 +189,7 @@ useful signal that the explanation is built on solid ground.
 ## Posture
 
 - Local / explain only. **Post nothing to GitHub, edit no files.** (For posting a
-  review, hand off to `pr-review`.)
+  review, hand off to `/review`.)
 - The skill carries no personal or org-specific data. Identity and org context
   live in the user's native rules / memory and are read at runtime, so the skill
   remains generic and shareable.

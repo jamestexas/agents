@@ -65,7 +65,23 @@ Rules:
    pending), write one row asking whether this change causes the failure;
    the settler is that check's log or failure probe if a pack declares one,
    else the probe file plus the diff, which may settle `Unresolved`.
-9. Escape `|` inside a cell as `\|`.
-10. End with: `Questions asked: N.`
+9. If `probes/core/sibling-prs.out` lists a sibling PR (a `## #M` section,
+   not the `none:` line), write one row per sibling asking whether its edits
+   to the shared files are consistent with this change: the same lines
+   changed two ways, a value one PR sets and the other assumes, or an order
+   the two must merge in. The settler is that probe's section for the
+   sibling plus this change's hunk for the same file.
+10. This run's mode is `{{MODE}}`. Unless it is `deep`, write one job-level
+    row asking whether skipping the deep pass (one reader per review
+    dimension) is safe for this change. It is safe only when all three hold:
+    the diff is small enough that every changed line is read; code reach is
+    zero (no new caller, branch or control flow other code enters); and
+    every load-bearing claim the PR makes is checked against an artifact,
+    not the body. The settler is `git/files`, `git/diff.patch`, and
+    `probes/go-graph/modmap-impact.out` or `probes/structure-*/paths.out`
+    when present. This row makes the skip a decision rather than an
+    omission.
+11. Escape `|` inside a cell as `\|`.
+12. End with: `Questions asked: N.`
 
 Write nothing else. Do not answer, do not review.

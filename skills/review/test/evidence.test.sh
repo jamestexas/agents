@@ -27,7 +27,7 @@ git checkout -q main && echo more >> README.md && git commit -qam "main moved"
 git checkout -q feature
 
 bin="$tmp/bin"; mkdir -p "$bin"   # a PATH with no gh, no go, no modmap (uname: macOS system ruby runs it at startup)
-for t in git jq ruby uname shasum date mktemp head tr cut mkdir cat grep sort uniq xargs dirname basename wc sed awk tee rm mv cp realpath readlink bash sh env; do
+for t in git jq ruby uname shasum date mktemp head tr cut mkdir cat grep sort uniq xargs dirname basename wc sed awk tee rm mv cp realpath readlink bash sh env sleep; do
     p="$(command -v $t || true)"; [ -n "$p" ] && ln -sf "$p" "$bin/$t"
 done
 
@@ -46,6 +46,13 @@ packs:
   bare:
     question: "a pack with a question and no probes"
     match: ["**/*.go"]
+  slow:
+    question: "does a pack-level timeout stop a hung probe without losing the next one?"
+    match: ["**/*.md"]
+    timeout: 1
+    probes:
+      hang: 'sleep 30'
+      next: 'echo after-hang'
 YAML
 
 out="$tmp/run"
@@ -80,6 +87,9 @@ jq -e '.matched | map(.name) | index("docs-only") | not' "$out/evidence/packs.js
 { grep -q '^one$' "$out/evidence/probes/multi/two.out" && grep -q '^two$' "$out/evidence/probes/multi/two.out"; } || { echo "multi-line probe must run both lines"; exit 1; }
 jq -e '[.probes[]|select(.name|startswith("multi/"))]|length == 1' "$m" >/dev/null || { echo "block scalar must be one probe, not one per line"; exit 1; }
 jq -e '.matched | map(.name) | index("bare")' "$out/evidence/packs.json" >/dev/null || { echo "bare pack should match"; exit 1; }
+[ "$(st slow/hang)" = UNAVAILABLE ] || { echo "slow/hang: a pack timeout must kill the probe, got $(st slow/hang)"; exit 1; }
+jq -e '.probes[] | select(.name=="slow/hang") | .reason | startswith("timeout: killed after 1s")' "$m" >/dev/null || { echo "slow/hang: reason must say timeout"; exit 1; }
+[ "$(st slow/next)" = RAN ] || { echo "slow/next: the probe after a timeout must still run, got $(st slow/next)"; exit 1; }
 # the manifest hash must be stable across runs of the same target
 out2="$tmp/run2"
 HUD_ROOT="$hud" PATH="$bin" bash "$HERE/../scripts/review-evidence.sh" --path "$repo" --base main --head feature --out "$out2" 2>/dev/null

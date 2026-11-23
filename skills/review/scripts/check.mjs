@@ -39,24 +39,39 @@ const work = (f) => path.join(run, 'work', f);
 const read = (f) => fs.existsSync(work(f)) ? fs.readFileSync(work(f), 'utf8') : null;
 const tryJSON = (text) => { try { return JSON.parse(text); } catch { return undefined; } };
 
-const isRow = (l) => /^\|\s*\d+\s*\|/.test(l);
 const cells = splitCells; // `\|` inside a cell is a pipe, not a column break
+// The `#` cell is meant to be a bare integer. Writers sometimes decorate it
+// (`row 3`, `#3`, `**3**`, `3.`); those still name a row unambiguously, so
+// they count, as the number they carry. Anything else in that cell is not a
+// numbered row.
+const NUM_CELL = /^\*{0,2}(?:row\s*|#)?(\d+)\.?\*{0,2}$/i;
+const rowNumber = (cell) => { const m = String(cell ?? '').trim().match(NUM_CELL); return m ? Number(m[1]) : NaN; };
+const isRow = (l) => l.startsWith('|') && !Number.isNaN(rowNumber(cells(l)[0]));
+// Rows come back with their first cell normalized to the bare number.
+const numbered = (l) => { const c = cells(l); c[0] = String(rowNumber(c[0])); return c; };
 // Every numbered table row in a document.
-const tableRows = (md) => md.split('\n').filter(isRow).map(cells);
+const tableRows = (md) => md.split('\n').filter(isRow).map(numbered);
+const isSeparator = (l) => /^\|[\s:|-]+\|?\s*$/.test(l);
 // Numbered rows of the first table after the line matching `header`: skip to
 // the first `|` line, then stop at the first line that is not part of it.
+// `stray` collects body rows (past the header row and separator) whose `#`
+// cell is not a number, so the gate can name them instead of silently
+// counting short.
 const tableAfter = (md, header) => {
   const lines = md.split('\n');
   const start = lines.findIndex((l) => header.test(l));
-  if (start === -1) return [];
-  const rows = [];
-  let inTable = false;
+  const rows = []; const stray = [];
+  if (start === -1) return { rows, stray };
+  let seen = 0;
   for (const l of lines.slice(start + 1)) {
     const isTableLine = l.startsWith('|');
-    if (inTable && !isTableLine) break;
-    if (isTableLine) { inTable = true; if (isRow(l)) rows.push(cells(l)); }
+    if (seen && !isTableLine) break;
+    if (!isTableLine) continue;
+    seen++;
+    if (isRow(l)) rows.push(numbered(l));
+    else if (seen > 1 && !isSeparator(l)) stray.push(cells(l)[0]);
   }
-  return rows;
+  return { rows, stray };
 };
 // Leading "Unresolved", optionally bold; a decided cell may mention the word.
 const isUnresolved = (cell) => /^\*{0,2}unresolved\b/i.test(cell);
@@ -98,7 +113,8 @@ gate('triage', (fail, pass) => {
   const header = /(\d+) candidates in, (\d+) dispositions out/;
   const m = triage.match(header);
   if (!m) return fail('header "N candidates in, N dispositions out" missing');
-  const rows = tableAfter(triage, header);
+  const { rows, stray } = tableAfter(triage, header);
+  if (stray.length) return fail(`table row(s) ${stray.map((c) => JSON.stringify(c)).join(', ')} have no number in the # cell; # is the candidate's position, a bare integer (1, 2, ...)`);
   if (Number(m[1]) !== rows.length || Number(m[2]) !== rows.length) return fail(`header says ${m[1]} in / ${m[2]} out, table has ${rows.length} rows`);
   pass(`${m[1]} in, ${rows.length} out`);
 });
@@ -169,18 +185,25 @@ if (fs.existsSync(eventsPath)) {
 // for a run whose claims use observations, so a run that predates them reads
 // the same as before.
 const allClaims = (read('claims.jsonl') ?? '').split('\n').filter((l) => l.trim()).map(tryJSON).filter(Boolean);
-const observes = (c) => typeof c.source === 'string' && c.source.startsWith('work/observe/');
+// A claim may rest on several recordings: `source` is a path, a JSON array
+// of paths, or one string listing several (comma-, semicolon- or
+// space-separated). Every work/observe/ path named in it is checked.
+const sourceText = (c) => (Array.isArray(c.source) ? c.source : [c.source]).filter((x) => typeof x === 'string').join(' ');
+const recordings = (c) => [...new Set(sourceText(c).match(/work\/observe\/[A-Za-z0-9._-]+\.json/g) ?? [])];
+const observes = (c) => recordings(c).length > 0;
 if (allClaims.some((c) => observes(c) || c.kind)) {
   gate('observe', (fail, pass) => {
     let bad = false; let recorded = 0;
     for (const c of allClaims) {
       if (c.class !== 'RAN') continue;
       if (observes(c)) {
-        const rec = tryJSON(fs.existsSync(path.join(run, c.source)) ? fs.readFileSync(path.join(run, c.source), 'utf8') : 'null');
-        if (!rec || typeof rec.exit !== 'number') { bad = true; fail(`claim ${c.id} cites ${c.source}, which is not an observe.sh recording`); }
-        else recorded++;
-      } else if (c.kind === 'behavior' && !(typeof c.source === 'string' && c.source.includes('probes/'))) {
-        bad = true; fail(`claim ${c.id} is a RAN behavior claim with no recording or probe behind it (source: ${c.source ?? 'none'})`);
+        for (const src of recordings(c)) {
+          const rec = tryJSON(fs.existsSync(path.join(run, src)) ? fs.readFileSync(path.join(run, src), 'utf8') : 'null');
+          if (!rec || typeof rec.exit !== 'number') { bad = true; fail(`claim ${c.id} cites ${src}, which is not an observe.sh recording`); }
+          else recorded++;
+        }
+      } else if (c.kind === 'behavior' && !sourceText(c).includes('probes/')) {
+        bad = true; fail(`claim ${c.id} is a RAN behavior claim with no recording or probe behind it (source: ${sourceText(c) || 'none'})`);
       }
     }
     if (!bad) pass(`${recorded} recording(s) behind RAN claims`);
