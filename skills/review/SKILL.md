@@ -141,6 +141,29 @@ written, ends with `node $SKILL/scripts/state.mjs <run> output <name>`
 Post with `posted`. `state.json` is a progress file, not evidence:
 no phase reads it.
 
+## Several PRs
+
+`/review 42088 42090 owner/repo#39311` reviews each PR on its own: one run
+directory, one worktree, one set of sub-agents per PR, and no phase of one
+review reads another's files. Start every PR's phase 1 together, each in
+the background; evidence runs against one clone are safe in parallel (each
+fetches into its own `refs/review/<N>` and `refs/review-base/<N>`). Then
+drive each run through its phases; the sub-agents of different PRs may run
+concurrently, but never share a prompt.
+
+With no PR argument and a request for "my queue", build the list first
+(`zen_inbox` when the zen MCP is connected, else `gh search prs
+--review-requested=@me --state=open --json number,title,repository`) and
+confirm it with the user, `repo#number — title` per line, before fanning out.
+
+When every run has finished, the hand-over adds one cross-PR summary: a
+line per PR (`repo#N — VERDICT — one line why`, Blocking and
+REQUEST_CHANGES first), the themes that recur across PRs (the same finding
+twice, a file two of them touch, a sibling-PR row that names another PR in
+the list), and the PRs that need a decision from the user. For a stack, list
+the PRs bottom up. Posting stays per PR: `--post` with several PRs asks for
+each one.
+
 ## Mode
 
 `--light`, default, `--deep`. **Auto-light**: after phase 1, if
@@ -187,7 +210,7 @@ early signal, and every other candidate on it is unrefuted.
 
 `state.mjs <run> phase questions`. Dispatch one `general-purpose` agent with
 `prompts/questions.md`, substituting `{{EVIDENCE}}`, `{{WORK}}`,
-`{{MAX_QUESTIONS}}` and `{{THREADS}}`. `{{MAX_QUESTIONS}}` is `8` under
+`{{MAX_QUESTIONS}}`, `{{THREADS}}` and `{{MODE}}` (the resolved mode). `{{MAX_QUESTIONS}}` is `8` under
 `--light`, `14` by default; under `--deep` delete the "Ask at most
 {{MAX_QUESTIONS}} questions;" clause instead, so the count is unbounded. The
 cap is a budget, not a target, and UNAVAILABLE rows count toward it.
@@ -210,7 +233,10 @@ UNAVAILABLE and FAILED probes, base drift, failing checks, and
 `probes/core/sibling-prs.out`, the author's other open PRs that touch a file
 this one touches, each cut to the shared files. A sibling becomes a row
 asking whether the two PRs edit the same lines consistently; neither PR's
-own review would see that.
+own review would see that. Outside `--deep`, one row always asks whether
+skipping the deep pass is safe (diff fully read, zero code reach, every
+load-bearing claim checked against an artifact); when it settles "no", say
+in the hand-over to rerun with `--deep`.
 
 Pass nothing else: not the PR title, not your hunches, not this
 conversation. When it returns, read `work/ledger.md` and confirm every

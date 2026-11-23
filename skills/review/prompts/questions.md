@@ -71,7 +71,17 @@ Rules:
    changed two ways, a value one PR sets and the other assumes, or an order
    the two must merge in. The settler is that probe's section for the
    sibling plus this change's hunk for the same file.
-10. Escape `|` inside a cell as `\|`.
-11. End with: `Questions asked: N.`
+10. This run's mode is `{{MODE}}`. Unless it is `deep`, write one job-level
+    row asking whether skipping the deep pass (one reader per review
+    dimension) is safe for this change. It is safe only when all three hold:
+    the diff is small enough that every changed line is read; code reach is
+    zero (no new caller, branch or control flow other code enters); and
+    every load-bearing claim the PR makes is checked against an artifact,
+    not the body. The settler is `git/files`, `git/diff.patch`, and
+    `probes/go-graph/modmap-impact.out` or `probes/structure-*/paths.out`
+    when present. This row makes the skip a decision rather than an
+    omission.
+11. Escape `|` inside a cell as `\|`.
+12. End with: `Questions asked: N.`
 
 Write nothing else. Do not answer, do not review.
