@@ -202,6 +202,13 @@ and the thread line already carries it. `(none)` if both
 lists are empty or the file is absent. Thread rows do not count toward
 `{{MAX_QUESTIONS}}`.
 
+Beyond the threads, the prompt draws questions from the evidence alone:
+UNAVAILABLE and FAILED probes, base drift, failing checks, and
+`probes/core/sibling-prs.out`, the author's other open PRs that touch a file
+this one touches, each cut to the shared files. A sibling becomes a row
+asking whether the two PRs edit the same lines consistently; neither PR's
+own review would see that.
+
 Pass nothing else: not the PR title, not your hunches, not this
 conversation. When it returns, read `work/ledger.md` and confirm every
 row's **Settled by** is non-empty and **Decision** is empty. Then

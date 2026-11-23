@@ -235,6 +235,37 @@ if [ -n "$CORE_ONLY" ]; then
     exit 0
 fi
 
+# ---- sibling PRs ----------------------------------------------------------
+# The author's other open PRs that touch a file this one touches. Two PRs by
+# one author editing the same lines is where a stack or a parallel branch
+# goes inconsistent (one assumes the other's state, or both change a value
+# two ways), and neither PR's own review sees it. Each overlapping sibling's
+# diff, cut to the shared files, is kept so a reader can settle the question
+# without a fetch. At most five siblings.
+if [ "$MODE" = pr ]; then
+    AUTHOR="$(jq -r '.data.repository.pullRequest.author.login // empty' "$OUTDIR/probes/core/pr-shas.out" 2>/dev/null || true)"
+    # shellcheck disable=SC2016  # the variables expand inside the probe's bash, by design
+    probe core sibling-prs --needs gh --env "REPO=$REPO" --env "PR=$PR" --env "AUTHOR=$AUTHOR" --env "FILES=$OUTDIR/git/files" -- bash -c '
+        [ -n "$AUTHOR" ] || { echo "PR author unknown (core/pr-shas)" >&2; exit 127; }
+        list="$(gh pr list --repo "$REPO" --author "$AUTHOR" --state open --limit 50 --json number,title,headRefOid,baseRefName,files)" || exit 1
+        mine="$(jq -R -s "split(\"\n\") | map(select(length > 0))" < "$FILES")"
+        sib="$(jq --argjson mine "$mine" --argjson pr "$PR" -c "[.[] | select(.number != \$pr)
+            | {number, title, head: .headRefOid, base: .baseRefName, shared: ([.files[]?.path] - ([.files[]?.path] - \$mine))}
+            | select(.shared | length > 0)] | .[:5]" <<<"$list")"
+        n="$(jq length <<<"$sib")"
+        if [ "$n" = 0 ]; then echo "none: no other open PR by $AUTHOR touches a file this PR touches"; exit 0; fi
+        jq -c ".[]" <<<"$sib" | while read -r s; do
+            m="$(jq -r .number <<<"$s")"
+            echo "## #$m $(jq -r .title <<<"$s") (head $(jq -r .head <<<"$s" | cut -c1-12), base $(jq -r .base <<<"$s"))"
+            echo "shared: $(jq -r ".shared | join(\", \")" <<<"$s")"
+            gh pr diff "$m" --repo "$REPO" | awk -v files="$(jq -r ".shared | join(\"\n\")" <<<"$s")" "
+                BEGIN { n = split(files, f, \"\n\"); for (i = 1; i <= n; i++) want[\"a/\" f[i]] = 1 }
+                /^diff --git / { keep = (\$3 in want) }
+                keep" || echo "(diff unavailable)"
+            echo
+        done'
+fi
+
 # Nearest go.mod above each changed file, deduped: the unit `go build` works
 # in. git/go-packages pairs each module with the package dirs (relative to it)
 # holding a changed .go file that still exists, so a test or lint probe can

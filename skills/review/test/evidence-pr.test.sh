@@ -38,10 +38,21 @@ if [ "$1 $2" = "api graphql" ]; then
     n=""; for a in "$@"; do case "$a" in n=*) n="${a#n=}" ;; esac; done
     head="$(git -C "$FAKE_REMOTE" rev-parse "refs/pull/$n/head")"
     base="$(git -C "$FAKE_REMOTE" rev-parse main)"
-    printf '{"data":{"repository":{"pullRequest":{"number":%s,"title":"t","state":"OPEN","headRefOid":"%s","baseRefOid":"%s","baseRefName":"main","headRefName":"pr%s"}}}}\n' "$n" "$head" "$base" "$n"
+    printf '{"data":{"repository":{"pullRequest":{"number":%s,"title":"t","state":"OPEN","author":{"login":"alice"},"headRefOid":"%s","baseRefOid":"%s","baseRefName":"main","headRefName":"pr%s"}}}}\n' "$n" "$head" "$base" "$n"
     exit 0
 fi
 [ "$1 $2" = "pr checks" ] && { echo '[]'; exit 0; }
+# alice has a third open PR that also edits a.txt, and PR 2 touches only b.txt
+if [ "$1 $2" = "pr list" ]; then
+    echo '[{"number":1,"title":"pr1","headRefOid":"aaa","baseRefName":"main","files":[{"path":"a.txt"}]},
+           {"number":2,"title":"pr2","headRefOid":"bbb","baseRefName":"main","files":[{"path":"b.txt"}]},
+           {"number":3,"title":"pr3 edits a too","headRefOid":"ccc","baseRefName":"main","files":[{"path":"a.txt"},{"path":"z.txt"}]}]'
+    exit 0
+fi
+if [ "$1 $2 $3" = "pr diff 3" ]; then
+    printf 'diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-base\n+three\ndiff --git a/z.txt b/z.txt\n+++ b/z.txt\n+zzz\n'
+    exit 0
+fi
 echo "fake gh: $* not supported" >&2; exit 1
 EOF
 chmod +x "$bin/gh"
@@ -57,6 +68,11 @@ bash "$EV" --pr acme/widget#1 --repo-dir "$clone" --out "$run1" 2>/dev/null
 [ "$(st "$run1" core/fetch)" = RAN ] || { echo "fetch: $(st "$run1" core/fetch)"; exit 1; }
 [ -d "$wt1" ] && registered "$wt1" || { echo "the PR worktree must exist and be registered"; exit 1; }
 [ "$(cat "$wt1/a.txt")" = one ] || { echo "the worktree must sit on the PR head"; exit 1; }
+# the author's other open PR that edits a.txt is evidence, cut to the shared file
+[ "$(st "$run1" core/sibling-prs)" = RAN ] || { echo "sibling-prs: $(st "$run1" core/sibling-prs) $(cat "$run1/evidence/probes/core/sibling-prs.err")"; exit 1; }
+sp="$run1/evidence/probes/core/sibling-prs.out"
+grep -q '^## #3 pr3 edits a too' "$sp" && grep -q '^shared: a.txt$' "$sp" && grep -q '^+three$' "$sp" || { echo "sibling-prs must list #3 with its a.txt hunk: $(cat "$sp")"; exit 1; }
+! grep -q '#2\|zzz\|^## #1 ' "$sp" || { echo "sibling-prs must leave out non-overlapping PRs, other files, and this PR: $(cat "$sp")"; exit 1; }
 
 # 2. cleanup removes it; the phase-7 recheck after it must not bring it back
 bash "$EV" --cleanup "$run1" 2>/dev/null

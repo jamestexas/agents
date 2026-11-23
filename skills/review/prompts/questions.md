@@ -65,7 +65,13 @@ Rules:
    pending), write one row asking whether this change causes the failure;
    the settler is that check's log or failure probe if a pack declares one,
    else the probe file plus the diff, which may settle `Unresolved`.
-9. Escape `|` inside a cell as `\|`.
-10. End with: `Questions asked: N.`
+9. If `probes/core/sibling-prs.out` lists a sibling PR (a `## #M` section,
+   not the `none:` line), write one row per sibling asking whether its edits
+   to the shared files are consistent with this change: the same lines
+   changed two ways, a value one PR sets and the other assumes, or an order
+   the two must merge in. The settler is that probe's section for the
+   sibling plus this change's hunk for the same file.
+10. Escape `|` inside a cell as `\|`.
+11. End with: `Questions asked: N.`
 
 Write nothing else. Do not answer, do not review.
