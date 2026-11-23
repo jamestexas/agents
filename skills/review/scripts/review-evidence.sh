@@ -243,11 +243,13 @@ ruby "$HERE/packs-match.rb" "${PACK_FILES[@]}" < "$OUTDIR/git/files" > "$OUTDIR/
 jq -c '.matched[]' "$OUTDIR/packs.json" | while read -r pack; do
     name="$(jq -r .name <<<"$pack")"
     needs=(); while read -r b; do [ -n "$b" ] && needs+=(--needs "$b"); done < <(jq -r '.needs[]?' <<<"$pack")
+    # a pack may raise (or lower) the per-probe time limit: `timeout: <seconds>`
+    ptimeout=(); pt="$(jq -r '.timeout // empty' <<<"$pack")"; [ -n "$pt" ] && ptimeout=(--timeout "$pt")
     # @json keeps a block-scalar command on one line; a pack may carry only a question
     jq -r '(.probes // {}) | to_entries[] | "\(.key)\t\(.value|@json)"' <<<"$pack" | while IFS=$'\t' read -r pname cmd; do
         cmd="$(jq -r . <<<"$cmd")"
         # stdin is the probe list; a command that read it would eat the next probe
-        probe "$name" "$pname" "${needs[@]+"${needs[@]}"}" \
+        probe "$name" "$pname" "${needs[@]+"${needs[@]}"}" "${ptimeout[@]+"${ptimeout[@]}"}" \
             --env "WORKTREE=$WT" --env "REPO_DIR=$REPO_DIR" --env "OUTDIR=$OUTDIR" \
             --env "FILES=$OUTDIR/git/files" --env "MODULES=$OUTDIR/git/modules" \
             --env "GO_PACKAGES=$OUTDIR/git/go-packages" --env "MERGE_BASE=$MB" \

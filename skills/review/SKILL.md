@@ -69,6 +69,14 @@ bash $SKILL/scripts/review-evidence.sh --pr <owner/repo#N> --repo-dir <local clo
 jq -r '.probes[] | "\(.status)\t\(.name)"' <run>/evidence/manifest.json
 ```
 
+Run the evidence script in the background (the Bash tool's
+`run_in_background`), not as a foreground call: a foreground call is killed
+at its 10-minute ceiling, and on a large change the builds and tests alone
+can pass that. Each probe carries its own time limit (pack `timeout:`, else
+`REVIEW_PROBE_TIMEOUT`, else 300s); a probe killed at its limit is recorded
+UNAVAILABLE with reason `timeout: ...`, so it becomes a ledger question
+instead of taking every later probe with it.
+
 `--repo-dir` is the reviewer's trusted clone: the repo-local pack file and
 CODEOWNERS are both read at its BASE ref, never from the PR worktree, and
 the script writes `evidence/manifest.sha256` from a timestamp-free hash so a
