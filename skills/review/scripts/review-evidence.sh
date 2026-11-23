@@ -84,7 +84,7 @@ cleanup() {
     exit 0
 }
 
-MODE="" PR="" REPO="" REPO_DIR="" BASE="" HEAD="" RUN="" CORE_ONLY=""
+MODE="" PR="" REPO="" REPO_DIR="" BASE="" BASE_LABEL="" HEAD="" RUN="" CORE_ONLY=""
 ARGS=("$@")
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -136,14 +136,24 @@ if [ "$MODE" = pr ]; then
         [ -n "$REMOTE" ] || die "no remote in $REPO_DIR points at $REPO"
         # `+`: a force-pushed PR head is not a fast-forward of the one an
         # earlier run parked under refs/review/<N>, and without it the re-run
-        # is refused. Retried only on a busy ref lock: reviews running at once against one
-        # clone race on it. The helper's path travels by --env, so the recorded
+        # is refused.
+        #
+        # The base is fetched into this PR's own ref, refs/review-base/<N>,
+        # never into the shared remote-tracking ref (the helper passes
+        # --refmap= so git's opportunistic update of <remote>/<branch> is off).
+        # Reviews of several PRs run at once against one clone; with a shared
+        # base ref they contended for its lock, and a run's later probes read
+        # whatever base the last fetch left there rather than the one its
+        # merge-base was computed against.
+        #
+        # Retried only on a busy ref lock: reviews running at once against one
+        # clone can still meet on a lock (packed-refs). The helper's path travels by --env, so the recorded
         # command (and the manifest hash) does not depend on the install path.
         # shellcheck disable=SC2016  # $FETCH_RETRY expands inside the probe's bash, by design
         probe core fetch --env "FETCH_RETRY=$HERE/git-fetch-retry.sh" -- bash -c '"$FETCH_RETRY" "$@"' _ \
-            "$REPO_DIR" "$REMOTE" "+refs/pull/$PR/head:refs/review/$PR" "$BASE_BRANCH"
+            "$REPO_DIR" "$REMOTE" "+refs/pull/$PR/head:refs/review/$PR" "+refs/heads/$BASE_BRANCH:refs/review-base/$PR"
         require_ran core/fetch
-        BASE="$REMOTE/$BASE_BRANCH"
+        BASE="refs/review-base/$PR" BASE_LABEL="$REMOTE/$BASE_BRANCH"
         TMP="${TMPDIR:-/tmp}"; WT="${REVIEW_WORKTREE_ROOT:-${TMP%/}/review-worktrees}/${REPO//\//-}-$PR"
         if [ -n "$CORE_ONLY" ]; then
             WT=""
@@ -181,6 +191,7 @@ if [ "$MODE" = pr ]; then
     probe core pr-checks  --needs gh -- gh pr checks "$PR" --repo "$REPO" --json name,state,link,workflow
 else
     [ -n "$BASE" ] && [ -n "$HEAD" ] || die "--path needs --base and --head"
+    BASE_LABEL="$BASE"
     REPO="$(basename "$REPO_DIR")"; PR=""
     WT="$REPO_DIR"
     echo "$WT" > "$OUTDIR/git/worktree-path"
@@ -193,8 +204,12 @@ else
         '[ -f "$PR_CONTEXT" ] || { echo "pr-context.sh not found at $PR_CONTEXT" >&2; exit 127; }; echo "no PR in path mode" >&2; exit 127'
 fi
 echo "$REPO_DIR" > "$OUTDIR/git/repo-dir"
-jq -n --arg kind "$MODE" --arg repo "$REPO" --arg pr "$PR" --arg base "$BASE" --arg head "$HEAD" --arg worktree "$WT" --arg repo_dir "$REPO_DIR" \
-   '{kind:$kind, repo:$repo, pr:$pr, base:$base, head:$head, worktree:$worktree, repo_dir:$repo_dir}' > "$OUTDIR/target.json"
+# `base` is the name a person reads (upstream/main); `base_ref` is what every
+# git command here uses, and `base_sha` where it pointed when the run began.
+BASE_SHA="$(git -C "$REPO_DIR" rev-parse --verify -q "$BASE^{commit}" || true)"
+jq -n --arg kind "$MODE" --arg repo "$REPO" --arg pr "$PR" --arg base "$BASE_LABEL" --arg base_ref "$BASE" --arg base_sha "$BASE_SHA" \
+      --arg head "$HEAD" --arg worktree "$WT" --arg repo_dir "$REPO_DIR" \
+   '{kind:$kind, repo:$repo, pr:$pr, base:$base, base_ref:$base_ref, base_sha:$base_sha, head:$head, worktree:$worktree, repo_dir:$repo_dir}' > "$OUTDIR/target.json"
 
 # ---- git facts ------------------------------------------------------------
 probe core merge-base  -- git -C "$REPO_DIR" merge-base "$BASE" "$HEAD"
@@ -257,7 +272,7 @@ if [ -n "$CO_LOC" ]; then
     # shellcheck disable=SC2016  # $OUTDIR and $1 expand inside the probe's bash, by design
     probe core owners --env "OUTDIR=$OUTDIR" -- bash -c 'cd "$OUTDIR" && ruby "$1" CODEOWNERS < git/files' _ "$HERE/codeowners.rb"
     if [ "$(status_of core/owners)" = RAN ]; then
-        jq --arg ref "$BASE" --arg loc "$CO_LOC" '. + {ref: $ref, location: $loc}' "$OUTDIR/probes/core/owners.out" > "$OUTDIR/owners.json"
+        jq --arg ref "$BASE_LABEL" --arg sha "$BASE_SHA" --arg loc "$CO_LOC" '. + {ref: $ref, ref_sha: $sha, location: $loc}' "$OUTDIR/probes/core/owners.out" > "$OUTDIR/owners.json"
     fi
 else
     rm -f "$OUTDIR/CODEOWNERS"

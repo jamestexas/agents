@@ -106,3 +106,23 @@ mkdir -p "$wt1"; echo mine > "$wt1/keep.txt"
 if bash "$EV" --pr acme/widget#1 --repo-dir "$clone" --out "$tmp/run6" 2>/dev/null; then echo "a foreign dir at the worktree path must stop the run"; exit 1; fi
 [ -f "$wt1/keep.txt" ] || { echo "a foreign dir must not be removed"; exit 1; }
 rm -rf "$wt1"
+
+# 9. reviews of two PRs at once: each fetches the base into its own ref, the
+# shared remote-tracking ref is never written, and both runs complete
+git -C "$src" checkout -q main
+echo moved > "$src/c.txt"; git -C "$src" add c.txt; git -C "$src" commit -qm "main moved"
+git -C "$remote" fetch -q "$src" "+main:main"
+before="$(git -C "$clone" rev-parse refs/remotes/upstream/main)"
+bash "$EV" --pr acme/widget#1 --repo-dir "$clone" --out "$tmp/par1" 2>/dev/null & p1=$!
+bash "$EV" --pr acme/widget#2 --repo-dir "$clone" --out "$tmp/par2" 2>/dev/null & p2=$!
+wait "$p1" || { echo "parallel run 1 failed"; exit 1; }
+wait "$p2" || { echo "parallel run 2 failed"; exit 1; }
+for n in 1 2; do
+    [ "$(st "$tmp/par$n" core/fetch)" = RAN ] || { echo "parallel fetch $n: $(st "$tmp/par$n" core/fetch)"; exit 1; }
+    jq -e --arg sha "$(git -C "$remote" rev-parse main)" --arg ref "refs/review-base/$n" \
+        '.base == "upstream/main" and .base_ref == $ref and .base_sha == $sha' "$tmp/par$n/evidence/target.json" >/dev/null \
+        || { echo "run $n target.json base: $(jq -c '{base, base_ref, base_sha}' "$tmp/par$n/evidence/target.json")"; exit 1; }
+    [ "$(cat "$tmp/par$n/evidence/git/behind-base")" = 1 ] || { echo "run $n must measure staleness against the fetched base"; exit 1; }
+done
+[ "$(git -C "$clone" rev-parse refs/remotes/upstream/main)" = "$before" ] || { echo "the shared remote-tracking ref must not be written"; exit 1; }
+bash "$EV" --cleanup "$tmp/par1" 2>/dev/null; bash "$EV" --cleanup "$tmp/par2" 2>/dev/null
