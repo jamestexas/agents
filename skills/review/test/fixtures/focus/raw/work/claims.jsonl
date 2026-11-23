@@ -1,0 +1,2 @@
+{"id":"r1-1","class":"RAN","kind":"behavior","text":"retain skips renamed","source":"work/observe/r1.json","row":1}
+{"id":"r4-1","class":"READ","kind":"text","text":"labels fixed","source":"worktree svc/ces.go:101-104","row":4}

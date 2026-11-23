@@ -1,0 +1,8 @@
+diff --git a/svc/provision.go b/svc/provision.go
+--- a/svc/provision.go
++++ b/svc/provision.go
+@@ -40,3 +40,5 @@ func retain() {
++a
++b
+@@ -80,3 +82,6 @@ func sweep() {
++c

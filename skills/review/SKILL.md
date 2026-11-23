@@ -7,8 +7,9 @@ description: >
   writes a decision ledger with "settled by" before any answer; isolated
   readers settle rows from the evidence directory alone; a fresh-context
   refute pass attacks every candidate; finding-triage gates significance;
-  explain-work teaches; three arithmetic checks decide whether the one HUD
-  artifact is postable. Posts only with --post and a policy file. Use for any
+  an independent explain-work pass runs beside it and a script joins the two
+  into a focus map (what is load-bearing x what held); three arithmetic
+  checks decide whether the HUD artifact is postable. Posts only with --post and a policy file. Use for any
   PR review, own or peer's; replaces the hand-composed explain-work +
   structural-pr-review chain.
 allowed-tools: "Bash,Read,Glob,Grep,Agent,Skill,mcp__modmap__*,mcp__mache__*"
@@ -17,8 +18,16 @@ argument-hint: "<PR number | owner/repo#N | path> [--fast|--light|--deep] [--eng
 
 # /review
 
-Seven phases. Each reads files and writes files under one run directory.
-No phase reads another phase's chat reply. Spec:
+Seven phases, plus an explain pass that runs beside them and a join that
+reads both. Each reads files and writes files under one run directory.
+No phase reads another phase's chat reply.
+
+Two lenses look at the same evidence and never read each other. The review
+phases falsify: for each question, what would make this true, and did it
+hold? The explain pass constructs: what does this change do, and which parts
+of it are load-bearing? `scripts/focus-map.mjs` joins them with no model.
+The review produces the peer-facing artifact (`review.md`, and the post
+body); the explanation and the focus map are for the operator. Spec:
 `docs/superpowers/specs/2026-10-28-review-chain-design.md`.
 
 ## Run directory
@@ -102,6 +111,18 @@ ledger question in phase 2. Do not re-fetch what the script fetched.
 
 Authorship: compare `pr/context.json`'s author login to `gh api user --jq
 .login`. Record `own` or `peer` for phase 6; tell no reader.
+
+### Explain pass (independent, alongside phases 2–5)
+
+Right after the manifest is read, dispatch one background `general-purpose`
+agent with `prompts/explain.md`, substituting `{{EVIDENCE}}`, `{{RUN}}`,
+`{{AUTHORSHIP}}`, `{{CONTEXT}}` (as in phase 6), and `{{OUT}}` = `explain.md`
+beside the note (`$HUD_ROOT/projects/<project>/prs/PR-N/explain.md`). It
+reads the evidence and the worktree and never `work/`; no review phase reads
+its output. It ends `explain.md` with an `## Areas` table (load-bearing vs
+plumbing, file:line). Do not wait for it: phases 2–5 run while it does, and
+the join after phase 6 is the first thing that needs it. Skip it under
+`--fast`.
 
 Then record the evidence in the run's state file, which the HUD reviews panel reads:
 
@@ -280,8 +301,24 @@ node $SKILL/scripts/state.mjs <run> output teach
 node $SKILL/scripts/render.mjs <run> --title "PR N — <title>" --out <notes path>
 node $SKILL/scripts/check.mjs <run>
 node $SKILL/scripts/state.mjs <run> finish note=<notes path relative to $HUD_ROOT>
+# wait for the explain pass, then join (no model)
+node $SKILL/scripts/focus-map.mjs <PR folder> --run <run>
 bash $SKILL/scripts/review-evidence.sh --cleanup <run>
 ```
+
+The join runs once the explain pass has written `explain.md`, and before
+cleanup, since the explain pass reads the worktree. `focus-map.mjs` reads
+the `## Areas` table and the run's `work/ledger.md`, `work/findings.json`
+and `work/claims.jsonl`, matches them by file and line overlap (resolving a
+reader's `git/diff.patch hunk N` through the patch, and a shared identifier
+when no lines match), and writes `focus.md` beside the note: a 2x3 grid of
+load-bearing/plumbing by held/open/fell, a "Look here first" list (findings
+in areas explain-work also flagged, load-bearing open rows, load-bearing
+areas no review question reached), the areas the two passes disagree on, and
+the review items no area claims. A finding replaces the ledger rows it cites.
+If the explain pass failed or wrote no `## Areas` table, the script says so
+and exits 1; the review artifact is unaffected, and the hand-over says the
+focus map is missing.
 
 `finish` re-runs the gates and records each as ok or fail, the verdict from
 `summary.md`, and the finding counts; the HUD row turns from running to done
@@ -297,7 +334,10 @@ run entered recorded an `output`, or was recorded as skipped. A `--fast`
 run gets a last line, `fast: PRELIMINARY — not postable`, and a non-zero
 exit regardless of the gates.
 
-Print the notes path and the check lines. `finish` has already added the
+Print the check lines and the two outputs: for the operator, `explain.md`
+and `focus.md` (lead with focus.md's "Look here first"); for peers, the
+notes path (`review.md`, whose summary and findings become the post body).
+`finish` has already added the
 note's `index.md` line (once per path); append one line to
 `$HUD_ROOT/log.md`. Stop here unless `--post`.
 
@@ -387,7 +427,9 @@ probes before any model call; UNAVAILABLE rows become questions before readers
 run; *Settled by* before *Decision*; refute reads findings and evidence, never
 the settling reasoning; triage reads refutations before confirmations; cheap
 local probes before credentialed ones; the staleness recheck before the gates
-in Post; existing threads seed questions before new ones under `--engage`.
+in Post; existing threads seed questions before new ones under `--engage`;
+the explain pass and the review phases never read each other, and only the
+join, after both, sees the two together.
 
 ## Reader contract (what phases 3–5 are held to)
 
