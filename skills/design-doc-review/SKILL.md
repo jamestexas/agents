@@ -234,9 +234,9 @@ degrades gracefully.
   clean context, or to run this over a doc while you do something else.
 - **Downstream:** once the decision holds, `problem-decomposer` and `work-scope`
   break it into dispatchable/shippable units.
-- **Reviewer-of-record habits:** `pr-review-kit` (its "design intent" phase is
-  this skill applied after the code exists; the verification rules — cite
-  sources, verify the artifact not the summary — apply here too).
+- **Reviewer-of-record habits:** `/review` (reading the PR body as design
+  intent is this skill applied after the code exists; its verification rules —
+  cite sources, verify the artifact not the summary — apply here too).
 - **Adversarial specialists:** `type-driven-correctness`, `security-auditor`,
   `trust-root-adversary`, `dos-resilience-auditor`, `observability-gap-auditor`,
   `paradigm-assessor`; `prior-art-cartographer` skill for reinvention checks.

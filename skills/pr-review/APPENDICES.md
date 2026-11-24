@@ -1,6 +1,6 @@
-# pr-review-kit — appendices
+# pr-review-kit appendices (retired kit, kept for reference)
 
-A sidecar to [SKILL.md](SKILL.md), carrying the reference material the phases
+Carried over from the retired pr-review-kit, carrying the reference material the phases
 point at: the author's review pattern (A), CLOSED-not-merged PRs (B), memory and
 persistence (C), the heavier review skills (D), and the glossary. None of it is
 needed to run a review — it is what you consult when the situation calls for it.

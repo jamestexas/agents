@@ -410,7 +410,9 @@ expand_file() {
 
 run_include_pass() {
     local mode="$1" drifted=0
-    for f in "$AGENTS_DIR"/*.md "$SKILLS_DIR"/*/SKILL.md; do
+    # prompts/*.md too: a sub-agent sees only its prompt file, so a shared rule
+    # it must follow has to be expanded there, not just in the SKILL.md.
+    for f in "$AGENTS_DIR"/*.md "$SKILLS_DIR"/*/SKILL.md "$SKILLS_DIR"/*/prompts/*.md; do
         [ -f "$f" ] || continue
         grep -q '<!-- @include-begin ' "$f" 2>/dev/null || continue
         if ! expand_file "$f" "$mode"; then
