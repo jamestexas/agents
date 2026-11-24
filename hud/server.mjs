@@ -2080,7 +2080,11 @@ function treeCache(root, opts) {
   let dirty = true;
   let watcher = null;
   try {
-    watcher = fs.watch(root, { recursive: true, persistent: false }, () => {
+    watcher = fs.watch(root, { recursive: true, persistent: false }, (_type, filename) => {
+      // Ignore what the walk ignores. The server writes its own snapshots and
+      // log under .generated/, and counting those would throw the cache away
+      // on every digest refresh. An unnamed event (null) is a change.
+      if (filename != null && String(filename).split(path.sep).some((seg) => seg.startsWith(".") || SKIP_NAMES.has(seg))) return;
       dirty = true;
     });
     watcher.on("error", () => {
@@ -2187,6 +2191,17 @@ export function createServer(opts = {}) {
   });
 
   server.hudRefreshPeers = refresh;
+  // Build the tree once the server is up, so the first page after a restart
+  // does not pay for a cold walk of the whole HUD (seconds on a large tree).
+  server.on("listening", () =>
+    setImmediate(() => {
+      try {
+        dyn.tree.get();
+      } catch (err) {
+        process.stderr.write(`hud: tree prewarm: ${errText(err)}\n`);
+      }
+    }),
+  );
   // An open event stream never ends on its own, and `close` waits for every
   // open response; so the streams are ended first, or stopping the HUD with a
   // page open would hang.
