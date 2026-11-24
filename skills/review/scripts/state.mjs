@@ -22,7 +22,7 @@
 //          review_state: who has reviewed, and who is waiting on whom.
 //   phase  <name>        close the open phase, open <name>; only forward, and
 //                        a jump only over phases the mode skips
-//   finish note=<rel> [gates=-]
+//   finish note=<rel> [gates=-] [worktree=keep]
 //          ended=now, phase "rendered", verdict from work/summary.md (APPROVE,
 //          REQUEST_CHANGES, COMMENT, or PRELIMINARY for a --fast run), finding
 //          counts from work/findings.json, gates from check.mjs output: read
@@ -64,6 +64,7 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { eventId, eventKey, fold, checkTransition } from './runstate.mjs';
+import { removeRunWorktree } from './worktree.mjs';
 
 const [run, op, ...rest] = process.argv.slice(2);
 const usage = () => { console.error('usage: state.mjs <run> init [--pending pr=<owner/repo#N>]|phase <name>|output <phase>|early|finish|posted|abandon|fail [k=v ...]'); process.exit(2); };
@@ -138,6 +139,8 @@ const terminal = (opName, target) => {
   if (replayed(opName, { reason })) return;
   transition(s, target);
   append(opName, { reason });
+  // A dead or failed run has no join coming to clean up after it.
+  removeRunWorktree(run);
 };
 // A run directory is per PR (prs/PR-N/raw), so a second review of the same PR
 // starts in the first one's directory. A run that ended is packed into one
@@ -270,7 +273,7 @@ const ops = {
   },
 
   finish() {
-    const args = kv(['note', 'gates']);
+    const args = kv(['note', 'gates', 'worktree']);
     const s = current();
     // PRELIMINARY is what a --fast run writes: it stopped before refute and
     // triage, and check.mjs refuses to call it postable.
@@ -291,6 +294,9 @@ const ops = {
     if (t.skipped.length) append('skip', { skipped: t.skipped });
     append('finish', data);
     catalogNote(data.note, s, data.verdict);
+    // The explain pass reads the worktree and may still be running; the join
+    // (focus-map.mjs) removes it once that pass is done. --fast has neither.
+    if (args.worktree !== 'keep' && s.mode === 'fast') removeRunWorktree(run);
   },
 
   early() {
