@@ -25,10 +25,13 @@ Write three files:
   approval it waits for. Name it in the verdict line instead. Phase 7
   re-checks this against the live PR before posting.
   When the ledger has `prior finding` rows (a re-review), `summary.md`
-  carries a `**Since the last review**` table right after the verdict, one
+  carries a `**Since the last review**` table right after the verdict line
+  (the verdict stays first; the table comes before everything else), one
   row per prior finding: `| Finding | Status | Settled by |`, status one of
   fixed, answered, open, from that row's Decision. `teach.md` opens with the
-  same table.
+  same table. An open finding with no new evidence keeps its earlier tag, and
+  a verdict that differs from the earlier review's on unchanged evidence says
+  so and why (`evidence/prior/meta.json` holds the earlier verdict).
 - `{{WORK}}/impact.md`: one bullet per job-level axis (deploy, metrics,
   callers, on-call), each naming the probe that produced it or saying
   `UNAVAILABLE`.

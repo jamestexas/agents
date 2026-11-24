@@ -172,23 +172,26 @@ const startOver = ({ dirs = false } = {}) => {
     if (!prior) { try { prior = JSON.parse(fs.readFileSync(statePath, 'utf8')); } catch { prior = {}; } }
   }
   if (members.length === 0) return;
-  if (dirs) for (const d of ['evidence', 'work', 'recheck']) if (fs.existsSync(path.join(run, d))) members.push(d);
+  if (dirs) for (const d of ['evidence', 'work', 'recheck', 'evidence.log']) if (fs.existsSync(path.join(run, d))) members.push(d);
   // The note sits outside the run directory, so it goes in under its own -C.
   const hud = process.env.HUD_ROOT || path.join(os.homedir(), 'hud');
   const note = dirs && typeof prior?.note === 'string' && !path.isAbsolute(prior.note) && fs.existsSync(path.join(hud, prior.note))
     ? prior.note : null;
+  // explain.md and focus.md sit beside the note and are rewritten by the next
+  // run, so the archive is the only place the earlier round's copies survive.
+  const notes = note ? [note, ...['explain.md', 'focus.md'].map((f) => path.join(path.dirname(note), f)).filter((f) => fs.existsSync(path.join(hud, f)))] : [];
   fs.mkdirSync(path.join(run, RUNS), { recursive: true });
   const archive = `${RUNS}/${stamp}.tar.gz`;
   // PATH first; the fixed locations cover a caller that narrowed PATH to keep
   // gh out, which is every test here.
   const tarBin = ['tar', '/usr/bin/tar', '/bin/tar'].find((b) => !spawnSync(b, ['--version']).error) ?? 'tar';
-  const tar = spawnSync(tarBin, ['-czf', path.join(run, archive), '-C', run, ...members, ...(note ? ['-C', hud, note] : [])], { encoding: 'utf8' });
+  const tar = spawnSync(tarBin, ['-czf', path.join(run, archive), '-C', run, ...members, ...(notes.length ? ['-C', hud, ...notes] : [])], { encoding: 'utf8' });
   if (tar.status !== 0) {
     console.error(`state.mjs ${op}: could not pack the ended run into ${archive}: ${(tar.stderr || tar.error?.message || '').trim()}`);
     process.exit(1);
   }
   for (const m of members) fs.rmSync(path.join(run, m), { recursive: true, force: true });
-  const line = { archive, started: prior?.started ?? null, ended: prior?.ended ?? null, mode: prior?.mode ?? null, verdict: prior?.verdict ?? null, head: prior?.head ?? null };
+  const line = { archive, started: prior?.started ?? null, ended: prior?.ended ?? null, mode: prior?.mode ?? null, verdict: prior?.verdict ?? null, head: prior?.head ?? null, posted: prior?.posted ?? null };
   fs.appendFileSync(path.join(run, RUNS, 'history.jsonl'), `${JSON.stringify(line)}\n`);
 };
 const priorEnded = () => { const es = readEvents(); return es.length > 0 && fold(es).ended != null; };

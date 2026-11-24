@@ -18,6 +18,18 @@ line: `| <row#> | <Decision> |`, where Decision is one of:
   settled it, ending `→ candidate: <one line>` only if it yields a finding;
 - `**Unresolved** — <which probe or file was missing or UNAVAILABLE>`.
 
+A row that asks about a `prior finding` (an earlier review of this PR)
+starts its Decision with **fixed**, **answered** or **open**:
+- **fixed**: a commit in `probes/core/since-last-review.out` changed the
+  cited code, and the code at this head no longer does the thing.
+- **answered**: the author replied with a reason and the code is unchanged.
+  Only possible when the row says `posted`.
+- **open**: neither.
+
+The cited file:line is from the earlier head, so find the same code at this
+head first. Keep the earlier tag on an open finding unless you name new
+evidence that changes it.
+
 A candidate may carry a leading `[Blocking]` tag when you believe it blocks
 merge (correctness, security, or data integrity); leave the tag off
 otherwise. A row that settles clean ends with no `→ candidate:` clause at all. Never

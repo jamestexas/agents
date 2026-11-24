@@ -13,7 +13,7 @@ description: >
   PR review, own or peer's; replaces the hand-composed explain-work +
   structural-pr-review chain.
 allowed-tools: "Bash,Read,Glob,Grep,Agent,Skill,mcp__modmap__*,mcp__mache__*"
-argument-hint: "<PR number | owner/repo#N | path> [more PRs ...] [--fast|--light|--deep] [--engage] [--post] [--beads]"
+argument-hint: "<PR number | owner/repo#N | path> [more PRs ...] [--fast|--light|--default|--deep] [--engage] [--post] [--beads]"
 ---
 
 # /review
@@ -164,12 +164,105 @@ the list), and the PRs that need a decision from the user. For a stack, list
 the PRs bottom up. Posting stays per PR: `--post` with several PRs asks for
 each one.
 
+## Re-review
+
+A re-review is any `/review` of a PR whose folder already holds an earlier
+review: `raw/runs/history.jsonl` has a line, `raw/` holds a run that ended,
+or the folder has a legacy artifact (`structural-review.md`,
+`structural-post.md`, or a `review.md` from before the folder had a
+`/review` run). It needs no flag. The earlier review is evidence, gathered
+by script like everything else in phase 1, never recalled from this
+conversation.
+
+**Phase 1 order.** Each step needs the one before it:
+
+```bash
+node $SKILL/scripts/state.mjs <run> init --pending --new pr=<owner/repo#N> mode=<...>   # archives the ended run, appends its history line
+SINCE=$(node $SKILL/scripts/prior-context.mjs <run> head)                                # the head that run saw, or empty
+bash $SKILL/scripts/review-evidence.sh --pr <owner/repo#N> --repo-dir <clone> ${SINCE:+--since "$SINCE"} --out <run>
+PRIOR=$(node $SKILL/scripts/prior-context.mjs <run> write [--engage])                    # evidence/prior/ + the whole {{THREADS}} list
+```
+
+`--since` adds `probes/core/since-last-review.out`, the commits since that
+head and the files they changed. After a rebase and force-push it holds a
+`range-diff` of the old PR commits against the new ones instead, so base
+drift doesn't bury the delta. It is UNAVAILABLE when gc pruned the old head. `write` puts the last run's `findings.json`, `summary.md`,
+`meta.json` (head, mode, verdict, `posted` url and state) and, when it was
+posted, `post.md` under `evidence/prior/`; legacy artifacts go under
+`evidence/prior/legacy/`. It prints the whole `{{THREADS}}` list:
+- one line per prior finding, marked `posted` or `not posted`;
+- one line per legacy artifact;
+- every unresolved thread, plus each thread resolved with a comment after
+  the last run ended (a resolve is not a fix);
+- each review submitted after the last run ended.
+
+Older reviews and threads that were settled before are left out. The last
+run already ruled on them, so listing them again only spends the readers
+re-checking history.
+
+**Phase 2.** `$PRIOR` is `{{THREADS}}` (`(none)` when empty), in every mode. Prior
+rows do not count toward `{{MAX_QUESTIONS}}`. A prior finding's settler is
+`since-last-review.out` plus the cited file at this head, plus
+`evidence/prior/post.md` when it was posted, since that is what the author
+was answering. The remaining budget goes first to the hunks
+`since-last-review.out` names: code the earlier run settled, in a file no
+commit since has touched, is not asked about again unless base drift
+reaches it.
+
+**Settling.** Every prior row is decided as one of the following:
+
+- **fixed**: a commit since changed the cited code, and the code no longer
+  does the thing.
+- **answered**: the author replied with a reason and the code is unchanged.
+  This is possible only for a `posted` finding.
+- **open**: neither.
+
+Thread state is not code state. A resolved thread may still be unfixed, and
+an open one may have been fixed two commits later. `teach.md` and
+`summary.md` open with a "Since the last review" table, one row per prior
+finding: the finding, its status, and the commit or reply that settled it.
+A fix commit is new code, so it gets its own questions like any other hunk.
+A fix that introduces a new defect is a new finding, not a re-opened one.
+Prior file:line citations point at the old head, so a reader finds the same
+code at this head (`since-last-review.out` says where it moved) before
+judging it.
+
+**Stance carries forward.** A prior finding that is still open, with no
+new evidence about it, keeps its earlier tag. The verdict that rested on it
+keeps the same weight too. An APPROVE posted over an open Question does not
+become a COMMENT on re-review just because the question is still open. If
+this run's judgment differs from the last run's, say so in the summary as a
+disagreement with the earlier review and name the reason. It must not turn
+into a new verdict silently, because the author would read that as a
+change in the code.
+
+**Mode.** A re-review does not inherit the earlier run's mode. Auto-light
+checks the files in `since-last-review.out` instead of `git/files`, so a
+docs-only follow-up to a deep review runs light. `--deep` still wins, and
+`--default` turns auto-light off without going deep. The deep-or-not
+questions ("is code reach zero?") are about the delta too. A PR whose last
+run went deep always has code reach, so judging the whole PR again would
+force every re-review deep. When
+the probe says `none: the head has not moved`, settle only the thread and
+activity rows, and say in the hand-over that nothing was re-reviewed.
+
+**Post.** When the earlier run was posted, the new body opens with
+`Re-reviewed at <head> since <prior head> (previous review: <url>)`. It then
+gives the "Since the last review" table and the new findings, if any. A
+fixed finding is never restated as new. When the author replied to a posted
+finding in a thread, answer in that thread through `gh api`, per the repo
+rule in the policy file.
+
 ## Mode
 
-`--light`, default, `--deep`. **Auto-light**: after phase 1, if
+`--light`, default, `--deep`; `--default` forces default when auto-light
+would otherwise apply. **Auto-light**: after phase 1, if
 `packs.json` matched only `docs-only`, or `git/files` lists 3 or fewer
-files and none ends in `.go` or `.tf`, run light unless `--deep` was given;
-say so in the hand-over. Pass the resolved mode to `state.mjs init`.
+files and none ends in `.go` or `.tf`, run light unless `--deep` or
+`--default` was given;
+say so in the hand-over. On a re-review the file test reads
+`since-last-review.out` instead of `git/files` (see Re-review). Pass the
+resolved mode to `state.mjs init`.
 
 Light skips refute and triage, so the orchestrator writes their two files
 itself, as pass-throughs, and the gates run unchanged:
@@ -215,18 +308,17 @@ early signal, and every other candidate on it is unrefuted.
 {{MAX_QUESTIONS}} questions;" clause instead, so the count is unbounded. The
 cap is a budget, not a target, and UNAVAILABLE rows count toward it.
 
-`{{THREADS}}` is `(none)` unless `--engage`. Under `--engage`, build it from
+On a re-review, `{{THREADS}}` starts with the `prior-context.mjs write`
+lines in every mode (see Re-review). Otherwise it is `(none)` unless
+`--engage`. Under `--engage`, build it from
 `pr/context.json` with no model: one line per thread in `.threads.items[]`
 whose `state` is `unresolved` (`- thread <path>:<line> — <first line of the
 first comment body>`), then one per `.reviews.items[]` with `kind` `review`
 and a non-empty body (`- review by <author> (<state>) — <first line of
 body>`). An empty body is the review GitHub creates around a thread reply,
-and the thread line already carries it. On a re-review (the PR folder's
-`raw/runs/history.jsonl` has an earlier run), add one line per finding of
-the last run, read from its archive with `tar -xzOf raw/<archive>
-work/findings.json`: `- prior finding [<tag>] <file_line> — <title>`.
-`(none)` if all three lists are empty or the file is absent. Thread and
-prior-finding rows do not count toward `{{MAX_QUESTIONS}}`.
+and the thread line already carries it. `(none)` if every list is empty or
+the file is absent. Thread and prior rows do not count toward
+`{{MAX_QUESTIONS}}`.
 
 Beyond the threads, the prompt draws questions from the evidence alone:
 UNAVAILABLE and FAILED probes, base drift, failing checks, and
@@ -448,18 +540,9 @@ per finding of the last run, through `{{THREADS}}` in the questions prompt
 (so the ledger, not this conversation, carries them); Post writes replies
 with `gh api`, never a new review.
 
-**Re-review: walk the commits forward.** Thread state is not code state: a
-resolved thread may be unfixed, and an open one may have been fixed two
-commits later. When `raw/runs/history.jsonl` has an earlier run, take the
-`head` of its last line and pass it to phase 1 as `--since <head>`; the
-evidence then carries `probes/core/since-last-review.out`, the commits from
-that head to this one and the files they changed (or UNAVAILABLE when a
-force-push left the old head pruned). Each prior-finding and thread row is
-settled against it plus the code at the head, as **fixed** (a commit since
-changed the cited code and the code no longer does the thing), **answered**
-(the author replied with a reason and the code is unchanged), or **open**.
-`teach.md` and `summary.md` open with a "Since the last review" table, one
-row per prior finding: finding, status, the commit or reply that settled it.
+**Re-review:** see the Re-review section. Prior findings are settled
+against `since-last-review.out` and the code at the head, not against
+thread state.
 
 `--beads`: for each confirmed Blocking/Non-blocking finding, `rsry_bead_create`
 with `files` = its `file_line`, body = the ledger row + settling evidence path,

@@ -13,10 +13,11 @@
 # builds and tests. (It used to check the PR out again, after phase 6's
 # cleanup had removed the worktree, and nothing removed it a second time.)
 #
-# --since SHA is the head an earlier review of this PR saw (a re-review under
-# --engage). core/since-last-review then lists the commits from SHA to the
-# head and the files they changed, which is what says whether a prior
-# finding was fixed in code or only answered in a thread.
+# --since SHA is the head an earlier review of this PR saw (a re-review; the
+# caller gets it from `prior-context.mjs <run> head`). core/since-last-review
+# then lists the commits from SHA to the head and the files they changed,
+# which is what says whether a prior finding was fixed in code or only
+# answered in a thread.
 #
 # --cleanup RUN removes RUN's worktree and that of RUN/recheck, if any.
 #
@@ -233,12 +234,20 @@ if [ -n "$SINCE" ]; then
     # A force-push can leave the earlier head unreachable; it is still in the
     # clone until gc prunes it, and when it is gone the probe says so.
     # shellcheck disable=SC2016  # the variables expand inside the probe's bash, by design
-    probe core since-last-review --env "REPO_DIR=$REPO_DIR" --env "SINCE=$SINCE" --env "HEAD=$HEAD" -- bash -c '
+    # When history was rewritten (a rebase onto a newer base, then a force-push),
+    # a plain diff of the two heads carries every base commit in between, so the
+    # probe compares the two PR ranges with range-diff instead: only the PR's
+    # own commits, matched old to new.
+    probe core since-last-review --env "REPO_DIR=$REPO_DIR" --env "SINCE=$SINCE" --env "HEAD=$HEAD" --env "BASE=$BASE" --env "MB=$MB" -- bash -c '
         git -C "$REPO_DIR" cat-file -e "$SINCE^{commit}" 2>/dev/null || { echo "earlier head $SINCE is not in the clone (force-pushed and pruned?)" >&2; exit 127; }
         if [ "$(git -C "$REPO_DIR" rev-parse "$SINCE^{commit}")" = "$(git -C "$REPO_DIR" rev-parse "$HEAD^{commit}")" ]; then echo "none: the head has not moved since the last review"; exit 0; fi
         if git -C "$REPO_DIR" merge-base --is-ancestor "$SINCE" "$HEAD"; then echo "## commits since the last review ($SINCE..$HEAD)"; git -C "$REPO_DIR" log --format="%h %cI %s" "$SINCE..$HEAD"
-        else echo "## history rewritten: $SINCE is not an ancestor of $HEAD (force-push); diff below is head against the earlier head"; fi
-        echo; echo "## files changed since the last review"; git -C "$REPO_DIR" diff --stat "$SINCE" "$HEAD"'
+            echo; echo "## files changed since the last review"; git -C "$REPO_DIR" diff --stat "$SINCE" "$HEAD"
+        else
+            OLDMB="$(git -C "$REPO_DIR" merge-base "$BASE" "$SINCE")"
+            echo "## history rewritten: $SINCE is not an ancestor of $HEAD (force-push); range-diff of the PR commits, old $OLDMB..$SINCE vs new $MB..$HEAD"
+            git -C "$REPO_DIR" range-diff --no-color "$OLDMB..$SINCE" "$MB..$HEAD" | head -n 3000
+        fi'
 fi
 # Base commits since the merge-base that touch a file this change touches. The
 # staleness count says how far the base moved; this says whether it moved under
