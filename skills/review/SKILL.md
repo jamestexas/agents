@@ -13,7 +13,7 @@ description: >
   PR review, own or peer's; replaces the hand-composed explain-work +
   structural-pr-review chain.
 allowed-tools: "Bash,Read,Glob,Grep,Agent,Skill,mcp__modmap__*,mcp__mache__*"
-argument-hint: "<PR number | owner/repo#N | path> [more PRs ...] [--fast|--light|--deep] [--engage] [--post] [--beads]"
+argument-hint: "<PR number | owner/repo#N | path> [more PRs ...] [--fast|--light|--default|--deep] [--engage] [--post] [--beads]"
 ---
 
 # /review
@@ -180,19 +180,27 @@ conversation.
 node $SKILL/scripts/state.mjs <run> init --pending --new pr=<owner/repo#N> mode=<...>   # archives the ended run, appends its history line
 SINCE=$(node $SKILL/scripts/prior-context.mjs <run> head)                                # the head that run saw, or empty
 bash $SKILL/scripts/review-evidence.sh --pr <owner/repo#N> --repo-dir <clone> ${SINCE:+--since "$SINCE"} --out <run>
-PRIOR=$(node $SKILL/scripts/prior-context.mjs <run> write)                               # evidence/prior/ + one line per prior item
+PRIOR=$(node $SKILL/scripts/prior-context.mjs <run> write [--engage])                    # evidence/prior/ + the whole {{THREADS}} list
 ```
 
 `--since` adds `probes/core/since-last-review.out`, the commits since that
-head and the files they changed, or UNAVAILABLE when a force-push pruned
-the old head. `write` puts the last run's `findings.json`, `summary.md`,
+head and the files they changed. After a rebase and force-push it holds a
+`range-diff` of the old PR commits against the new ones instead, so base
+drift doesn't bury the delta. It is UNAVAILABLE when gc pruned the old head. `write` puts the last run's `findings.json`, `summary.md`,
 `meta.json` (head, mode, verdict, `posted` url and state) and, when it was
 posted, `post.md` under `evidence/prior/`; legacy artifacts go under
-`evidence/prior/legacy/`. It prints one `{{THREADS}}` line per prior
-finding, marked `posted` or `not posted`, and one per legacy artifact.
+`evidence/prior/legacy/`. It prints the whole `{{THREADS}}` list:
+- one line per prior finding, marked `posted` or `not posted`;
+- one line per legacy artifact;
+- every unresolved thread, plus each thread resolved with a comment after
+  the last run ended (a resolve is not a fix);
+- each review submitted after the last run ended.
 
-**Phase 2.** `$PRIOR` goes into `{{THREADS}}` in every mode, not only under
-`--engage`. Under `--engage` the thread and review lines follow it. Prior
+Older reviews and threads that were settled before are left out. The last
+run already ruled on them, so listing them again only spends the readers
+re-checking history.
+
+**Phase 2.** `$PRIOR` is `{{THREADS}}` (`(none)` when empty), in every mode. Prior
 rows do not count toward `{{MAX_QUESTIONS}}`. A prior finding's settler is
 `since-last-review.out` plus the cited file at this head, plus
 `evidence/prior/post.md` when it was posted, since that is what the author
@@ -215,10 +223,26 @@ an open one may have been fixed two commits later. `teach.md` and
 finding: the finding, its status, and the commit or reply that settled it.
 A fix commit is new code, so it gets its own questions like any other hunk.
 A fix that introduces a new defect is a new finding, not a re-opened one.
+Prior file:line citations point at the old head, so a reader finds the same
+code at this head (`since-last-review.out` says where it moved) before
+judging it.
+
+**Stance carries forward.** A prior finding that is still open, with no
+new evidence about it, keeps its earlier tag. The verdict that rested on it
+keeps the same weight too. An APPROVE posted over an open Question does not
+become a COMMENT on re-review just because the question is still open. If
+this run's judgment differs from the last run's, say so in the summary as a
+disagreement with the earlier review and name the reason. It must not turn
+into a new verdict silently, because the author would read that as a
+change in the code.
 
 **Mode.** A re-review does not inherit the earlier run's mode. Auto-light
 checks the files in `since-last-review.out` instead of `git/files`, so a
-docs-only follow-up to a deep review runs light. `--deep` still wins. When
+docs-only follow-up to a deep review runs light. `--deep` still wins, and
+`--default` turns auto-light off without going deep. The deep-or-not
+questions ("is code reach zero?") are about the delta too. A PR whose last
+run went deep always has code reach, so judging the whole PR again would
+force every re-review deep. When
 the probe says `none: the head has not moved`, settle only the thread and
 activity rows, and say in the hand-over that nothing was re-reviewed.
 
@@ -231,9 +255,11 @@ rule in the policy file.
 
 ## Mode
 
-`--light`, default, `--deep`. **Auto-light**: after phase 1, if
+`--light`, default, `--deep`; `--default` forces default when auto-light
+would otherwise apply. **Auto-light**: after phase 1, if
 `packs.json` matched only `docs-only`, or `git/files` lists 3 or fewer
-files and none ends in `.go` or `.tf`, run light unless `--deep` was given;
+files and none ends in `.go` or `.tf`, run light unless `--deep` or
+`--default` was given;
 say so in the hand-over. On a re-review the file test reads
 `since-last-review.out` instead of `git/files` (see Re-review). Pass the
 resolved mode to `state.mjs init`.

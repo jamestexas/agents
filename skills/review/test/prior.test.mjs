@@ -90,3 +90,28 @@ test('write: nothing earlier leaves no evidence/prior and prints nothing', () =>
   assert.equal(r.stdout, '');
   assert.equal(fs.existsSync(path.join(raw, 'evidence', 'prior')), false);
 });
+
+test('write: a re-review lists open threads, threads resolved since, and newer reviews only', () => {
+  const { raw } = prFolder();
+  archive(raw, { findings: [] });
+  // archive() records no ended time; give the history line one.
+  const hf = path.join(raw, 'runs', 'history.jsonl');
+  fs.writeFileSync(hf, fs.readFileSync(hf, 'utf8').replace('"mode"', '"ended":"2026-11-24T05:00:00Z","mode"'));
+  fs.mkdirSync(path.join(raw, 'evidence', 'pr'), { recursive: true });
+  fs.writeFileSync(path.join(raw, 'evidence', 'pr', 'context.json'), JSON.stringify({
+    threads: { items: [
+      { path: 'a.go', line: 1, state: 'unresolved', resolved: false, comments: [{ at: '2026-11-20T00:00:00Z', body: 'still open' }] },
+      { path: 'b.go', line: 2, state: 'resolved', resolved: true, comments: [{ at: '2026-11-20T00:00:00Z', body: 'moved it' }, { at: '2026-11-24T06:00:00Z', body: 'done' }] },
+      { path: 'c.go', line: 3, state: 'resolved', resolved: true, comments: [{ at: '2026-11-20T00:00:00Z', body: 'old and settled' }] },
+    ] },
+    reviews: { items: [
+      { kind: 'review', author: 'old', state: 'COMMENTED', at: '2026-11-20T00:00:00Z', body: 'settled last round' },
+      { kind: 'review', author: 'new', state: 'APPROVED', at: '2026-11-24T07:00:00Z', body: 'lgtm\nmore' },
+      { kind: 'review', author: 'wrap', state: 'COMMENTED', at: '2026-11-24T07:00:00Z', body: '' },
+    ] },
+  }));
+  assert.equal(run(raw, 'write').stdout,
+    '- thread a.go:1 — still open\n'
+    + '- thread b.go:2 (resolved since the last review) — moved it\n'
+    + '- review by new (APPROVED) — lgtm\n');
+});

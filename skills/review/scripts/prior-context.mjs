@@ -5,10 +5,12 @@
 //
 //   prior-context.mjs <run> head    print the head the last review saw (empty
 //                                   when there is none); pass it as --since
-//   prior-context.mjs <run> write   copy the last review's findings, posted
+//   prior-context.mjs <run> write [--engage]
+//                                   copy the last review's findings, posted
 //                                   body and verdict into <run>/evidence/prior/
-//                                   and print one {{THREADS}} line per prior
-//                                   finding and per legacy artifact
+//                                   and print the whole {{THREADS}} list: one
+//                                   line per prior finding, legacy artifact,
+//                                   thread and review (see below)
 //
 // Run `head` after `state.mjs init --pending --new` (which archives the ended
 // run and appends its history line) and before review-evidence.sh; run `write`
@@ -21,13 +23,21 @@
 //      structural-review.md, structural-post.md, and a review.md written before
 //      the folder had any /review run. They have no machine-readable findings,
 //      so each becomes one row asking whether what it raised still holds.
+//
+// Threads and reviews come from evidence/pr/context.json. On a first review
+// they are listed only under --engage. On a re-review they are always listed,
+// cut to what the last run did not already settle: unresolved threads, threads
+// resolved with a comment after the last run ended (a resolve is not a fix),
+// and reviews submitted after it. Re-listing every past review re-asks settled
+// history and spends the readers on it.
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const [run, op] = process.argv.slice(2);
+const [run, op, ...flags] = process.argv.slice(2);
+const engage = flags.includes('--engage');
 if (!run || !['head', 'write'].includes(op)) {
-  console.error('usage: prior-context.mjs <run> head|write');
+  console.error('usage: prior-context.mjs <run> head | write [--engage]');
   process.exit(2);
 }
 
@@ -84,4 +94,23 @@ for (const name of legacy) {
 }
 
 if (lines.length === 0) fs.rmSync(out, { recursive: true, force: true });
+
+const ctx = tryJSON(fs.existsSync(path.join(run, 'evidence', 'pr', 'context.json')) ? fs.readFileSync(path.join(run, 'evidence', 'pr', 'context.json'), 'utf8') : '');
+const rereview = history.length > 0 || lines.length > 0;
+if (ctx && (engage || rereview)) {
+  const since = rereview ? (last?.ended ?? null) : null;
+  const after = (at) => since == null || (typeof at === 'string' && at > since);
+  const first = (b) => String(b ?? '').split('\n').find((l) => l.trim()) ?? '';
+  for (const t of ctx.threads?.items ?? []) {
+    const comments = t.comments ?? [];
+    const open = t.state === 'unresolved' || t.resolved === false;
+    const newlyResolved = !open && since != null && comments.some((c) => after(c.at));
+    if (!open && !newlyResolved) continue;
+    lines.push(`- thread ${t.path ?? '?'}:${t.line ?? '?'}${newlyResolved ? ' (resolved since the last review)' : ''} — ${first(comments[0]?.body)}`);
+  }
+  for (const r of ctx.reviews?.items ?? []) {
+    if (r.kind !== 'review' || !String(r.body ?? '').trim() || !after(r.at)) continue;
+    lines.push(`- review by ${r.author ?? '?'} (${r.state ?? '?'}) — ${first(r.body)}`);
+  }
+}
 process.stdout.write(lines.length ? `${lines.join('\n')}\n` : '');
