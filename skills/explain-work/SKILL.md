@@ -31,7 +31,7 @@ PII-free.
 ## Step 0 — Check for prior session context
 
 Before fetching anything, check whether the current session already contains
-analysis of the same target. If a `pr-review-kit` or `/review` pass was just
+analysis of the same target. If a `/review` pass was just
 run in this session for the same PR/path, **reuse that context rather than
 re-fetching**. The exception is `/review`'s explain pass: its prompt forbids
 reading the review's work, because the join that follows is only worth
@@ -92,7 +92,7 @@ the explanation.
 - **Default (light):** the structural + ownership + intent context from Step 2 is
   enough to explain most work. Note what is notable / risky inline; do not run a
   full agent panel.
-- **`--deep`:** run the full review-lens panel (delegate to `pr-review-kit`
+- **`--deep`:** run the full review-lens panel (delegate to `/review --deep`
   discipline / parallel analysis agents) and fold confirmed findings into the
   teaching. Use when the user is reviewing a substantial peer PR and wants the
   findings, not just the shape.
@@ -169,7 +169,7 @@ Format:
 
 | Layer | Status | Notes |
 |---|---|---|
-| Code / structural | ✅ reached (session reuse) | pr-review-kit pass earlier this session |
+| Code / structural | ✅ reached (session reuse) | `/review` pass earlier this session |
 | Seam / boundaries | ❌ skipped | seam-discovery not available |
 | Team ownership | ✅ reached | CODEOWNERS: @org/team-name |
 | Intent / ticket | ⚠️ partial | PR body only; no linked Linear ticket |

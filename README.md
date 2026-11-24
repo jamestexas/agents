@@ -124,7 +124,7 @@ It links three things, not two: `agents/` and `skills/` into `~/.claude/`, and t
 | [`park-work`](skills/park-work/SKILL.md) | pre-approved | Check whether the current human-agent work episode is mechanically safe to close, park incomplete work behind a verified durable checkpoint and receipt, or inspect a previously parked episode before a fail-closed resume gate. |
 | [`pr-board`](skills/pr-board/SKILL.md) | pre-approved | Answers "how are my PRs?", "did I address the review?", "anything waiting on me?". |
 | [`pr-buckets`](skills/pr-buckets/SKILL.md) | pre-approved | Group a body of in-progress work (a diff, a branch, a set of changes) into small, individually-reviewable PR buckets sized to a LoC threshold — one concern per bucket, in dependency order. |
-| [`pr-review-kit`](skills/pr-review-kit/SKILL.md) | pre-approved | Self-contained playbook for rigorous PR review: state inspection, design-intent hunting, verification rules (cite sources, walk commits, verify artifacts), agent dispatch, falsifiable-matrix output, GitHub posting only with explicit authorization. |
+| [`pr-review-kit`](skills/pr-review-kit/SKILL.md) | prompts | Folded into /review — use `/review <pr>` instead. |
 | [`pr-review`](skills/pr-review/SKILL.md) | prompts | Folded into /review. |
 | [`pr-suggestion`](skills/pr-suggestion/SKILL.md) | pre-approved | Post a GitHub review comment as an applyable "suggested change" — a ```suggestion block the author commits with one click — and, first, decide whether a finding should be a suggestion at all. |
 | [`prior-art-cartographer`](skills/prior-art-cartographer/SKILL.md) | pre-approved | Produce cited, structured comparisons between a project and external systems solving adjacent problems; updates a prior-art matrix. |

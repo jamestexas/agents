@@ -1,8 +1,10 @@
 # Engage mode — responding to existing reviewer comments
 
-A sidecar to [SKILL.md](SKILL.md), carrying Phase 9 in full. Read it when the PR
-already carries inline reviewer comments you need to answer; skip it entirely for
-a fresh review. Phases 1–8 referenced below live in SKILL.md.
+Carried over from the retired pr-review-kit (its Phase 9), and read from
+[RESPOND.md](RESPOND.md) §S.9 when the PR already carries inline reviewer
+comments you need to answer. "Phases 1–8" below are the old kit's; their
+successors are `/review`'s phases (see `skills/pr-review-kit/SKILL.md` for the
+map).
 
 ---
 

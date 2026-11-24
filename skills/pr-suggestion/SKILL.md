@@ -22,7 +22,7 @@ The spine, one question:
 > If yes, post it as a `suggestion` so the author applies it with one click. If
 > no, post a described comment — a suggestion here would be broken or wrong.
 
-**Posting gate (repo-wide rule, same as pr-review-kit):** nothing in this skill
+**Posting gate (repo-wide rule, same as /review's Post phase):** nothing in this skill
 is posted to GitHub without explicit human authorization. Prepare the payloads,
 show what will be posted and where, and call the API only on an explicit go.
 
@@ -232,7 +232,7 @@ well-formed suggestion payload.
   reject individually.
 
 ## Cross-references
-- **Upstream:** `structural-pr-review` / `pr-review-kit` produce the findings;
+- **Upstream:** `/review` produces the findings;
   this skill is the posting mechanic their gated Phase-8 step can call for the
   findings that pass the suggestability rule.
 - **Sibling:** for structural/additive findings that fail the rule, hand a
