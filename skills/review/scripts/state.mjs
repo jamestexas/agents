@@ -188,7 +188,7 @@ const startOver = ({ dirs = false } = {}) => {
     process.exit(1);
   }
   for (const m of members) fs.rmSync(path.join(run, m), { recursive: true, force: true });
-  const line = { archive, started: prior?.started ?? null, ended: prior?.ended ?? null, mode: prior?.mode ?? null, verdict: prior?.verdict ?? null, head: prior?.head ?? null };
+  const line = { archive, started: prior?.started ?? null, ended: prior?.ended ?? null, mode: prior?.mode ?? null, verdict: prior?.verdict ?? null, head: prior?.head ?? null, posted: prior?.posted ?? null };
   fs.appendFileSync(path.join(run, RUNS, 'history.jsonl'), `${JSON.stringify(line)}\n`);
 };
 const priorEnded = () => { const es = readEvents(); return es.length > 0 && fold(es).ended != null; };

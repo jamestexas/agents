@@ -13,10 +13,11 @@
 # builds and tests. (It used to check the PR out again, after phase 6's
 # cleanup had removed the worktree, and nothing removed it a second time.)
 #
-# --since SHA is the head an earlier review of this PR saw (a re-review under
-# --engage). core/since-last-review then lists the commits from SHA to the
-# head and the files they changed, which is what says whether a prior
-# finding was fixed in code or only answered in a thread.
+# --since SHA is the head an earlier review of this PR saw (a re-review; the
+# caller gets it from `prior-context.mjs <run> head`). core/since-last-review
+# then lists the commits from SHA to the head and the files they changed,
+# which is what says whether a prior finding was fixed in code or only
+# answered in a thread.
 #
 # --cleanup RUN removes RUN's worktree and that of RUN/recheck, if any.
 #

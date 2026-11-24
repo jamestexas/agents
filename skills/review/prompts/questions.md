@@ -9,7 +9,16 @@ if there are none):
 
 Write one row per entry in that list, each asking whether its ask is
 addressed at this head; the settler is the diff hunk or worktree file the
-entry names. These rows come first. If the list is `(none)`, write no such
+entry names. These rows come first.
+
+A `prior finding` entry comes from an earlier review of this PR. Ask
+whether it is fixed, answered or still open at this head. The settler is
+`probes/core/since-last-review.out` plus the file the entry cites, plus
+`prior/post.md` when the entry says `posted`, since that is what the author
+was shown. A `prior review (legacy)` entry names a file under
+`prior/legacy/`: ask whether what it raised still holds, with that file as
+the settler. After the prior rows, spend the budget first on the hunks that
+`since-last-review.out` names. If the list is `(none)`, write no such
 rows, even when `pr/context.json` holds reviews or comments: the list is the
 only source for these rows, and a later phase reads the rest of that file.
 
