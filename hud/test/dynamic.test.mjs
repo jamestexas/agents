@@ -633,6 +633,12 @@ test("tree is cached with an ETag and rebuilt when the HUD changes", async (t) =
   const revalidate = await fetch(base + "/api/tree", { headers: { "if-none-match": etag } });
   assert.equal(revalidate.status, 304, "a matching ETag costs no body");
 
+  // Writes the walk ignores (the server's own snapshots) keep the cache.
+  fs.mkdirSync(path.join(root, ".generated"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".generated", "digest.json"), "{}");
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal((await get("/api/tree")).headers.get("etag"), etag, "a .generated write is not a tree change");
+
   fs.writeFileSync(path.join(root, "inbox", "2026-09-11-two.md"), "# Two\n");
   let titles = [];
   for (let i = 0; i < 100; i++) {
