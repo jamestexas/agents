@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// focus-map.mjs <prdir> [--run DIR] [--explain FILE] [--out FILE] [--title T]
+// focus-map.mjs <prdir> [--run DIR] [--explain FILE] [--out FILE] [--title T] [--worktree keep]
 //
 // The join step: no model. Two passes looked at the same change without
 // reading each other. explain-work said which areas are load-bearing and
@@ -15,6 +15,10 @@
 // Defaults: --run <prdir>/raw, --explain <prdir>/explain.md,
 // --out <prdir>/focus.md.
 //
+// The join is the last step that waits for the explain pass, the only reader
+// of the PR worktree that can outlive `finish`, so after writing focus.md it
+// removes the run's worktree (`--worktree keep` holds it).
+//
 // Outcomes, per review item:
 //   fell   a finding tagged Blocking, Non-blocking or Observation
 //   open   a finding tagged Question, or a ledger row whose Decision is
@@ -27,6 +31,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { splitCells } from './cells.mjs';
+import { removeRunWorktree } from './worktree.mjs';
 
 // Files that are the review's own evidence, not code under review.
 const EVIDENCE = /^(git|probes|pr|work|evidence|raw)\//;
@@ -358,7 +363,7 @@ function main(argv) {
     if (a.startsWith('--')) args[a.slice(2)] = argv[++i]; else args._.push(a);
   }
   const prdir = args._[0];
-  if (!prdir) { console.error('usage: focus-map.mjs <prdir> [--run DIR] [--explain FILE] [--out FILE] [--title T]'); return 2; }
+  if (!prdir) { console.error('usage: focus-map.mjs <prdir> [--run DIR] [--explain FILE] [--out FILE] [--title T] [--worktree keep]'); return 2; }
   const run = args.run ?? path.join(prdir, 'raw');
   const explainPath = args.explain ?? path.join(prdir, 'explain.md');
   const outPath = args.out ?? path.join(prdir, 'focus.md');
@@ -392,6 +397,7 @@ function main(argv) {
   const lb = result.items.filter((it) => it.weight === 'load-bearing' && it.outcome === 'open').length
     + result.unexamined.filter((a) => a.weight === 'load-bearing').length;
   console.log(`focus-map: ${result.areas.length} areas, ${result.items.length} review items, ${lb} load-bearing x open → ${outPath}`);
+  if (args.worktree !== 'keep') removeRunWorktree(run);
   return 0;
 }
 

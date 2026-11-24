@@ -589,3 +589,37 @@ test('finish catalogs the note in index.md once, and leaves a tree without one a
   assert.equal(at2(['finish', `note=${note}`, 'gates=-'], 'ledger: x — ok\n').status, 0);
   assert.ok(!fs.existsSync(path.join(bare, 'index.md')), 'a tree without index.md is not given one');
 });
+
+// A real repo and a PR-style worktree the run claims as its own, the shape
+// review-evidence.sh leaves in evidence/.
+const fakeWorktree = (dir) => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-repo-'));
+  const git = (...a) => spawnSync('git', ['-C', repo, ...a], { encoding: 'utf8' });
+  git('init', '-q'); git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'x');
+  const wt = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'wt-')), 'pr-1');
+  assert.equal(git('worktree', 'add', '-q', '--detach', wt).status, 0);
+  fs.mkdirSync(path.join(dir, 'evidence', 'git'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'evidence', 'target.json'), JSON.stringify({ kind: 'pr', pr: 1 }));
+  fs.writeFileSync(path.join(dir, 'evidence', 'git', 'worktree-path'), wt);
+  fs.writeFileSync(path.join(dir, 'evidence', 'git', 'repo-dir'), repo);
+  return wt;
+};
+
+test('abandon removes the run\'s PR worktree: a dead run has no join to clean up after it', () => {
+  const dir = copyGood();
+  run(dir, ['init']);
+  const wt = fakeWorktree(dir);
+  // The cleanup shells out to git and jq, which the suite's narrowed PATH hides.
+  const r = spawnSync(process.execPath, [state, dir, 'abandon', 'reason=test'], { encoding: 'utf8', env: { ...env, PATH: process.env.PATH } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(fs.existsSync(wt), false);
+});
+
+test('finish keeps the worktree for the explain pass, except under --fast', () => {
+  const dir = copyGood();
+  run(dir, ['init']);
+  walk(dir);
+  const wt = fakeWorktree(dir);
+  assert.equal(run(dir, ['finish', 'note=projects/p/notes/PR-1.md']).status, 0);
+  assert.equal(fs.existsSync(wt), true, 'the join removes it, after the explain pass');
+});

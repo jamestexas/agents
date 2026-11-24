@@ -430,12 +430,11 @@ node $SKILL/scripts/render.mjs <run> --title "PR N — <title>" --out <notes pat
 node $SKILL/scripts/check.mjs <run>
 node $SKILL/scripts/state.mjs <run> finish note=<notes path relative to $HUD_ROOT>
 # wait for the explain pass, then join (no model)
-node $SKILL/scripts/focus-map.mjs <PR folder> --run <run>
-bash $SKILL/scripts/review-evidence.sh --cleanup <run>
+node $SKILL/scripts/focus-map.mjs <PR folder> --run <run>   # also removes the PR worktree
 ```
 
-The join runs once the explain pass has written `explain.md`, and before
-cleanup, since the explain pass reads the worktree. `focus-map.mjs` reads
+The join runs once the explain pass has written `explain.md`, and removes
+the worktree after it, since the explain pass reads the worktree. `focus-map.mjs` reads
 the `## Areas` table and the run's `work/ledger.md`, `work/findings.json`
 and `work/claims.jsonl`, matches them by file and line overlap (resolving a
 reader's `git/diff.patch hunk N` through the patch, and a shared identifier
@@ -447,6 +446,13 @@ the review items no area claims. A finding replaces the ledger rows it cites.
 If the explain pass failed or wrote no `## Areas` table, the script says so
 and exits 1; the review artifact is unaffected, and the hand-over says the
 focus map is missing.
+
+The PR worktree is removed by the script that knows nothing will read it
+again: `focus-map.mjs` after the join (the explain pass reads the worktree
+and may outlive `finish`), `finish` itself under `--fast` (no explain pass),
+and `abandon`/`fail`. Pass `--worktree keep` / `worktree=keep` to hold it,
+for example to re-run a test by hand. `review-evidence.sh --cleanup <run>`
+still works for a run that ended some other way.
 
 `finish` re-runs the gates and records each as ok or fail, the verdict from
 `summary.md`, and the finding counts; the HUD row turns from running to done
