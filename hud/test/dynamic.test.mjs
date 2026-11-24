@@ -372,7 +372,8 @@ test("digest output is cached and replayed when the command breaks", async (t) =
     path.join(root, "hud.config.json"),
     config({ digest: { cmd: `"${cli}" digest --since 24h` } }),
   );
-  const { get } = await serve(t, root);
+  // Blocking mode: every request runs the command, so a break shows at once.
+  const { get } = await serve(t, root, { sourceRefreshMs: 0 });
 
   const live = await get("/api/dyn/digest");
   assert.equal(live.status, 200);
@@ -564,4 +565,81 @@ test("implausible peer handles never reach a subprocess", (t) => {
     ["peer-a"],
     "only login-shaped handles survive",
   );
+});
+
+test("digest serves its snapshot at once and refreshes behind it", async (t) => {
+  const first = [{ at: "2026-09-10T09:00:00Z", kind: "commit", text: "first" }];
+  const second = [{ at: "2026-09-10T10:00:00Z", kind: "commit", text: "second" }];
+  const root = fixture(t, { "inbox/x.md": "# x\n" });
+  const out = path.join(root, "bin", "out.json");
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  fs.writeFileSync(out, JSON.stringify(first));
+  const cli = script(root, "bin/digest-cli", ["#!/bin/sh", `cat "${out}"`, ""].join("\n"));
+  fs.writeFileSync(path.join(root, "hud.config.json"), config({ digest: { cmd: `"${cli}" digest` } }));
+  let clock = Date.parse("2026-09-10T12:00:00Z");
+  const { get } = await serve(t, root, { sourceRefreshMs: 60_000, now: () => clock });
+
+  // No snapshot yet: the first request waits for the command.
+  assert.deepEqual((await (await get("/api/dyn/digest")).json()).data, first);
+
+  // The command now says something else, but the snapshot is young: served as is.
+  fs.writeFileSync(out, JSON.stringify(second));
+  const young = await (await get("/api/dyn/digest")).json();
+  assert.deepEqual(young.data, first);
+  assert.equal(young.stale, false);
+
+  // Aged past the window: still answered from the snapshot, refreshed behind it.
+  clock += 120_000;
+  const aged = await (await get("/api/dyn/digest")).json();
+  assert.deepEqual(aged.data, first, "the response does not wait for the refresh");
+  for (let i = 0; i < 50 && readGenerated(root, "digest").data[0].text !== "second"; i++) {
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  assert.deepEqual(readGenerated(root, "digest").data, second, "the background refresh landed");
+
+  // A failed background refresh keeps the data and reports stale.
+  fs.writeFileSync(cli, "#!/bin/sh\nexit 3\n", { mode: 0o755 });
+  clock += 120_000;
+  await get("/api/dyn/digest");
+  let after;
+  for (let i = 0; i < 50; i++) {
+    after = await (await get("/api/dyn/digest")).json();
+    if (after.stale) break;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  assert.equal(after.stale, true);
+  assert.deepEqual(after.data, second);
+});
+
+test("tree is cached with an ETag and rebuilt when the HUD changes", async (t) => {
+  const root = fixture(t, { "inbox/2026-09-10-one.md": "# One\n" });
+  const { get, base } = await serve(t, root);
+
+  const a = await get("/api/tree");
+  assert.ok(a.headers.get("etag"), "the tree carries an ETag");
+  assert.equal(a.headers.get("cache-control"), "no-cache");
+  // The watcher can still report the fixture's own writes just after it
+  // starts (macOS FSEvents), so wait until two reads agree.
+  let etag = a.headers.get("etag");
+  let settled = false;
+  for (let i = 0; i < 100 && !settled; i++) {
+    await new Promise((r) => setTimeout(r, 20));
+    const next = (await get("/api/tree")).headers.get("etag");
+    settled = next === etag;
+    etag = next;
+  }
+  assert.ok(settled, "unchanged HUD, same body");
+
+  const revalidate = await fetch(base + "/api/tree", { headers: { "if-none-match": etag } });
+  assert.equal(revalidate.status, 304, "a matching ETag costs no body");
+
+  fs.writeFileSync(path.join(root, "inbox", "2026-09-11-two.md"), "# Two\n");
+  let titles = [];
+  for (let i = 0; i < 100; i++) {
+    const tree = await (await get("/api/tree")).json();
+    titles = tree.sections.flatMap((s) => s.entries.map((e) => e.title));
+    if (titles.includes("Two")) break;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  assert.ok(titles.includes("Two"), "a new note shows up without a restart");
 });

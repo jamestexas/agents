@@ -49,6 +49,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { lectioGraft, listSessions } from "./sessions.mjs";
@@ -130,6 +131,13 @@ export const LIMITS = {
   // Rows one sessions response may carry. Bounds the payload; the per-file
   // read is already bounded inside sessions.mjs.
   maxSessions: 200,
+  // A cached tree older than this is rebuilt even if the watcher saw nothing:
+  // a backstop for a missed event, not the freshness mechanism.
+  treeMaxAgeMs: 60 * 1000,
+  // A command source (the digest) older than this is refreshed in the
+  // background while its snapshot is served. 0 turns that off: every request
+  // runs the command and waits for it.
+  sourceRefreshMs: 60 * 1000,
 };
 
 /**
@@ -2053,6 +2061,67 @@ function sendFile(res, abs, type) {
   res.end(buf);
 }
 
+// ------------------------------------------------------------ tree cache
+//
+// Building the tree walks the whole HUD and parses every note; every page load
+// asks for it, and its size grows with every review run's raw/ files. So it is
+// built once and kept, with its serialized body and an ETag, until something
+// under the root changes. A dedicated watcher marks it dirty; it runs for the
+// server's life, unlike the events hub's, which runs only while a page holds a
+// stream. If the watcher cannot start, the cache is bypassed and every request
+// builds, which is exactly the old behavior.
+
+/**
+ * @param {string} root
+ * @param {{maxAgeMs: number, now: () => number}} opts
+ */
+function treeCache(root, opts) {
+  let cached = null; // { body, etag, at }
+  let dirty = true;
+  let watcher = null;
+  try {
+    watcher = fs.watch(root, { recursive: true, persistent: false }, () => {
+      dirty = true;
+    });
+    watcher.on("error", () => {
+      if (watcher) watcher.close();
+      watcher = null;
+      dirty = true;
+    });
+  } catch {
+    watcher = null;
+  }
+  return {
+    get() {
+      const stale = !cached || dirty || !watcher || opts.now() - cached.at > opts.maxAgeMs;
+      if (stale) {
+        // Cleared before the build, so a change that lands mid-walk marks the
+        // result dirty again rather than being lost.
+        dirty = false;
+        const body = JSON.stringify(buildTree(root), null, 2);
+        cached = { body, etag: `"${createHash("sha1").update(body).digest("base64url")}"`, at: opts.now() };
+      }
+      return cached;
+    },
+    close() {
+      if (watcher) watcher.close();
+      watcher = null;
+    },
+  };
+}
+
+function serveTree(req, res, tree) {
+  const { body, etag } = tree.get();
+  // no-cache, not no-store: the browser keeps the body and revalidates, so an
+  // unchanged tree costs a 304 instead of the whole listing.
+  const headers = { etag, "cache-control": "no-cache" };
+  if (req.headers["if-none-match"] === etag) {
+    res.writeHead(304, headers);
+    return res.end();
+  }
+  return sendText(res, 200, body, "application/json; charset=utf-8", headers);
+}
+
 /**
  * @param {{root?: string, uiDir?: string, env?: object, httpTimeoutMs?: number,
  *          cmdTimeoutMs?: number}} [opts]
@@ -2078,6 +2147,11 @@ export function createServer(opts = {}) {
       debounceMs: opts.eventsDebounceMs || EVENTS_DEBOUNCE_MS,
       pingMs: opts.eventsPingMs || EVENTS_PING_MS,
     }),
+    tree: treeCache(root, { maxAgeMs: opts.treeMaxAgeMs ?? LIMITS.treeMaxAgeMs, now: opts.now || Date.now }),
+    sourceRefreshMs: opts.sourceRefreshMs ?? LIMITS.sourceRefreshMs,
+    // Per command source: the background refresh in flight, and the last
+    // refresh's error (null when it succeeded), which is what `stale` reports.
+    sources: new Map(),
   };
 
   const refresh = () => {
@@ -2119,6 +2193,7 @@ export function createServer(opts = {}) {
   const close = server.close.bind(server);
   server.close = (cb) => {
     dyn.events.closeAll();
+    dyn.tree.close();
     return close(cb);
   };
   return server;
@@ -2153,7 +2228,7 @@ function handle(req, res, root, uiDir, dyn, refresh) {
     return dyn.events.serve(req, res);
   }
 
-  if (pathname === "/api/tree") return sendJson(res, 200, buildTree(root));
+  if (pathname === "/api/tree") return serveTree(req, res, dyn.tree);
   if (pathname === "/api/md") return serveMarkdown(res, root, url.searchParams.get("path"));
   // The parsed config. The UI needs `ticket_url_template` and used to read the
   // config's raw bytes through /api/md, which only worked while the file was
@@ -2199,24 +2274,59 @@ function handle(req, res, root, uiDir, dyn, refresh) {
  * The board walked this ladder too, until it became a card: the `http` kind
  * is this ladder with the snapshot under `.generated/cards/`.
  */
-async function serveSource(res, root, name, source, produce) {
+async function serveSource(res, root, name, source, produce, dyn) {
   if (!source) {
     // Not configured ⇒ the source does not exist ⇒ the panel does not exist.
     // Deliberately not served from a snapshot: `sources` is the switchboard.
     return sendJson(res, 503, { source: name, error: `${name} is not configured in ${CONFIG_TOML}` });
   }
+  // `at` is when this process last refreshed the source, on its own clock;
+  // null until the first refresh, so a fresh start refreshes once behind the
+  // snapshot it serves.
+  const state = dyn.sources.get(name) ?? { inFlight: null, error: null, at: null };
+  dyn.sources.set(name, state);
+  const run = () => {
+    if (!state.inFlight) {
+      state.inFlight = Promise.resolve()
+        .then(produce)
+        .then((data) => {
+          state.error = null;
+          state.at = dyn.now();
+          return { cached_at: writeSnapshot(root, name, data).cached_at, data };
+        })
+        .catch((err) => {
+          state.error = errText(err);
+          throw err;
+        })
+        .finally(() => {
+          state.inFlight = null;
+        });
+    }
+    return state.inFlight;
+  };
+
+  // Stale-while-revalidate: with a snapshot on disk, answer from it now and
+  // refresh behind the response once it has aged past sourceRefreshMs. The
+  // command can take seconds on a cold start; the panel should not.
+  const snap = dyn.sourceRefreshMs > 0 ? readSnapshot(root, name) : null;
+  if (snap) {
+    if (state.at === null || dyn.now() - state.at >= dyn.sourceRefreshMs) run().catch(() => {});
+    const body = { source: name, stale: state.error !== null, cached_at: snap.cached_at, data: snap.data };
+    if (state.error !== null) body.error = state.error;
+    return sendJson(res, 200, body);
+  }
+
   try {
-    const data = await produce();
-    const { cached_at } = writeSnapshot(root, name, data);
+    const { cached_at, data } = await run();
     return sendJson(res, 200, { source: name, stale: false, cached_at, data });
   } catch (err) {
-    const snap = readSnapshot(root, name);
-    if (snap) {
+    const old = readSnapshot(root, name);
+    if (old) {
       return sendJson(res, 200, {
         source: name,
         stale: true,
-        cached_at: snap.cached_at,
-        data: snap.data,
+        cached_at: old.cached_at,
+        data: old.data,
         error: errText(err),
       });
     }
@@ -2227,8 +2337,13 @@ async function serveSource(res, root, name, source, produce) {
 function serveDigest(res, root, dyn) {
   const source = sourceOf(loadConfig(root), "digest");
   const cmd = source && typeof source.cmd === "string" ? source.cmd : null;
-  return serveSource(res, root, "digest", cmd ? source : null, () =>
-    fetchDigest(cmd, { env: dyn.env, timeout: dyn.cmdTimeoutMs }),
+  return serveSource(
+    res,
+    root,
+    "digest",
+    cmd ? source : null,
+    () => fetchDigest(cmd, { env: dyn.env, timeout: dyn.cmdTimeoutMs }),
+    dyn,
   );
 }
 
