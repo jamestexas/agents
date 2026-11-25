@@ -26,8 +26,8 @@ git commit -qam change
 git checkout -q main && echo more >> README.md && git commit -qam "main moved"
 git checkout -q feature
 
-bin="$tmp/bin"; mkdir -p "$bin"   # a PATH with no gh, no go, no modmap (uname: macOS system ruby runs it at startup)
-for t in git jq ruby uname shasum date mktemp head tr cut mkdir cat grep sort uniq xargs dirname basename wc sed awk tee rm mv cp realpath readlink bash sh env sleep; do
+bin="$tmp/bin"; mkdir -p "$bin"   # a PATH with no gh, no go, no modmap
+for t in git jq node yq sha256sum shasum date mktemp head tr cut mkdir cat grep sort uniq xargs dirname basename wc sed awk tee rm mv cp realpath readlink bash sh env sleep; do
     p="$(command -v $t || true)"; [ -n "$p" ] && ln -sf "$p" "$bin/$t"
 done
 
@@ -107,7 +107,7 @@ reason() { jq -r --arg n "$1" '.probes[] | select(.name==$n) | .reason' "$m"; }
 # packs.json records which glob hit which file
 jq -e '.matched[] | select(.name=="go-graph") | .by[0] | (.glob|length>0) and (.file|length>0)' "$out/evidence/packs.json" >/dev/null || { echo "go-graph .by[0] must carry glob and file"; exit 1; }
 # manifest.sha256 is recomputable from the manifest minus timestamps
-want="$(jq -S 'del(.probes[].started, .probes[].ended)' "$m" | shasum -a 256 | cut -d' ' -f1)"
+want="$(jq -S 'del(.probes[].started, .probes[].ended)' "$m" | { command -v sha256sum >/dev/null && sha256sum || shasum -a 256; } | cut -d' ' -f1)"
 [ "$(cat "$out/evidence/manifest.sha256")" = "$want" ] || { echo "manifest.sha256 does not match a recompute"; exit 1; }
 # every probe has exactly one status from the allowed set
 jq -e '[.probes[].status] | all(. == "RAN" or . == "FAILED" or . == "UNAVAILABLE")' "$m" >/dev/null || { echo "bad status"; exit 1; }

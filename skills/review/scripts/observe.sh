@@ -47,7 +47,7 @@ started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 (cd "$cwd" && "$@") > "$dir/$id.out" 2> "$dir/$id.err"
 status=$?
 ended="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-sum="$(shasum -a 256 < "$dir/$id.out" | cut -d' ' -f1)"
+sum="$( (command -v sha256sum >/dev/null 2>&1 && sha256sum || shasum -a 256) < "$dir/$id.out" | cut -d' ' -f1)"
 rel="${cwd#"$wt"}"; rel="${rel#/}"; rel="${rel:-.}"
 
 # argv goes in NUL-separated, not as jq positional args: jq would read an

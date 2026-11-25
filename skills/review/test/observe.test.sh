@@ -14,7 +14,7 @@ bash "$O" "$run" echo-1 -- sh -c 'echo hello; echo oops >&2; exit 3' 2>/dev/null
 rec="$run/work/observe/echo-1.json"
 jq -e '.exit == 3 and .at == "abc123" and .cwd == "." and .cmd == ["sh","-c","echo hello; echo oops >&2; exit 3"]' "$rec" >/dev/null || { echo "recording fields: $(cat "$rec")"; exit 1; }
 [ "$(cat "$run/work/observe/echo-1.out")" = hello ] && [ "$(cat "$run/work/observe/echo-1.err")" = oops ] || { echo "out/err not captured"; exit 1; }
-[ "$(jq -r .out_sha256 "$rec")" = "$(shasum -a 256 < "$run/work/observe/echo-1.out" | cut -d' ' -f1)" ] || { echo "out hash wrong"; exit 1; }
+[ "$(jq -r .out_sha256 "$rec")" = "$( (command -v sha256sum >/dev/null && sha256sum || shasum -a 256) < "$run/work/observe/echo-1.out" | cut -d' ' -f1)" ] || { echo "out hash wrong"; exit 1; }
 
 if bash "$O" "$run" echo-1 -- true 2>/dev/null; then echo "reusing an id must fail"; exit 1; fi
 if bash "$O" "$run" outside --cwd "$tmp" -- true 2>/dev/null; then echo "--cwd outside the worktree must fail"; exit 1; fi

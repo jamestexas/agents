@@ -16,7 +16,7 @@ EOF
 printf '%s\n' api/x.go api/internal/y.go docs/a.md other/z.txt \
     api/sub/x.go api/internal/deep/y.go api/internal/a/b/c.go sub/dir/README.md \
     README.md sub/docs/a.md chainctl/pkg/commands/commands.go chainctl/main.go a/tools/x.sh > "$tmp/files"
-ruby "$HERE/../scripts/codeowners.rb" "$tmp/CODEOWNERS" < "$tmp/files" > "$tmp/owners.json"
+node "$HERE/../scripts/codeowners.mjs" "$tmp/CODEOWNERS" < "$tmp/files" > "$tmp/owners.json"
 own() { jq -r --arg p "$1" '.paths[$p].owners | join(",")' "$tmp/owners.json"; }
 [ "$(own api/x.go)" = "@org/api" ]                      || { echo "api: got $(own api/x.go)"; exit 1; }
 [ "$(own api/internal/y.go)" = "@org/api-internal" ]    || { echo "internal: last rule must win"; exit 1; }
