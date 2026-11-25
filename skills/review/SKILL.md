@@ -15,14 +15,15 @@ description: >
 allowed-tools: "Bash,Read,Glob,Grep,Agent,Skill,mcp__modmap__*,mcp__mache__*"
 argument-hint: "<PR number | owner/repo#N | path> [more PRs ...] [--fast|--light|--default|--deep] [--engage] [--post] [--beads]"
 context: fork
-agent: general-purpose
+agent: pr-reviewer
 ---
 
 # /review
 
 **Input:** $ARGUMENTS
 
-This skill runs in a forked subagent (`context: fork`): it starts with this
+This skill runs in a forked subagent (`context: fork`, as the `pr-reviewer`
+agent: every tool, no persona): it starts with this
 file and the arguments above, never the conversation that invoked it. That
 is the point: whoever invoked it may hold hunches about the PR, and the
 phases are built so that nothing reaches a reader except the evidence.
@@ -33,6 +34,11 @@ operator sees (format under Phase 6).
 
 Seven phases, plus an explain pass that runs beside them and a join that
 reads both. Each reads files and writes files under one run directory.
+Every phase agent is `general-purpose` with that phase's prompt file: the
+prompt file is the phase's specialist. A persona agent's own output format
+would fight the file contract the merge scripts and gates read, so domain
+knowledge reaches a phase as a skill ("apply the <skill> skill to these
+rows"), never as the agent type.
 No phase reads another phase's chat reply.
 
 Two lenses look at the same evidence and never read each other. The review
