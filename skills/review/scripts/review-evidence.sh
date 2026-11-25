@@ -280,16 +280,26 @@ if [ "$MODE" = pr ]; then
             | select(.shared | length > 0)] | .[:5]" <<<"$list")"
         n="$(jq length <<<"$sib")"
         if [ "$n" = 0 ]; then echo "none: no other open PR by $AUTHOR touches a file this PR touches"; exit 0; fi
-        jq -c ".[]" <<<"$sib" | while read -r s; do
+        # The shared paths reach awk through ENVIRON, not -v: BSD awk (macOS)
+        # rejects a newline in a -v value, which once made every sibling diff
+        # come back empty while the probe still reported RAN. A sibling whose
+        # diff cannot be read says why, and the probe fails when none could.
+        failed=0
+        while read -r s; do
             m="$(jq -r .number <<<"$s")"
             echo "## #$m $(jq -r .title <<<"$s") (head $(jq -r .head <<<"$s" | cut -c1-12), base $(jq -r .base <<<"$s"))"
             echo "shared: $(jq -r ".shared | join(\", \")" <<<"$s")"
-            gh pr diff "$m" --repo "$REPO" | awk -v files="$(jq -r ".shared | join(\"\n\")" <<<"$s")" "
-                BEGIN { n = split(files, f, \"\n\"); for (i = 1; i <= n; i++) want[\"a/\" f[i]] = 1 }
+            if ! d="$(gh pr diff "$m" --repo "$REPO")"; then
+                echo "(diff unavailable: gh pr diff failed)"; failed=$((failed + 1))
+            elif ! SHARED="$(jq -r ".shared | join(\"\n\")" <<<"$s")" awk "
+                BEGIN { n = split(ENVIRON[\"SHARED\"], f, \"\n\"); for (i = 1; i <= n; i++) want[\"a/\" f[i]] = 1 }
                 /^diff --git / { keep = (\$3 in want) }
-                keep" || echo "(diff unavailable)"
+                keep" <<<"$d"; then
+                echo "(diff unavailable: filtering it failed)"; failed=$((failed + 1))
+            fi
             echo
-        done'
+        done < <(jq -c ".[]" <<<"$sib")
+        [ "$failed" -lt "$n" ] || { echo "no sibling diff could be read" >&2; exit 1; }'
 fi
 
 # Nearest go.mod above each changed file, deduped: the unit `go build` works
