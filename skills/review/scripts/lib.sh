@@ -30,7 +30,12 @@ manifest_init() {
 }
 
 _now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
-_sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
+# sha256 of stdin as bare hex. macOS ships shasum, Linux coreutils sha256sum;
+# either may be the only one present.
+sha256_stdin() {
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi | cut -d' ' -f1
+}
+_sha() { sha256_stdin < "$1"; }
 
 _manifest_add() {  # name status file err sha reason exit cmd started ended
     local tmp; tmp="$(mktemp "$MANIFEST.XXXXXX")"

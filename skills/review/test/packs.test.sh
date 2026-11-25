@@ -16,7 +16,7 @@ packs:
     probes:
       extra: 'echo site-extra'
 EOF
-match() { ruby "$HERE/../scripts/packs-match.rb" "$@"; }
+match() { node "$HERE/../scripts/packs-match.mjs" "$@"; }
 
 # generic only: a Go change matches go-graph, not docs-only
 printf '%s\n' api/x.go api/x_test.go | match "$HERE/../packs.yaml" > "$tmp/a.json"

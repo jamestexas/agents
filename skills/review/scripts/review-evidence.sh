@@ -256,7 +256,7 @@ fi
 probe core base-drift --env "REPO_DIR=$REPO_DIR" --env "MB=$MB" --env "BASE=$BASE" --env "FILES=$OUTDIR/git/files" -- bash -c \
     'n="$(git -C "$REPO_DIR" rev-list --count "$MB..$BASE")"; out="$(xargs git -C "$REPO_DIR" log --format="%h %cI %s" "$MB..$BASE" -- < "$FILES")"; if [ -n "$out" ]; then echo "$out"; else echo "none: $n base commit(s) since the merge-base, none touch a changed file"; fi'
 if [ -n "$CORE_ONLY" ]; then
-    jq -S 'del(.probes[].started, .probes[].ended)' "$MANIFEST" | shasum -a 256 | cut -d' ' -f1 > "$OUTDIR/manifest.sha256"
+    jq -S 'del(.probes[].started, .probes[].ended)' "$MANIFEST" | sha256_stdin > "$OUTDIR/manifest.sha256"
     note "core evidence written to $OUTDIR ($(jq '.probes|length' "$MANIFEST") probes; worktree, modules, owners and packs skipped)"
     exit 0
 fi
@@ -332,12 +332,12 @@ for c in .github/CODEOWNERS CODEOWNERS docs/CODEOWNERS; do
     if git -C "$REPO_DIR" show "$BASE:$c" > "$OUTDIR/CODEOWNERS" 2>/dev/null; then CO_LOC="$c"; break; fi
 done
 if [ -n "$CO_LOC" ]; then
-    # Not a direct `ruby codeowners.rb "$OUTDIR/CODEOWNERS"` call: run inside
+    # Not a direct `node codeowners.mjs "$OUTDIR/CODEOWNERS"` call: run inside
     # OUTDIR with relative paths so neither the recorded command nor the output
     # names the run directory, and the manifest hash stays equal across run
     # dirs of the same target. Positional args, not a quoted command string.
     # shellcheck disable=SC2016  # $OUTDIR and $1 expand inside the probe's bash, by design
-    probe core owners --env "OUTDIR=$OUTDIR" -- bash -c 'cd "$OUTDIR" && ruby "$1" CODEOWNERS < git/files' _ "$HERE/codeowners.rb"
+    probe core owners --env "OUTDIR=$OUTDIR" -- bash -c 'cd "$OUTDIR" && node "$1" CODEOWNERS < git/files' _ "$HERE/codeowners.mjs"
     if [ "$(status_of core/owners)" = RAN ]; then
         jq --arg ref "$BASE_LABEL" --arg sha "$BASE_SHA" --arg loc "$CO_LOC" '. + {ref: $ref, ref_sha: $sha, location: $loc}' "$OUTDIR/probes/core/owners.out" > "$OUTDIR/owners.json"
     fi
@@ -359,7 +359,7 @@ if git -C "$REPO_DIR" show "$BASE:.claude/review-packs.yaml" > "$OUTDIR/repo-rev
 else
     rm -f "$OUTDIR/repo-review-packs.yaml"
 fi
-ruby "$HERE/packs-match.rb" "${PACK_FILES[@]}" < "$OUTDIR/git/files" > "$OUTDIR/packs.json"
+node "$HERE/packs-match.mjs" "${PACK_FILES[@]}" < "$OUTDIR/git/files" > "$OUTDIR/packs.json"
 
 jq -c '.matched[]' "$OUTDIR/packs.json" | while read -r pack; do
     name="$(jq -r .name <<<"$pack")"
@@ -382,5 +382,5 @@ done
 
 # manifest hash: the replay check compares this across runs, so timestamps
 # are left out and keys are sorted
-jq -S 'del(.probes[].started, .probes[].ended)' "$MANIFEST" | shasum -a 256 | cut -d' ' -f1 > "$OUTDIR/manifest.sha256"
+jq -S 'del(.probes[].started, .probes[].ended)' "$MANIFEST" | sha256_stdin > "$OUTDIR/manifest.sha256"
 note "evidence written to $OUTDIR ($(jq '.probes|length' "$MANIFEST") probes; $(jq '[.probes[]|select(.status=="UNAVAILABLE")]|length' "$MANIFEST") unavailable)"
