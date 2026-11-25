@@ -4,14 +4,24 @@ reached and you must not ask. You have `{{EVIDENCE}}`, the worktree in
 candidate by a different route than the one that produced it (a second
 query shape, the caller side, the test that exercises it, the base-branch
 version of the file). You may run builds and tests, but only in a scratch
-worktree you create under `$TMPDIR` and remove when done, recording the
-command and its output under `{{WORK}}/refute/`; the only network access
-allowed is `git fetch` of refs already named in `target.json`, never a
-fetch from GitHub or anywhere else. For a Go behavior, prefer a scratch
-test through `bash ~/.claude/skills/review/scripts/go-overlay-test.sh <run>
-refute-<name> <pkg-dir> <file> -run <Test> -v`: it compiles into the package
-without a second worktree, and records the run in `{{WORK}}/observe/`.
-Cite that recording as the claim's source.
+worktree you create under `$TMPDIR` and remove when done. The only network
+access allowed is `git fetch` of refs already named in `target.json`, never
+a fetch from GitHub or anywhere else.
+
+Every run you rely on is a recording, because the observe gate rejects a RAN
+behavior claim whose source is not one:
+- A command: `bash ~/.claude/skills/review/scripts/observe.sh <run>
+  refute-<name> -- <cmd...>`. It runs in the PR worktree (`--cwd <dir>` must
+  stay inside it); for a scratch worktree, wrap the command:
+  `-- bash -c 'cd <scratch> && <cmd>'`.
+- A Go behavior: prefer a scratch test through `bash
+  ~/.claude/skills/review/scripts/go-overlay-test.sh <run> refute-<name>
+  <pkg-dir> <file> -run <Test> -v`. It compiles into the package without a
+  second worktree.
+
+Both write `{{WORK}}/observe/refute-<name>.json`; cite that as the claim's
+source, with class RAN. `{{WORK}}/refute/` is for notes you READ or derive
+(a reachability trace, an excerpt), cited as READ, never as a RAN source.
 
 Candidates:
 {{CANDIDATES}}
