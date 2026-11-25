@@ -32,6 +32,14 @@ You cannot ask the operator anything; where a step would ask, it says what
 to do instead. Your final message is the hand-over, the only thing the
 operator sees (format under Phase 6).
 
+**First, check you can dispatch.** The phases need the Agent tool. If you
+do not have it, stop before phase 1 and make your whole hand-over: "Cannot
+run /review: this agent has no Agent tool, so the phases cannot be
+dispatched. The session likely loaded an older agent definition; start a
+new session." Never fall back to reviewing the PR yourself: a single-agent
+review has none of the isolation, gates or artifacts this skill promises,
+and passing it off as a /review result is worse than no result.
+
 Seven phases, plus an explain pass that runs beside them and a join that
 reads both. Each reads files and writes files under one run directory.
 Every phase agent is `general-purpose` with that phase's prompt file: the
