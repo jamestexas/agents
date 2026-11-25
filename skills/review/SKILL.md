@@ -14,9 +14,22 @@ description: >
   structural-pr-review chain.
 allowed-tools: "Bash,Read,Glob,Grep,Agent,Skill,mcp__modmap__*,mcp__mache__*"
 argument-hint: "<PR number | owner/repo#N | path> [more PRs ...] [--fast|--light|--default|--deep] [--engage] [--post] [--beads]"
+context: fork
+agent: general-purpose
 ---
 
 # /review
+
+**Input:** $ARGUMENTS
+
+This skill runs in a forked subagent (`context: fork`): it starts with this
+file and the arguments above, never the conversation that invoked it. That
+is the point: whoever invoked it may hold hunches about the PR, and the
+phases are built so that nothing reaches a reader except the evidence.
+Everything a run needs comes from the arguments and the files it reads.
+You cannot ask the operator anything; where a step would ask, it says what
+to do instead. Your final message is the hand-over, the only thing the
+operator sees (format under Phase 6).
 
 Seven phases, plus an explain pass that runs beside them and a join that
 reads both. Each reads files and writes files under one run directory.
@@ -153,16 +166,17 @@ concurrently, but never share a prompt.
 
 With no PR argument and a request for "my queue", build the list first
 (`zen_inbox` when the zen MCP is connected, else `gh search prs
---review-requested=@me --state=open --json number,title,repository`) and
-confirm it with the user, `repo#number — title` per line, before fanning out.
+--review-requested=@me --state=open --json number,title,repository`), return
+it as the hand-over, `repo#number — title` per line, and stop without
+reviewing: the operator re-invokes `/review` with the PRs they pick.
 
 When every run has finished, the hand-over adds one cross-PR summary: a
 line per PR (`repo#N — VERDICT — one line why`, Blocking and
 REQUEST_CHANGES first), the themes that recur across PRs (the same finding
 twice, a file two of them touch, a sibling-PR row that names another PR in
 the list), and the PRs that need a decision from the user. For a stack, list
-the PRs bottom up. Posting stays per PR: `--post` with several PRs asks for
-each one.
+the PRs bottom up. `--post` with several PRs posts each one that passes its
+own gates; to post only some, the operator names only those.
 
 ## Re-review
 
@@ -468,12 +482,16 @@ run entered recorded an `output`, or was recorded as skipped. A `--fast`
 run gets a last line, `fast: PRELIMINARY — not postable`, and a non-zero
 exit regardless of the gates.
 
-Print the check lines and the two outputs: for the operator, `explain.md`
-and `focus.md` (lead with focus.md's "Look here first"); for peers, the
-notes path (`review.md`, whose summary and findings become the post body).
-`finish` has already added the
-note's `index.md` line (once per path); append one line to
-`$HUD_ROOT/log.md`. Stop here unless `--post`.
+`finish` has already added the note's `index.md` line (once per path);
+append one line to `$HUD_ROOT/log.md`. Stop here unless `--post`.
+
+**The hand-over** is your final message, and the only part of the run the
+operator sees, so it stands alone. In this order: the verdict and the ledger
+row it turned on; focus.md's "Look here first"; the findings, most severe
+first (tag, title, `file:line`, one line of why); a "Since the last review"
+table on a re-review; the check lines; UNAVAILABLE probes; the paths of
+`review.md`, `explain.md` and `focus.md`; and, after `--post`, the review
+URL. Keep it under about 300 words; the artifacts hold the rest.
 
 ## Run state
 
@@ -503,6 +521,12 @@ owner's run as `abandoned` and a quiet one as `stale`, but nothing records
 it.
 
 ## Phase 7 — Post (`--post` only)
+
+**Post-only.** `/review <pr> --post` on a PR whose run already ended at
+`rendered` (its `state.json`) posts that run: skip phases 1–6 and start
+here. This is the usual second call: the operator reads the hand-over, then
+asks to post. Freshness below still refuses if the head moved. With no
+ended run, `--post` reviews first and posts at the end, as before.
 
 Read `$HUD_ROOT/review-policy.md`. If absent, print "no posting policy; not
 posting" and stop. Otherwise, re-run `review-evidence.sh --pr ... --core-only
