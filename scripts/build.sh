@@ -17,6 +17,9 @@ AGENTS_DIR="$REPO_ROOT/agents"
 SKILLS_DIR="$REPO_ROOT/skills"
 README="$REPO_ROOT/README.md"
 
+yq --version 2>/dev/null | grep -q mikefarah \
+    || { echo "build.sh needs yq (mikefarah/yq v4) to read front matter" >&2; exit 1; }
+
 # --- Spec ---------------------------------------------------------------
 # Anthropic Claude Code subagent frontmatter spec:
 #   https://code.claude.com/docs/en/sub-agents#supported-frontmatter-fields
@@ -39,33 +42,20 @@ extract_frontmatter() {
     awk '/^---$/{if(++c==2) exit; next} c==1' "$1"
 }
 
+# Front matter is read through yq (mikefarah v4). A document yq cannot parse
+# reads as having no fields; lint_one reports it as invalid YAML.
 field_value() {
     # field_value <file> <key>  -> value as a single line (newlines → spaces).
-    # Handles block scalars (`>` folded, `|` literal) by going through Ruby's YAML.
+    # Block scalars (`>` folded, `|` literal) arrive unfolded from yq and are
+    # flattened here; a list is joined with ", ".
     local file="$1" key="$2"
-    extract_frontmatter "$file" | ruby -ryaml -e '
-        begin
-            d = YAML.safe_load(STDIN.read) || {}
-            v = d[ARGV[0]]
-            unless v.nil?
-                v = v.to_s.strip.gsub(/\s+/, " ")
-                print v
-            end
-        rescue
-            exit 0
-        end
-    ' "$key"
+    extract_frontmatter "$file" \
+        | K="$key" yq '.[strenv(K)] | select(. != null) | with(select(tag == "!!seq"); . = join(", "))' - 2>/dev/null \
+        | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//' || true
 }
 
 field_keys() {
-    extract_frontmatter "$1" | ruby -ryaml -e '
-        begin
-            d = YAML.safe_load(STDIN.read) || {}
-            d.each_key { |k| puts k }
-        rescue
-            exit 0
-        end
-    '
+    extract_frontmatter "$1" | yq 'keys | .[]' - 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------
@@ -89,11 +79,9 @@ lint_one() {
     fi
 
     # YAML syntax
-    if command -v ruby >/dev/null 2>&1; then
-        if ! echo "$fm" | ruby -ryaml -e "YAML.safe_load(STDIN.read)" >/dev/null 2>&1; then
-            echo "  ❌ $file: invalid YAML"
-            return 1
-        fi
+    if ! printf '%s\n' "$fm" | yq '.' - >/dev/null 2>&1; then
+        echo "  ❌ $file: invalid YAML"
+        return 1
     fi
 
     # Required fields

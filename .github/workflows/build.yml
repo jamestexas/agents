@@ -25,8 +25,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ensure ruby (used by build.sh for YAML parsing)
-        run: ruby --version
+      - name: Ensure yq (used by build.sh for YAML parsing)
+        run: yq --version
 
       - name: Run build check (lint + include drift + README drift)
         run: |
